@@ -53,8 +53,6 @@ class ZigBuildCommand(build_ext):
 
 class ZigDevelopCommand(develop):
 	def run(self) -> None:
-		global zig_mode
-
 		self.run_command("build_ext")
 		super().run()
 

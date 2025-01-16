@@ -135,7 +135,7 @@ pub fn loop_call_soon(
 pub fn loop_call_soon_threadsafe(
     self: ?*LoopObject, args: ?[*]?PyObject, nargs: isize, knames: ?PyObject
 ) callconv(.C) ?*Handle.PythonHandleObject {
-    if (builtin.single_threaded) {
+    if (builtin.single_threaded and @hasField(python_c, "Py_GIL_DISABLED")) {
         python_c.raise_python_runtime_error("Loop.call_soon_threadsafe is not supported\x00");
         return null;
     }

@@ -47,6 +47,10 @@ fn initialize_python_module() !*python_c.PyObject {
     const module: *python_c.PyObject = python_c.PyModule_Create(&leviathan_module) orelse return error.PythonError;
     errdefer python_c.py_decref(module);
 
+    if (@hasField(python_c, "Py_GIL_DISABLED")) {
+        python_c.PyUnstable_Module_SetGIL(module, python_c.Py_MOD_GIL_NOT_USED);
+    }
+
     const leviathan_modules_name = .{
         "Future\x00",
         "Task\x00",

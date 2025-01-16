@@ -1,4 +1,4 @@
-from typing import Callable, List, Tuple, Dict, TypedDict
+from typing import Callable, List, Tuple, Dict
 from prettytable import PrettyTable
 from benchmarks import Benchmark
 
@@ -7,7 +7,6 @@ import uvloop, asyncio, time, leviathan
 import matplotlib.pyplot as plt
 import sys, os, statistics
 import matplotlib
-import statistics
 
 from benchmarks import (
     event_fiesta_factory,
@@ -61,9 +60,8 @@ class TimeMetrics:
     def __init__(self, times: List[float]):
         self.min = min(times)
         self.max = max(times)
-        self.avg, self.stdev = statistics._mean_stdev(
-            times
-        )
+        self.avg = statistics.mean(times)
+        self.stdev = statistics.stdev(times)
 
 def benchmark_with_event_loops(
     loops: List[Tuple[str, Callable[[], asyncio.AbstractEventLoop]]],
@@ -122,17 +120,17 @@ def create_comparison_table(
 
     base_loop_results = results["asyncio"]
     for loop_name, loop_results in results.items():
-        for i, (m, time) in enumerate(loop_results):
+        for i, (m, _time) in enumerate(loop_results):
             base_time: float = base_loop_results[i][1].avg
-            relative_time: float = base_time / time.avg
-            diff = time.avg - base_time
+            relative_time: float = base_time / _time.avg
+            diff = _time.avg - base_time
             table.add_row([
                 loop_name,
                 m,
                 *[
                     f"{value:.6f}"
                     for value
-                    in list(time.dict().values()) + [diff, relative_time]
+                    in list(_time.dict().values()) + [diff, relative_time]
                 ],
             ])
 

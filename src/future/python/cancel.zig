@@ -20,10 +20,7 @@ pub inline fn future_fast_cancel(instance: *PythonFutureObject, cancel_msg_py_ob
 
     const future_data = utils.get_data_ptr(Future, instance);
     Future.Callback.call_done_callbacks(future_data, .CANCELED) catch |err| {
-        const err_trace = @errorReturnTrace();
-        utils.print_error_traces(err_trace, err);
-        utils.put_python_runtime_error_message(@errorName(err));
-        return false;
+        return utils.handle_zig_function_error(err, false);
     };
 
     return true;
@@ -33,7 +30,7 @@ pub fn future_cancel(
     self: ?*PythonFutureObject, args: ?[*]?PyObject, nargs: isize, knames: ?PyObject
 ) callconv(.C) ?PyObject {
     if (nargs != 0) {
-        utils.put_python_runtime_error_message("Invalid number of arguments\x00");
+        python_c.raise_python_value_error("Invalid number of arguments\x00");
         return null;
     }
 
@@ -55,10 +52,7 @@ pub fn future_cancel(
         &.{"msg\x00"},
         &.{&cancel_msg_py_object},
     ) catch |err| {
-        const err_trace = @errorReturnTrace();
-        utils.print_error_traces(err_trace, err);
-        utils.put_python_runtime_error_message(@errorName(err));
-        return null;
+        return utils.handle_zig_function_error(err, null);
     };
 
     if (!future_fast_cancel(instance, cancel_msg_py_object)) {

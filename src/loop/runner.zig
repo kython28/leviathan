@@ -137,17 +137,17 @@ pub fn start(self: *Loop) !void {
     defer mutex.unlock();
 
     if (!self.initialized) {
-        utils.put_python_runtime_error_message("Loop is closed\x00");
+        python_c.raise_python_runtime_error("Loop is closed\x00");
         return error.PythonError;
     }
 
     if (self.stopping) {
-        utils.put_python_runtime_error_message("Loop is stopping\x00");
+        python_c.raise_python_runtime_error("Loop is stopping\x00");
         return error.PythonError;
     }
 
     if (self.running) {
-        utils.put_python_runtime_error_message("Loop is already running\x00");
+        python_c.raise_python_runtime_error("Loop is already running\x00");
         return error.PythonError;
     }
 

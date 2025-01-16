@@ -4,6 +4,8 @@ const builtin = @import("builtin");
 const python_c = @import("python_c");
 const jdz_allocator = @import("jdz_allocator");
 
+const CallbackManager = @import("../callback_manager.zig");
+
 
 pub var gpa = blk: {
     if (builtin.mode == .Debug) {
@@ -12,12 +14,6 @@ pub var gpa = blk: {
         break :blk jdz_allocator.JdzAllocator(.{}).init();
     }
 };
-
-pub inline fn put_python_runtime_error_message(msg: [:0]const u8) void {
-    python_c.PyErr_SetString(
-        python_c.PyExc_RuntimeError, @ptrCast(msg)
-    );
-}
 
 pub inline fn get_data_ptr(comptime T: type, leviathan_pyobject: anytype) *T {
     const type_info = @typeInfo(@TypeOf(leviathan_pyobject));
@@ -49,7 +45,7 @@ pub inline fn get_parent_ptr(comptime T: type, leviathan_object: anytype) *T {
     return @as(*T, @ptrFromInt(@intFromPtr(leviathan_object) - @offsetOf(T, "data")));
 }
 
-pub inline fn print_error_traces(
+pub fn print_error_traces(
     trace: ?*std.builtin.StackTrace, @"error": anyerror,
 ) void {
     const writer = std.io.getStdErr().writer();
@@ -75,24 +71,59 @@ pub inline fn print_error_traces(
 }
 
 fn get_func_return_type(func: anytype) type {
-    const ret_type = @typeInfo(@typeInfo(@TypeOf(func)).@"fn".return_type.?).error_union.payload;
-    if (@typeInfo(ret_type) == .int) {
-        return ret_type;
+    const func_type_info = @typeInfo(@TypeOf(func));
+    if (func_type_info != .@"fn") {
+        @compileError("func argument must be a function");
     }
-    return ?ret_type;
+
+    const return_type = @typeInfo(func_type_info.@"fn".return_type.?);
+    if (return_type != .error_union) {
+        @compileError("return type must be an error union");
+    }
+
+    const return_payload = return_type.error_union.payload;
+    if (return_payload == CallbackManager.ExecuteCallbacksReturn) {
+        return return_payload;
+    }
+
+    return switch (@typeInfo(return_payload)) {
+        .int => return_payload,
+        .noreturn => @compileError("return type must not be noreturn"),
+        else => ?return_payload
+    };
+}
+
+pub inline fn handle_zig_function_error(@"error": anyerror, return_value: anytype) @TypeOf(return_value) {
+    switch (@"error") {
+        error.PythonError => {},
+        error.OutOfMemory => python_c.raise_python_error(python_c.PyExc_MemoryError, null),
+        else => {
+            const err_trace = @errorReturnTrace();
+            print_error_traces(err_trace, @"error");
+
+            python_c.raise_python_runtime_error(@errorName(@"error"));
+        }
+    }
+
+    return return_value;
 }
 
 pub inline fn execute_zig_function(func: anytype, args: anytype) get_func_return_type(func) {
     return @call(.auto, func, args) catch |err| {
-        if (err != error.PythonError) {
-            const err_trace = @errorReturnTrace();
-            print_error_traces(err_trace, err);
+        const return_value = blk: {
+            const ret_type = get_func_return_type(func);
+            const ret_type_info = @typeInfo(ret_type);
+            if (ret_type_info == .int) {
+                if (ret_type_info.int.signedness == .signed) {
+                    break :blk -1;
+                }else{
+                    break :blk 0;
+                }
+            }
+            break :blk null;
+        };
 
-            put_python_runtime_error_message(@errorName(err));
-        }
-        if (@typeInfo(get_func_return_type(func)) == .int) {
-            return -1;
-        }
-        return null;
+        return handle_zig_function_error(err, return_value);
     };
 }
+

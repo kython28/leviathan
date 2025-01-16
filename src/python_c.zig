@@ -128,15 +128,11 @@ pub inline fn parse_vector_call_kwargs(
                     }
                 }
 
-                Python.PyErr_SetString(
-                    Python.PyExc_RuntimeError, "Invalid keyword argument\x00"
-                );
+                Python.raise_python_value_error("Invalid keyword argument\x00");
                 return error.PythonError;
             }
         }else if (kwargs_len > len) {
-            Python.PyErr_SetString(
-                Python.PyExc_RuntimeError, "Too many keyword arguments\x00"
-            );
+            Python.raise_python_value_error("Too many keyword arguments\x00");
             return error.PythonError;
         }
     }
@@ -146,6 +142,26 @@ pub inline fn parse_vector_call_kwargs(
             py_obj.* = py_newref(v);
         }
     }
+}
+
+pub inline fn raise_python_error(exception: *Python.PyObject, message: ?[:0]const u8) void {
+    if (message) |msg| {
+        Python.PyErr_SetString(exception, @ptrCast(msg));
+    }else{
+        Python.PyErr_SetNone(exception);
+    }
+}
+
+pub inline fn raise_python_value_error(message: ?[:0]const u8) void {
+    raise_python_error(Python.PyExc_ValueError, message);
+}
+
+pub inline fn raise_python_type_error(message: ?[:0]const u8) void {
+    raise_python_error(Python.PyExc_TypeError, message);
+}
+
+pub inline fn raise_python_runtime_error(message: ?[:0]const u8) void {
+    raise_python_error(Python.PyExc_RuntimeError, message);
 }
 
 const Python = @This();

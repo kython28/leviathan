@@ -25,7 +25,7 @@ inline fn append_new_task(
 ) !PyObject {
     const loop_data = utils.get_data_ptr(Loop, self);
     if (!loop_data.initialized) {
-        utils.put_python_runtime_error_message("Loop is closed\x00");
+        python_c.raise_python_runtime_error("Loop is closed\x00");
         return error.PythonError;
     }
 
@@ -56,7 +56,7 @@ pub fn asyncgen_finalizer_hook(
     if (builtin.single_threaded) {
         const thread_id = std.Thread.getCurrentId();
         if (thread_id != instance.thread_id) {
-            utils.put_python_runtime_error_message(
+            python_c.raise_python_runtime_error(
                 "Event loop is not thread-safe. Only one thread can be used at the same time.\x00"
             );
             return null;

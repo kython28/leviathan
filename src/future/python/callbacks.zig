@@ -16,7 +16,7 @@ inline fn z_future_add_done_callback(
     knames: ?PyObject
 ) !PyObject {
     if (args.len != 1) {
-        utils.put_python_runtime_error_message("Invalid number of arguments\x00");
+        python_c.raise_python_value_error("Invalid number of arguments\x00");
         return error.PythonError;
     }
 
@@ -35,9 +35,7 @@ inline fn z_future_add_done_callback(
         }else if (python_c.is_type(py_ctx, &python_c.PyContext_Type)) {
             python_c.py_incref(py_ctx);
         }else{
-            python_c.PyErr_SetString(
-                python_c.PyExc_TypeError, "Invalid context\x00"
-            );
+            python_c.raise_python_type_error("Invalid context\x00");
             return error.PythonError;
         }
     }else {
@@ -54,7 +52,7 @@ inline fn z_future_add_done_callback(
     errdefer python_c.py_decref(callback);
 
     if (python_c.PyCallable_Check(callback) < 0) {
-        utils.put_python_runtime_error_message("Invalid callback\x00");
+        python_c.raise_python_type_error("Invalid callback\x00");
         return error.PythonError;
     }
 

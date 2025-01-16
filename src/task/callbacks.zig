@@ -97,10 +97,7 @@ inline fn execute_zig_function(
     comptime function: anytype, args: anytype
 ) CallbackManager.ExecuteCallbacksReturn {
     @call(.auto, function, args) catch |err| {
-        if (err != error.PythonError) {
-            utils.put_python_runtime_error_message(@errorName(err));
-        }
-        return .Exception;
+        return utils.handle_zig_function_error(err, .Exception);
     };
 
     return .Continue;
@@ -269,8 +266,7 @@ inline fn successfully_execution(
         };
 
         Loop.Scheduling.Soon.dispatch(loop_data, callback) catch |err| {
-            utils.put_python_runtime_error_message(@errorName(err));
-            return .Exception;
+            return utils.handle_zig_function_error(err, .Exception);
         };
 
         python_c.py_incref(@ptrCast(task));
@@ -371,7 +367,7 @@ pub fn step_run_and_handle_result(
     defer mutex.unlock();
 
     if (future_data.status != .PENDING) {
-        utils.put_python_runtime_error_message(
+        python_c.raise_python_runtime_error(
             "Task already finished\x00"
         );
         return failed_execution(task, py_loop);
@@ -503,7 +499,7 @@ fn py_wake_up(
     return switch (ret) {
         .Continue => python_c.get_py_none(),
         .Stop => blk: {
-            utils.put_python_runtime_error_message("Stop signal received\x00");
+            python_c.raise_python_runtime_error("Stop signal received\x00");
             break :blk null;
         },
         .Exception => null,

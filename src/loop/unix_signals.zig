@@ -66,11 +66,7 @@ fn signal_handler(
             .offset = 0
         }
     }) catch |err| {
-        const err_trace = @errorReturnTrace();
-        utils.print_error_traces(err_trace, err);
-
-        utils.put_python_runtime_error_message(@errorName(err));
-        return .Exception;
+        return utils.handle_zig_function_error(err, .Exception);
     };
 
     return .Continue;

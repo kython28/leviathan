@@ -43,7 +43,7 @@ inline fn z_loop_run_forever(self: *LoopObject) !PyObject {
         if (py_exception) |v| {
             python_c.PyException_SetCause(py_exc, v);
         }else{
-            utils.put_python_runtime_error_message(@errorName(error_holder.?));
+            python_c.raise_python_runtime_error(@errorName(error_holder.?));
             const exc: PyObject = python_c.PyErr_GetRaisedException() orelse unreachable;
 
             error_holder = error.PythonError;
@@ -108,7 +108,7 @@ pub fn loop_close(self: ?*LoopObject, _: ?PyObject) callconv(.C) ?PyObject {
         defer mutex.unlock();
 
         if (loop_data.running) {
-            utils.put_python_runtime_error_message("Loop is running\x00");
+            python_c.raise_python_runtime_error("Loop is running\x00");
             return null;
         }
     }

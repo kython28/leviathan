@@ -14,7 +14,7 @@ inline fn z_loop_create_task(
     knames: ?PyObject
 ) !*PythonTaskObject {
     if (args.len != 1) {
-        utils.put_python_runtime_error_message("Invalid number of arguments\x00");
+        python_c.raise_python_runtime_error("Invalid number of arguments\x00");
         return error.PythonError;
     }
 

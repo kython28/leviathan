@@ -13,8 +13,7 @@ pub fn loop_time(self: ?*Loop.Python.LoopObject, _: ?PyObject) callconv(.C) ?PyO
 
     var time: std.posix.timespec = undefined;
     std.posix.clock_gettime(.MONOTONIC, &time) catch |err| {
-        utils.put_python_runtime_error_message(@errorName(err));
-        return null;
+        return utils.handle_zig_function_error(err, null);
     };
 
     const f_time: f64 = @as(f64, @floatFromInt(time.sec)) + @as(f64, @floatFromInt(time.nsec)) / std.time.ns_per_s;

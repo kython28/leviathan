@@ -31,7 +31,7 @@ pub inline fn get_callback_info(allocator: std.mem.Allocator, args: []?PyObject)
     }
 
     if (python_c.PyCallable_Check(callback_info[0]) < 0) {
-        utils.put_python_runtime_error_message("Invalid callback\x00");
+        python_c.raise_python_type_error("Invalid callback\x00");
         return error.PythonError;
     }
 
@@ -43,7 +43,7 @@ inline fn z_loop_call_soon(
     knames: ?PyObject
 ) !*Handle.PythonHandleObject {
     if (args.len == 0) {
-        utils.put_python_runtime_error_message("Invalid number of arguments\x00");
+        python_c.raise_python_value_error("Invalid number of arguments\x00");
         return error.PythonError;
     }
 
@@ -92,7 +92,7 @@ inline fn z_loop_call_soon(
     errdefer python_c.py_decref(py_callback);
 
     if (python_c.PyCallable_Check(py_callback) < 0) {
-        utils.put_python_runtime_error_message("Invalid callback\x00");
+        python_c.raise_python_type_error("Invalid callback\x00");
         return error.PythonError;
     }
 
@@ -101,12 +101,12 @@ inline fn z_loop_call_soon(
     defer mutex.unlock();
 
     if (!loop_data.initialized) {
-        utils.put_python_runtime_error_message("Loop is closed\x00");
+        python_c.raise_python_runtime_error("Loop is closed\x00");
         return error.PythonError;
     }
 
     if (loop_data.stopping) {
-        utils.put_python_runtime_error_message("Loop is stopping\x00");
+        python_c.raise_python_runtime_error("Loop is stopping\x00");
         return error.PythonError;
     }
 
@@ -136,7 +136,7 @@ pub fn loop_call_soon_threadsafe(
     self: ?*LoopObject, args: ?[*]?PyObject, nargs: isize, knames: ?PyObject
 ) callconv(.C) ?*Handle.PythonHandleObject {
     if (builtin.single_threaded) {
-        utils.put_python_runtime_error_message("Loop.call_soon_threadsafe is not supported\x00");
+        python_c.raise_python_runtime_error("Loop.call_soon_threadsafe is not supported\x00");
         return null;
     }
 
@@ -150,7 +150,7 @@ inline fn z_loop_delayed_call(
     knames: ?PyObject, comptime is_absolute: bool
 ) !*TimerHandle.PythonTimerHandleObject {
     if (args.len <= 1) {
-        utils.put_python_runtime_error_message("Invalid number of arguments\x00");
+        python_c.raise_python_value_error("Invalid number of arguments\x00");
         return error.PythonError;
     }
 
@@ -207,7 +207,7 @@ inline fn z_loop_delayed_call(
     errdefer python_c.py_decref(py_callback);
 
     if (python_c.PyCallable_Check(py_callback) < 0) {
-        utils.put_python_runtime_error_message("Invalid callback\x00");
+        python_c.raise_python_type_error("Invalid callback\x00");
         return error.PythonError;
     }
 
@@ -216,12 +216,12 @@ inline fn z_loop_delayed_call(
     defer mutex.unlock();
 
     if (!loop_data.initialized) {
-        utils.put_python_runtime_error_message("Loop is closed\x00");
+        python_c.raise_python_runtime_error("Loop is closed\x00");
         return error.PythonError;
     }
 
     if (loop_data.stopping) {
-        utils.put_python_runtime_error_message("Loop is stopping\x00");
+        python_c.raise_python_runtime_error("Loop is stopping\x00");
         return error.PythonError;
     }
 

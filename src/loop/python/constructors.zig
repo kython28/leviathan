@@ -211,7 +211,7 @@ inline fn z_loop_init(
     }
 
     if (python_c.PyCallable_Check(exception_handler.?) < 0) {
-        utils.put_python_runtime_error_message("Invalid exception handler\x00");
+        python_c.raise_python_runtime_error("Invalid exception handler\x00");
         return error.PythonError;
     }
 

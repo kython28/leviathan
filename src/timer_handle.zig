@@ -43,7 +43,7 @@ inline fn z_timer_handle_init(
 
     if (py_context) |ctx| {
         if (python_c.is_none(ctx)) {
-            utils.put_python_runtime_error_message("context cannot be None\x00");
+            python_c.raise_python_type_error("context cannot be None\x00");
             return error.PythonError;
         }
     }

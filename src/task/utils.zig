@@ -36,8 +36,7 @@ pub fn task_get_name(self: ?*Task.PythonTaskObject) callconv(.C) ?PyObject {
     
     const task_id = @atomicRmw(u64, &loop.task_name_counter, .Add, 1, .monotonic);
     const random_str = std.fmt.allocPrint(allocator, "Leviathan.Task_{x:0>16}\x00", .{task_id}) catch |err| {
-        utils.put_python_runtime_error_message(@errorName(err));
-        return null;
+        return utils.handle_zig_function_error(err, null);
     };
     defer allocator.free(random_str);
 

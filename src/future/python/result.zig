@@ -27,7 +27,7 @@ pub inline fn get_result(self: *PythonFutureObject) ?PyObject {
                 const new_exc = python_c.py_newref(exc);
                 if (self.exception_tb) |exception_tb| {
                     if (python_c.PyException_SetTraceback(new_exc, exception_tb) < 0) {
-                        utils.put_python_runtime_error_message(
+                        python_c.raise_python_runtime_error(
                             "An error ocurred setting traceback to python exception\x00"
                         );
                         break :blk null;

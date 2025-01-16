@@ -16,14 +16,14 @@ inline fn z_loop_add_signal_handler(
     self: *LoopObject, args: []?PyObject
 ) !PyObject {
     if (args.len < 2) {
-        utils.put_python_runtime_error_message("Invalid number of arguments\x00");
+        python_c.raise_python_value_error("Invalid number of arguments\x00");
         return error.PythonError;
     }
     const loop_data = utils.get_data_ptr(Loop, self);
 
     const py_sig: PyObject = args[0].?;
     if (python_c.PyLong_Check(py_sig) == 0) {
-        utils.put_python_runtime_error_message("Invalid signal\x00");
+        python_c.raise_python_runtime_error("Invalid signal\x00");
         return error.PythonError;
     }
 
@@ -57,7 +57,7 @@ inline fn z_loop_add_signal_handler(
     errdefer python_c.py_decref(py_callback);
 
     if (python_c.PyCallable_Check(py_callback) < 0) {
-        utils.put_python_runtime_error_message("Invalid callback\x00");
+        python_c.raise_python_runtime_error("Invalid callback\x00");
         return error.PythonError;
     }
 
@@ -65,12 +65,12 @@ inline fn z_loop_add_signal_handler(
     mutex.lock();
     defer mutex.unlock();
     if (!loop_data.initialized) {
-        utils.put_python_runtime_error_message("Loop is closed\x00");
+        python_c.raise_python_runtime_error("Loop is closed\x00");
         return error.PythonError;
     }
 
     if (loop_data.stopping) {
-        utils.put_python_runtime_error_message("Loop is stopping\x00");
+        python_c.raise_python_runtime_error("Loop is stopping\x00");
         return error.PythonError;
     }
 
@@ -103,7 +103,7 @@ pub fn loop_remove_signal_handler(
     self: ?*LoopObject, py_sig: ?PyObject
 ) callconv(.C) ?PyObject {
     if (python_c.PyLong_Check(py_sig.?) == 0) {
-        utils.put_python_runtime_error_message("Invalid signal\x00");
+        python_c.raise_python_type_error("Invalid signal\x00");
         return null;
     }
 
@@ -118,8 +118,7 @@ pub fn loop_remove_signal_handler(
         if (err == error.KeyNotFound) {
             return python_c.get_py_false();
         }
-        utils.put_python_runtime_error_message(@errorName(err));
-        return null;
+        return utils.handle_zig_function_error(err, null);
     };
 
     return python_c.get_py_true();

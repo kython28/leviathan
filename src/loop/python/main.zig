@@ -78,6 +78,7 @@ const PythonLoopMethods: []const python_c.PyMethodDef = &[_]python_c.PyMethodDef
         .ml_doc = "Return the current time, as a float value, according to the event loop’s internal monotonic clock.\x00",
         .ml_flags = python_c.METH_NOARGS
     },
+
     python_c.PyMethodDef{
         .ml_name = "create_future\x00",
         .ml_meth = @ptrCast(&Utils.Future.loop_create_future),
@@ -104,6 +105,8 @@ const PythonLoopMethods: []const python_c.PyMethodDef = &[_]python_c.PyMethodDef
         .ml_doc = "Schedule callback to be called with args arguments at the next iteration of the event loop.\x00",
         .ml_flags = python_c.METH_O
     },
+
+
 
     // --------------------- Sentinel ---------------------
     python_c.PyMethodDef{

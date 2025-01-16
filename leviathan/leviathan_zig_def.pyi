@@ -53,7 +53,7 @@ class Task(asyncio.Task[_T]):
 
 _Tcs = TypeVarTuple("_Tcs")
 
-class Loop(asyncio.AbstractEventLoop):
+class Loop(asyncio.AbstractEventLoop): # type: ignore
     _asyncgens: weakref.WeakSet[AsyncGenerator[Any]]
 
     def __init__(
@@ -101,3 +101,7 @@ class Loop(asyncio.AbstractEventLoop):
         *args: Unpack[_Tcs],
         context: Context | None = ...,
     ) -> asyncio.TimerHandle: ...
+    def add_signal_handler(
+        self, sig: int, callback: Callable[[Unpack[_Tcs]], object], *args: Unpack[_Tcs]
+    ) -> None: ...
+    def remove_signal_handler(self, sig: int) -> bool: ...

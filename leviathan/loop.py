@@ -1,7 +1,20 @@
 from .leviathan_zig_single_thread import Loop as _LoopSingleThread
+from .leviathan_zig_single_thread import Future as _FutureSingleThread
 from .leviathan_zig import Loop as _Loop
+from .leviathan_zig import Future as _Future
 
-from typing import Any, Callable, TypedDict, NotRequired, AsyncGenerator, Awaitable, TypeVar
+from concurrent.futures import ThreadPoolExecutor
+
+from typing import (
+    Any,
+    Callable,
+    TypedDict,
+    NotRequired,
+    AsyncGenerator,
+    Awaitable,
+    TypeVar,
+    Unpack,
+)
 from logging import getLogger
 
 import asyncio, socket, weakref
@@ -61,6 +74,8 @@ class _LoopHelpers:
             context["asyncgen"] = asyncgenerator
 
         self._exception_handler(context)
+        self._default_executor: ThreadPoolExecutor|None = None
+        self._shutdown_executor_called: bool = False
 
     def default_exception_handler(self, context: ExceptionContext) -> None:
         message = context.get("message")
@@ -115,7 +130,9 @@ class _LoopHelpers:
         loop = future.get_loop()
         loop.stop()
 
-    def _run_until_complete(self, loop: asyncio.AbstractEventLoop, future: Awaitable[_T]) -> _T:
+    def _run_until_complete(
+        self, loop: asyncio.AbstractEventLoop, future: Awaitable[_T]
+    ) -> _T:
         if loop.is_closed() or loop.is_running():
             raise RuntimeError("Event loop is closed or already running")
 
@@ -136,8 +153,26 @@ class _LoopHelpers:
 
         return new_future.result()
 
+    def _run_in_executor(
+        self, loop: asyncio.AbstractEventLoop, executor: ThreadPoolExecutor|None, func: Callable[..., _T], *args: Any
+    ) -> asyncio.Future[_T]:
+        if executor is None and (executor := self._default_executor) is None:
+            if self._shutdown_executor_called:
+                raise RuntimeError("Default executor shutted down")
 
-class Loop(_LoopSingleThread, _LoopHelpers):
+            executor = ThreadPoolExecutor(thread_name_prefix="leviathan")
+
+        concurrent_future = executor.submit(func, *args)
+        return asyncio.wrap_future(concurrent_future, loop=loop)
+
+    def set_default_executor(self, executor: Any) -> None:
+        if not isinstance(executor, ThreadPoolExecutor):
+            raise TypeError("executor must be ThreadPoolExecutor")
+
+        self._default_executor = executor
+
+
+class Loop(_LoopSingleThread, _LoopHelpers):  # type: ignore
     def __init__(self, ready_tasks_queue_min_bytes_capacity: int = 10**6) -> None:
         _LoopHelpers.__init__(self)
         _LoopSingleThread.__init__(
@@ -150,8 +185,13 @@ class Loop(_LoopSingleThread, _LoopHelpers):
     def run_until_complete(self, future: Awaitable[_T]) -> _T:
         return self._run_until_complete(self, future)
 
+    def run_in_executor(
+        self, executor: ThreadPoolExecutor, func: Callable[..., _T], *args: Any
+    ) -> asyncio.Future[_T]:
+        return self._run_in_executor(self, executor, func, *args)
 
-class ThreadSafeLoop(_Loop, _LoopHelpers):
+
+class ThreadSafeLoop(_Loop, _LoopHelpers):  # type: ignore
     def __init__(self, ready_tasks_queue_min_bytes_capacity: int = 10**6) -> None:
         _LoopHelpers.__init__(self)
         _Loop.__init__(
@@ -161,5 +201,7 @@ class ThreadSafeLoop(_Loop, _LoopHelpers):
     async def shutdown_asyncgens(self) -> None:
         await self._shutdown_asyncgenerators(self._asyncgens)
 
-    def run_until_complete(self, future: Awaitable[_T]) -> _T:
-        return self._run_until_complete(self, future)
+    def run_in_executor(
+        self, executor: ThreadPoolExecutor, func: Callable[..., _T], *args: Any
+    ) -> asyncio.Future[_T]:
+        return self._run_in_executor(self, executor, func, *args)

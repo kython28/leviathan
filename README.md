@@ -25,7 +25,7 @@ python setup.py install
 ## 📦 Basic Usage
 
 ```python
-from leviathan import Loop
+import leviathan
 import asyncio
 
 async def main():
@@ -33,11 +33,7 @@ async def main():
     await asyncio.sleep(1)
     print("Goodbye from Leviathan!")
 
-loop = Loop()
-try:
-    loop.run_until_complete(main())
-finally:
-    loop.close()
+leviathan.run(main())
 ```
 
 ## 🧪 Benchmarks

@@ -1,8 +1,12 @@
+from benchmarks import Benchmark
 import asyncio
 import random
 from typing import Dict, Any
 
-BENCHMARK_NAME = "Event fiesta factory"
+BENCHMARK = Benchmark(
+    "Event fiesta factory",
+    lambda loop, n: loop.run_until_complete(main(n)),
+)
 
 registered_users = {}
 order_history = {}
@@ -113,5 +117,3 @@ async def main(nevents: int) -> None:
     events = generate_events(nevents)
     await event_loop_simulator(events)
 
-def run(loop: asyncio.AbstractEventLoop, num_producers: int) -> None:
-    loop.run_until_complete(main(num_producers))

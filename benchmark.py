@@ -1,57 +1,46 @@
 from typing import Callable, List, Tuple, Dict, TypedDict
 from prettytable import PrettyTable
+from benchmarks import Benchmark
 
+import dataclasses
 import uvloop, asyncio, time, leviathan
 import matplotlib.pyplot as plt
-import os, statistics
+import sys, os, statistics
 import matplotlib
+import statistics
+
+from benchmarks import (
+    event_fiesta_factory,
+    producer_consumer,
+    food_delivery,
+    task_workflow,
+    chat,
+)
+
+BENCHMARKS: List[Benchmark] = [
+    event_fiesta_factory.BENCHMARK,
+    producer_consumer.BENCHMARK,
+    food_delivery.BENCHMARK,
+    task_workflow.BENCHMARK,
+    chat.BENCHMARK,
+]
 
 matplotlib.use("QtAgg")
 
-from benchmarks.producer_consumer import (
-    run as benchmark1_run,
-    BENCHMARK_NAME as benchmark1_name,
-)
-from benchmarks.task_workflow import (
-    run as benchmark2_run,
-    BENCHMARK_NAME as benchmark2_name,
-)
-from benchmarks.event_fiesta_factory import (
-    run as benchmark3_run,
-    BENCHMARK_NAME as benchmark3_name,
-)
-from benchmarks.chat import run as benchmark4_run, BENCHMARK_NAME as benchmark4_name
-from benchmarks.food_delivery import (
-    run as benchmark5_run,
-    BENCHMARK_NAME as benchmark5_name,
-)
-
-os.nice(-20)
-
-BENCHMARK_FUNCTIONS: List[
-    Tuple[Callable[[asyncio.AbstractEventLoop, int], None], str]
-] = [
-    (benchmark1_run, benchmark1_name),
-    (benchmark2_run, benchmark2_name),
-    (benchmark3_run, benchmark3_name),
-    (benchmark4_run, benchmark4_name),
-    (benchmark5_run, benchmark5_name),
-]
+try:
+    os.nice(-20)
+except IOError as e:
+    print(
+        f"({e}):",
+        "Couldn't set nice, running with default level",
+        file=sys.stderr,
+    )
 
 N: int = 11
 ITERATIONS = 5
 
 M_INITIAL: int = 1024
 M_MULTIPLIER: int = 2
-
-
-class ComparisonData(TypedDict):
-    Function: str
-    M: int
-    Avg_Time_s: float
-    Diff_s: float
-    Relative_Speed: float
-
 
 LOOPS: List[Tuple[str, Callable[[], asyncio.AbstractEventLoop]]] = [
     ("asyncio", asyncio.new_event_loop),
@@ -60,13 +49,27 @@ LOOPS: List[Tuple[str, Callable[[], asyncio.AbstractEventLoop]]] = [
     ("leviathan (Thread-safe)", leviathan.ThreadSafeLoop),
 ]
 
+@dataclasses.dataclass
+class TimeMetrics:
+    min: float
+    max: float
+    avg: float
+    stdev: float
+    
+    dict = dataclasses.asdict
+    
+    def __init__(self, times: List[float]):
+        self.min = min(times)
+        self.max = max(times)
+        self.avg, self.stdev = statistics._mean_stdev(
+            times
+        )
 
 def benchmark_with_event_loops(
     loops: List[Tuple[str, Callable[[], asyncio.AbstractEventLoop]]],
     function: Callable[[asyncio.AbstractEventLoop, int], None],
-) -> Dict[str, List[Tuple[int, float, float, float, float]]]:
-    results: Dict[str, List[Tuple[int, float, float, float, float]]] = {}
-
+) -> Dict[str, List[Tuple[int, TimeMetrics]]]:
+    results: Dict[str, List[Tuple[int, TimeMetrics]]] = {}
     for loop_name, loop_creator in loops:
         results[loop_name] = []
         m: int = M_INITIAL
@@ -77,24 +80,21 @@ def benchmark_with_event_loops(
             while m <= M_INITIAL * (2 ** (N - 1)):
                 times: list[float] = []
                 for _ in range(ITERATIONS):
-                    start_time: float = time.perf_counter()
+                    start: float = time.perf_counter()
                     function(loop, m)
-                    end_time: float = time.perf_counter()
-                    times.append(end_time - start_time)
-
-                # average_time: float = (end_time - start_time) / ITERATIONS
-                average_time: float = statistics.mean(times)
-                std_ev = statistics.stdev(times) if len(times) > 1 else 0
-                min_time = min(times)
-                max_time = max(times)
-
-                print(
-                    "{} - {} - Avg: {:.6f} s. Std: {:.6f} s. Min: {:.6f} s. Max: {:.6f} s.".format(
-                        loop_name, m, average_time, std_ev, min_time, max_time
+                    end: float = time.perf_counter()
+                    times.append(end - start)
+                metrics = TimeMetrics(times)
+                print(" - ".join((
+                    loop_name,
+                    str(m),
+                    ", ".join(
+                        f"{key}: {value:.6f} s"
+                        for key, value
+                        in metrics.dict().items()
                     )
-                )
-                results[loop_name].append((m, average_time, std_ev, min_time, max_time))
-
+                )))
+                results[loop_name].append((m, metrics))
                 m *= M_MULTIPLIER
         finally:
             loop.run_until_complete(loop.shutdown_asyncgens())
@@ -106,51 +106,53 @@ def benchmark_with_event_loops(
 
 
 def create_comparison_table(
-    results: Dict[str, List[Tuple[int, float, float, float, float]]],
+    results: Dict[str, List[Tuple[int, TimeMetrics]]],
 ) -> None:
     table: PrettyTable = PrettyTable()
     table.field_names = [
         "Loop",
         "M",
-        "Avg Time (s)",
-        "Std (s)",
-        "Min (s)",
-        "Max (s)",
+        *(
+            f"{field.capitalize()} (s)"
+            for field in TimeMetrics.__annotations__
+        ),
         "Diff (s)",
         "Relative Speed",
     ]
 
     base_loop_results = results["asyncio"]
     for loop_name, loop_results in results.items():
-        for i, (m, avg_time, std_ev, min_time, max_time) in enumerate(loop_results):
-            base_time: float = base_loop_results[i][1]
-            relative_time: float = base_time / avg_time
-            table.add_row(
-                [
-                    loop_name,
-                    m,
-                    f"{avg_time:.6f}",
-                    f"{std_ev:.6f}",
-                    f"{min_time:.6f}",
-                    f"{max_time:.6f}",
-                    f"{(avg_time - base_time):.6f}",
-                    f"{relative_time:.2f}",
-                ]
-            )
+        for i, (m, time) in enumerate(loop_results):
+            base_time: float = base_loop_results[i][1].avg
+            relative_time: float = base_time / time.avg
+            diff = time.avg - base_time
+            table.add_row([
+                loop_name,
+                m,
+                *[
+                    f"{value:.6f}"
+                    for value
+                    in list(time.dict().values()) + [diff, relative_time]
+                ],
+            ])
 
     print(table)
 
 
 def plot_results(
-    results: Dict[str, List[Tuple[int, float, float, float, float]]], name: str
+    results: Dict[str, List[Tuple[int, TimeMetrics]]],
+    name: str
 ) -> None:
     plt.figure(figsize=(10, 6))
 
     for loop_name, loop_results in results.items():
-        x: List[int] = [m for m, _, _, _, _ in loop_results]
-        y: List[float] = [avg_time for _, avg_time, _, _, _ in loop_results]
-        yerr: List[float] = [std_ev for _, _, std_ev, _, _ in loop_results]
-        plt.errorbar(x, y, yerr=yerr, marker="o", label=loop_name, capsize=5)
+        x: List[int] = [m for m, _ in loop_results]
+        y: List[float] = [time.avg for _, time in loop_results]
+        lows: List[float] = [time.avg - time.min for _, time in loop_results]
+        highs: List[float] = [time.max - time.avg for _, time in loop_results]
+        # stdevs: List[float] = [time.stdev for _, time in loop_results]
+        # plt.errorbar(x, y, stdevs, marker="o")
+        plt.errorbar(x, y, [lows, highs], marker="o", label=loop_name, capsize=5)
 
     plt.xscale("log", base=2)
     plt.yscale("log")
@@ -164,10 +166,13 @@ def plot_results(
 
 
 if __name__ == "__main__":
-    for function, name in BENCHMARK_FUNCTIONS:
-        print("Starting test for function:", name)
-        benchmark_results = benchmark_with_event_loops(LOOPS, function)
+    for benchmark in BENCHMARKS:
+        print("Starting test for function:", benchmark.name)
+        benchmark_results = benchmark_with_event_loops(
+            LOOPS,
+            benchmark.function
+        )
         create_comparison_table(benchmark_results)
-        plot_results(benchmark_results, name)
+        plot_results(benchmark_results, benchmark.name)
         print("-" * 50)
         print()

@@ -1,6 +1,10 @@
+from benchmarks import Benchmark
 import asyncio
 
-BENCHMARK_NAME = "Async Task Workflow"
+BENCHMARK = Benchmark(
+    "Async Task Workflow",
+    lambda loop, n: loop.run_until_complete(main(n)),
+)
 
 async def subtask(_: str) -> None:
     await asyncio.sleep(0.1)
@@ -33,6 +37,3 @@ async def main(num_tasks: int) -> None:
     
     await asyncio.gather(*tasks)
 
-
-def run(loop: asyncio.AbstractEventLoop, num_producers: int) -> None:
-    loop.run_until_complete(main(num_producers))

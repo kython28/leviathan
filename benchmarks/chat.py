@@ -1,9 +1,12 @@
+from benchmarks import Benchmark
 import asyncio
 import random
 from typing import Dict, List, Any
 
-
-BENCHMARK_NAME = "Chat"
+BENCHMARK = Benchmark(
+    "Chat",
+    lambda loop, n: loop.run_until_complete(main(n)),
+)
 
 class ChatServer:
     def __init__(self) -> None:
@@ -51,5 +54,3 @@ async def main(nusers: int) -> None:
     tasks = [asyncio.create_task(simulate_user_life(server, user)) for user in user_list]
     await asyncio.gather(*tasks)
 
-def run(loop: asyncio.AbstractEventLoop, num_producers: int) -> None:
-    loop.run_until_complete(main(num_producers))

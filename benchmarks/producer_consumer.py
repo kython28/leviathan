@@ -1,7 +1,13 @@
+from benchmarks import Benchmark
 from typing import List, Awaitable
 import random, asyncio
 
-BENCHMARK_NAME = "Producer-Consumer"
+BENCHMARK = Benchmark(
+    "Producer-Consumer",
+    lambda loop, n: loop.run_until_complete(
+        execute_producers(n)
+    ),
+)
 
 async def producer(producer_id: int) -> str:
     loop = asyncio.get_event_loop()
@@ -21,5 +27,3 @@ async def execute_producers(num_producers: int) -> None:
     tasks: List[Awaitable[str]] = [producer(i) for i in range(num_producers)]
     await asyncio.gather(*tasks)
 
-def run(loop: asyncio.AbstractEventLoop, num_producers: int) -> None:
-    loop.run_until_complete(execute_producers(num_producers))

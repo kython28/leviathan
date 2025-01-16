@@ -1,9 +1,12 @@
+from benchmarks import Benchmark
 import asyncio
 import random
 from typing import Dict, Any
 
-BENCHMARK_NAME = "Food Delivery"
-
+BENCHMARK = Benchmark(
+    "Food Delivery",
+    lambda loop, n: loop.run_until_complete(main(n)),
+)
 
 class FoodDeliverySystem:
     def __init__(self) -> None:
@@ -159,5 +162,3 @@ async def main(orders: int) -> None:
     tasks = [fds.handle_event(evt) for evt in events]
     await asyncio.gather(*tasks)
 
-def run(loop: asyncio.AbstractEventLoop, num_producers: int) -> None:
-    loop.run_until_complete(main(num_producers))

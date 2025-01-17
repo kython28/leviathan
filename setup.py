@@ -51,12 +51,10 @@ class LeviathanTest(Command):
 		pass
 	
 	def run(self) -> None:
-		self.run_command("build")
 		subprocess.check_call(["zig", "build", "test"])
+		self.run_command("build_ext")
 
-		build_lib_path = os.path.join("build", "lib")
-		errno = subprocess.call([sys.executable, "-m", "pytest", "-s"], cwd=build_lib_path)
-
+		errno = subprocess.call([sys.executable, "-m", "pytest", "-s"])
 		raise SystemExit(errno)
 
 class ZigBuildExtCommand(build_ext):

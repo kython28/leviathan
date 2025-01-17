@@ -1,7 +1,9 @@
-pub usingnamespace @cImport({
-    @cDefine("PY_SSIZE_T_CLEAN", {});
-    @cInclude("Python.h");
-});
+// https://github.com/ziglang/zig/issues/1499
+pub usingnamespace @import("python_header.zig");
+// pub usingnamespace @cImport({
+//     @cDefine("PY_SSIZE_T_CLEAN", {});
+//     @cInclude("Python.h");
+// });
 
 pub inline fn get_type(obj: *Python.PyObject) *Python.PyTypeObject {
     return obj.ob_type orelse unreachable;
@@ -66,7 +68,7 @@ pub inline fn py_decref(op: *Python.PyObject) void {
     ref -= 1;
     op.unnamed_0.ob_refcnt = ref;
     if (ref == 0) {
-        op.ob_type.*.tp_dealloc.?(op);
+        op.ob_type.?.tp_dealloc.?(op);
     }
 }
 
@@ -153,15 +155,15 @@ pub inline fn raise_python_error(exception: *Python.PyObject, message: ?[:0]cons
 }
 
 pub inline fn raise_python_value_error(message: ?[:0]const u8) void {
-    raise_python_error(Python.PyExc_ValueError, message);
+    raise_python_error(Python.PyExc_ValueError.?, message);
 }
 
 pub inline fn raise_python_type_error(message: ?[:0]const u8) void {
-    raise_python_error(Python.PyExc_TypeError, message);
+    raise_python_error(Python.PyExc_TypeError.?, message);
 }
 
 pub inline fn raise_python_runtime_error(message: ?[:0]const u8) void {
-    raise_python_error(Python.PyExc_RuntimeError, message);
+    raise_python_error(Python.PyExc_RuntimeError.?, message);
 }
 
 const Python = @This();

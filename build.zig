@@ -37,8 +37,9 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    const python_include_dir = b.option([]const u8, "python-include-dir", "Path to python include directory")
-        orelse "/usr/include/python3.13";
+    // https://github.com/ziglang/zig/issues/1499
+    // const python_include_dir = b.option([]const u8, "python-include-dir", "Path to python include directory")
+    //     orelse "/usr/include/python3.13";
     const python_lib_dir = b.option([]const u8, "python-lib-dir", "Path to python library directory");
 
 
@@ -55,9 +56,9 @@ pub fn build(b: *std.Build) void {
         .link_libc = true
     });
 
-    python_c_module.addIncludePath(.{
-        .cwd_relative = python_include_dir
-    });
+    // python_c_module.addIncludePath(.{
+    //     .cwd_relative = python_include_dir
+    // });
 
     if (python_lib_dir) |dir| {
         python_c_module.addLibraryPath(b.path(dir));

@@ -1,3 +1,6 @@
 include leviathan/leviathan_zig.pyi
+include leviathan/leviathan_zig_single_thread.pyi
+include leviathan/leviathan_zig_def.pyi
 include leviathan/leviathan_zig.so
 include leviathan/leviathan_zig_single_thread.so
+

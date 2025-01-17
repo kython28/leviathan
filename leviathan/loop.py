@@ -201,6 +201,9 @@ class ThreadSafeLoop(_Loop, _LoopHelpers):  # type: ignore
     async def shutdown_asyncgens(self) -> None:
         await self._shutdown_asyncgenerators(self._asyncgens)
 
+    def run_until_complete(self, future: Awaitable[_T]) -> _T:
+        return self._run_until_complete(self, future)
+
     def run_in_executor(
         self, executor: ThreadPoolExecutor, func: Callable[..., _T], *args: Any
     ) -> asyncio.Future[_T]:

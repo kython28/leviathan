@@ -6,6 +6,10 @@ const utils = @import("../utils/utils.zig");
 const Loop = @import("main.zig");
 const CallbackManager = @import("../callback_manager.zig");
 
+const c = @cImport({
+    @cInclude("signal.h");
+});
+
 callbacks: std.AutoHashMap(u6, CallbackManager.Callback),
 fd: std.posix.fd_t,
 mask: std.posix.sigset_t,
@@ -32,7 +36,9 @@ pub fn sigdelset(set: *std.posix.sigset_t, sig: u6) void {
     (set.*)[@as(usize, @intCast(s)) / usize_bits] ^= val;
 }
 // ------------------------------------------------------------------------
-    
+fn dummy_signal_handler(_: c_int) callconv(.C) void {
+    std.log.info("Dummy signal handler", .{});
+}
 
 fn signal_handler(
     data: ?*anyopaque, status: CallbackManager.ExecuteCallbacksReturn
@@ -90,6 +96,9 @@ pub fn link(self: *UnixSignals, sig: u6, callback: CallbackManager.Callback) !vo
     sigaddset(mask, sig);
     std.posix.sigprocmask(std.os.linux.SIG.BLOCK, mask, null);
     self.fd = try std.posix.signalfd(self.fd, mask, 0);
+    
+    // When the user create a new thread, we need to avoid that python catch the signal
+    _ = c.signal(@intCast(sig), &dummy_signal_handler);
 
     const prev = try self.callbacks.fetchPut(sig, callback);
     self.callbacks.rehash();
@@ -112,7 +121,6 @@ pub fn unlink(self: *UnixSignals, sig: u6) !void {
     }
     if (callback_info == null) return error.KeyNotFound;
 
-
     const callback: CallbackManager.Callback = switch (sig) {
         std.os.linux.SIG.INT => CallbackManager.Callback{
             .ZigGeneric = .{
@@ -129,6 +137,8 @@ pub fn unlink(self: *UnixSignals, sig: u6) !void {
 
             sigdelset(&self.mask, sig);
             self.fd = try std.posix.signalfd(self.fd, &self.mask, 0);
+            _ = c.signal(@intCast(sig), c.SIG_DFL);
+            _ = c.siginterrupt(@intCast(sig), 0);
             return;
         }
     };
@@ -173,6 +183,7 @@ pub fn init(loop: *Loop) !void {
             .offset = 0
         }
     });
+
 }
 
 pub fn deinit(self: *UnixSignals) !void {
@@ -184,7 +195,7 @@ pub fn deinit(self: *UnixSignals) !void {
 
     while (iter.next()) |sig| {
         sigaddset(&mask, sig.*);
-
+        _ = c.signal(@intCast(sig.*), c.SIG_DFL);
         var value = self.callbacks.get(sig.*).?;
         CallbackManager.cancel_callback(&value, true);
         try Loop.Scheduling.Soon._dispatch(loop, value);

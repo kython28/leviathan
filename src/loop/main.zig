@@ -52,7 +52,7 @@ pub fn init(self: *Loop, allocator: std.mem.Allocator, rtq_min_capacity: usize) 
     const blocking_ready_epoll_events = try allocator.alloc(std.os.linux.epoll_event, 256);
     errdefer allocator.free(blocking_ready_epoll_events);
 
-    const unlock_epoll_fd = try std.posix.eventfd(1, std.os.linux.EFD.NONBLOCK|std.os.linux.EFD.CLOEXEC);
+    const unlock_epoll_fd = try std.posix.eventfd(0, std.os.linux.EFD.NONBLOCK|std.os.linux.EFD.CLOEXEC);
     errdefer std.posix.close(unlock_epoll_fd);
 
     self.* = .{

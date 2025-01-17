@@ -169,11 +169,11 @@ pub fn start(self: *Loop) !void {
     var wait_for_blocking_events: bool = false;
     while (!self.stopping) {
         const old_index = ready_tasks_queue_index;
-        ready_tasks_queue_index = 1 - ready_tasks_queue_index;
-        self.ready_tasks_queue_index = ready_tasks_queue_index;
-
         const ready_tasks_queue = &ready_tasks_queues[old_index];
         try poll_blocking_events(self, mutex, wait_for_blocking_events, ready_tasks_queue);
+
+        ready_tasks_queue_index = 1 - ready_tasks_queue_index;
+        self.ready_tasks_queue_index = ready_tasks_queue_index;
 
         mutex.unlock();
         defer mutex.lock();

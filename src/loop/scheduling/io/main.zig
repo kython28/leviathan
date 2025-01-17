@@ -29,7 +29,7 @@ pub const BlockingTasksSet = struct {
         const set = allocator.create(BlockingTasksSet) catch unreachable;
         errdefer allocator.destroy(set);
 
-        const eventfd = try std.posix.eventfd(1, std.os.linux.EFD.NONBLOCK|std.os.linux.EFD.CLOEXEC);
+        const eventfd = try std.posix.eventfd(0, std.os.linux.EFD.NONBLOCK|std.os.linux.EFD.CLOEXEC);
         errdefer std.posix.close(eventfd);
 
         set.* = .{

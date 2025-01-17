@@ -9,8 +9,6 @@ const builtin = @import("builtin");
 inline fn unlock_epoll(self: *Loop) !void {
     const data: [8]u8 = .{1} ** 8;
     _ = try std.posix.write(self.unlock_epoll_fd, &data);
-
-    self.epoll_locked = false;
 }
 
 pub inline fn _dispatch(self: *Loop, callback: CallbackManager.Callback) !void {

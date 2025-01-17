@@ -14,7 +14,7 @@ inline fn unlock_epoll(self: *Loop) !void {
 }
 
 pub inline fn _dispatch(self: *Loop, callback: CallbackManager.Callback) !void {
-    if (!builtin.single_threaded and self.epoll_locked) {
+    if (self.epoll_locked) {
         try unlock_epoll(self);
     }
 

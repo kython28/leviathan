@@ -96,7 +96,7 @@ fn get_func_return_type(func: anytype) type {
 pub inline fn handle_zig_function_error(@"error": anyerror, return_value: anytype) @TypeOf(return_value) {
     switch (@"error") {
         error.PythonError => {},
-        error.OutOfMemory => python_c.raise_python_error(python_c.PyExc_MemoryError, null),
+        error.OutOfMemory => python_c.raise_python_error(python_c.PyExc_MemoryError.?, null),
         else => {
             const err_trace = @errorReturnTrace();
             print_error_traces(err_trace, @"error");

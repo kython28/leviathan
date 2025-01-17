@@ -105,9 +105,6 @@ const PythonLoopMethods: []const python_c.PyMethodDef = &[_]python_c.PyMethodDef
         .ml_doc = "Schedule callback to be called with args arguments at the next iteration of the event loop.\x00",
         .ml_flags = python_c.METH_O
     },
-
-
-
     // --------------------- Sentinel ---------------------
     python_c.PyMethodDef{
         .ml_name = null, .ml_meth = null, .ml_doc = null, .ml_flags = 0
@@ -131,7 +128,6 @@ pub const LoopObject = extern struct {
     ob_base: python_c.PyObject,
     data: [@sizeOf(Loop)]u8,
 
-    sys_module: ?PyObject,
     get_asyncgen_hooks: ?PyObject,
     set_asyncgen_hooks: ?PyObject,
 
@@ -144,7 +140,6 @@ pub const LoopObject = extern struct {
     enter_task_func: ?PyObject,
     leave_task_func: ?PyObject,
     register_task_func: ?PyObject,
-    unregister_task_func: ?PyObject,
 
     exception_handler: ?PyObject,
 

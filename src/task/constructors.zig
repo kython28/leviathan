@@ -38,9 +38,7 @@ inline fn task_init_configuration(
         if (await_attr) |v| {
             python_c.py_decref(v);
         }else{
-            python_c.PyErr_SetString(
-                python_c.PyExc_TypeError, "Coro argument must be a coroutine\x00"
-            );
+            python_c.raise_python_type_error("Coro argument must be a coroutine\x00");
             return error.PythonError;
         }
     }
@@ -198,9 +196,7 @@ inline fn z_task_init(
 
     const leviathan_loop: *LoopObject = @ptrCast(py_loop.?);
     if (!python_c.type_check(@ptrCast(leviathan_loop), &Loop.Python.LoopType)) {
-        python_c.PyErr_SetString(
-            python_c.PyExc_TypeError, "Invalid asyncio event loop. Only Leviathan's event loops are allowed\x00"
-        );
+        python_c.raise_python_type_error("Invalid asyncio event loop. Only Leviathan's event loops are allowed\x00");
         return error.PythonError;
     }
 
@@ -211,9 +207,7 @@ inline fn z_task_init(
         }else if (python_c.is_type(py_ctx, &python_c.PyContext_Type)) {
             python_c.py_incref(py_ctx);
         }else{
-            python_c.PyErr_SetString(
-                python_c.PyExc_TypeError, "Invalid context\x00"
-            );
+            python_c.raise_python_type_error("Invalid context\x00");
             return error.PythonError;
         }
     }else{

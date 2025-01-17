@@ -29,10 +29,7 @@ inline fn z_loop_add_signal_handler(
 
     const sig = python_c.PyLong_AsLong(py_sig);
     if (sig < 0) {
-        python_c.PyErr_SetString(
-            python_c.PyExc_ValueError,
-            "Invalid signal\x00",
-        );
+        python_c.raise_python_value_error("Invalid signal\x00");
         return error.PythonError;
     }
 

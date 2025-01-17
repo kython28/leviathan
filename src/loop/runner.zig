@@ -113,6 +113,9 @@ fn poll_blocking_events(
                 loop.epoll_locked = false;
             }
 
+            const py_thread_state = python_c.PyEval_SaveThread();
+            defer python_c.PyEval_RestoreThread(py_thread_state);
+
             break :blk std.posix.epoll_wait(epoll_fd, blocking_ready_epoll_events, -1);
         }else{
             break :blk std.posix.epoll_wait(epoll_fd, blocking_ready_epoll_events, 0);

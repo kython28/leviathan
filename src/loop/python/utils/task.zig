@@ -35,7 +35,7 @@ inline fn z_loop_create_task(
         }else if (python_c.is_type(py_ctx, &python_c.PyContext_Type)) {
             python_c.py_incref(py_ctx);
         }else{
-            python_c.PyErr_SetString(python_c.PyExc_TypeError, "Invalid context\x00");
+            python_c.raise_python_type_error("Invalid context\x00");
             return error.PythonError;
         }
     }else {
@@ -48,7 +48,7 @@ inline fn z_loop_create_task(
             name = null;
         }else{
             if (python_c.PyUnicode_Check(v) == 0) {
-                python_c.PyErr_SetString(python_c.PyExc_TypeError, "name must be a string\x00");
+                python_c.raise_python_type_error("name must be a string\x00");
                 return error.PythonError;
             }
         }

@@ -88,7 +88,7 @@ pub fn setup_asyncgen_hooks(self: *LoopObject) !void {
     self.old_asyncgen_hooks = python_c.PyObject_CallNoArgs(self.get_asyncgen_hooks.?)
         orelse return error.PythonError;
 
-    var args: [2]?PyObject = undefined;
+    var args: [2]PyObject = undefined;
     args[0] = python_c.PyCFunction_New(
         @constCast(&LoopAsyncGenFirstIterHookMethod), @ptrCast(self)
     ) orelse return error.PythonError;

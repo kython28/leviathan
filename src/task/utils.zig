@@ -12,7 +12,7 @@ const std = @import("std");
 pub fn task_not_implemented_method(
     _: ?*Task.PythonTaskObject, _: ?PyObject, _: ?PyObject
 ) callconv(.C) ?PyObject {
-    python_c.PyErr_SetString(python_c.PyExc_NotImplementedError, "This method is not supported for tasks\x00");
+    python_c.PyErr_SetString(python_c.PyExc_NotImplementedError.?, "This method is not supported for tasks\x00");
     return null;
 }
 

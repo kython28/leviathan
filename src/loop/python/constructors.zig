@@ -15,14 +15,6 @@ inline fn z_loop_new(
     const instance: *LoopObject = @ptrCast(@"type".tp_alloc.?(@"type", 0) orelse return error.PythonError);
     errdefer @"type".tp_free.?(instance);
 
-    const contextvars_module: PyObject = python_c.PyImport_ImportModule("contextvars\x00")
-        orelse return error.PythonError;
-    errdefer python_c.py_decref(contextvars_module);
-
-    const contextvars_copy: PyObject = python_c.PyObject_GetAttrString(contextvars_module, "copy_context\x00")
-        orelse return error.PythonError;
-    errdefer python_c.py_decref(contextvars_copy);
-
     const asyncio_module: PyObject = python_c.PyImport_ImportModule("asyncio\x00")
         orelse return error.PythonError;
     errdefer python_c.py_decref(asyncio_module);
@@ -51,17 +43,13 @@ inline fn z_loop_new(
         orelse return error.PythonError;
     errdefer python_c.py_decref(register_task_func);
 
-    const unregister_task_func: PyObject = python_c.PyObject_GetAttrString(asyncio_module, "_unregister_task\x00")
-        orelse return error.PythonError;
-    errdefer python_c.py_decref(unregister_task_func);
-
     const asyncion_tasks_modules: PyObject = python_c.PyObject_GetAttrString(asyncio_module, "tasks\x00")
         orelse return error.PythonError;
     defer python_c.py_decref(asyncion_tasks_modules);
 
     const sys_module: PyObject = python_c.PyImport_ImportModule("sys\x00")
         orelse return error.PythonError;
-    errdefer python_c.py_decref(sys_module);
+    defer python_c.py_decref(sys_module);
 
     const get_asyncgen_hooks: PyObject = python_c.PyObject_GetAttrString(sys_module, "get_asyncgen_hooks\x00")
         orelse return error.PythonError;
@@ -95,7 +83,6 @@ inline fn z_loop_new(
 
     instance.thread_id = std.Thread.getCurrentId();
 
-    instance.sys_module = sys_module;
     instance.get_asyncgen_hooks = get_asyncgen_hooks;
     instance.set_asyncgen_hooks = set_asyncgen_hooks;
 
@@ -108,7 +95,6 @@ inline fn z_loop_new(
     instance.enter_task_func = enter_task_func;
     instance.leave_task_func = leave_task_func;
     instance.register_task_func = register_task_func;
-    instance.unregister_task_func = unregister_task_func;
 
     instance.asyncgens_set = weakref_set;
     instance.asyncgens_set_add = weakref_add;
@@ -136,7 +122,6 @@ pub fn loop_clear(self: ?*LoopObject) callconv(.C) c_int {
         loop_data.release();
     }
 
-    python_c.py_decref_and_set_null(&py_loop.sys_module);
     python_c.py_decref_and_set_null(&py_loop.get_asyncgen_hooks);
     python_c.py_decref_and_set_null(&py_loop.set_asyncgen_hooks);
 
@@ -164,7 +149,6 @@ pub fn loop_traverse(self: ?*LoopObject, visit: python_c.visitproc, arg: ?*anyop
     const instance = self.?;
     return python_c.py_visit(
         &[_]?*python_c.PyObject{
-            instance.sys_module,
             instance.get_asyncgen_hooks,
             instance.set_asyncgen_hooks,
             instance.asyncio_module,

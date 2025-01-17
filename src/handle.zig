@@ -88,7 +88,7 @@ pub fn callback_for_python_generic_callbacks(
             orelse return .Exception;
         defer python_c.py_decref(exc_message);
 
-        var args: [4]?PyObject = undefined;
+        var args: [4]PyObject = undefined;
         args[0] = exception;
         args[1] = exc_message;
         args[2] = data.py_callback;
@@ -215,5 +215,6 @@ pub var PythonHandleType = python_c.PyTypeObject{
     .tp_init = @ptrCast(&handle_init),
     .tp_dealloc = @ptrCast(&handle_dealloc),
     .tp_methods = @constCast(PythonhandleMethods.ptr),
+    .tp_members = null
 };
 

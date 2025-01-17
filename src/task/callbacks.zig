@@ -113,7 +113,7 @@ inline fn cancel_future_object(
     }else{
         const cancel_function: PyObject = python_c.PyObject_GetAttrString(
             future, "cancel\x00"
-        );
+        ) orelse return .Exception;
         defer python_c.py_decref(cancel_function);
 
         const ret: PyObject = blk: {
@@ -315,7 +315,7 @@ inline fn failed_execution(
         orelse return .Exception;
     defer python_c.py_decref(exc_message);
 
-    var args: [4]?PyObject = undefined;
+    var args: [4]PyObject = undefined;
     args[0] = exception;
     args[1] = exc_message;
     args[2] = task.coro.?;
@@ -392,7 +392,7 @@ pub fn step_run_and_handle_result(
         task.must_cancel = false;
     }
 
-    const enter_task_args: [2]?PyObject = .{
+    const enter_task_args: [2]PyObject = .{
         @ptrCast(py_loop), @ptrCast(task)
     };
 

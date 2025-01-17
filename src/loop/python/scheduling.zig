@@ -62,9 +62,7 @@ inline fn z_loop_call_soon(
         }else if (python_c.is_type(py_ctx, &python_c.PyContext_Type)) {
             python_c.py_incref(py_ctx);
         }else{
-            python_c.PyErr_SetString(
-                python_c.PyExc_TypeError, "Invalid context\x00"
-            );
+            python_c.raise_python_type_error("Invalid context\x00");
             return error.PythonError;
         }
     }else {

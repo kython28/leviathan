@@ -69,7 +69,7 @@ pub fn callback_for_python_future_callbacks(data: Data) CallbackManager.ExecuteC
             orelse return .Exception;
         defer python_c.py_decref(exc_message);
 
-        var exc_args: [4]?PyObject = undefined;
+        var exc_args: [4]PyObject = undefined;
         exc_args[0] = exception;
         exc_args[1] = exc_message;
         exc_args[2] = py_callback;

@@ -52,6 +52,9 @@ pub fn init(self: *Loop, allocator: std.mem.Allocator, rtq_min_capacity: usize) 
     const blocking_ready_epoll_events = try allocator.alloc(std.os.linux.epoll_event, 256);
     errdefer allocator.free(blocking_ready_epoll_events);
 
+    const unlock_epoll_fd = try std.posix.eventfd(1, std.os.linux.EFD.NONBLOCK|std.os.linux.EFD.CLOEXEC);
+    errdefer std.posix.close(unlock_epoll_fd);
+
     self.* = .{
         .allocator = allocator,
         .mutex = lock.init(),
@@ -72,7 +75,8 @@ pub fn init(self: *Loop, allocator: std.mem.Allocator, rtq_min_capacity: usize) 
         .blocking_ready_tasks = blocking_ready_tasks,
         .blocking_tasks_epoll_fd = try std.posix.epoll_create1(0),
         .blocking_ready_epoll_events = blocking_ready_epoll_events,
-        .unix_signals = undefined
+        .unix_signals = undefined,
+        .unlock_epoll_fd = unlock_epoll_fd
     };
     errdefer {
         std.posix.close(self.blocking_tasks_epoll_fd);
@@ -81,6 +85,15 @@ pub fn init(self: *Loop, allocator: std.mem.Allocator, rtq_min_capacity: usize) 
     try UnixSignals.init(self);
 
     self.initialized = true;
+
+    var epoll_event: std.os.linux.epoll_event = .{
+        .events = std.os.linux.EPOLL.IN | std.os.linux.EPOLL.ET,
+        .data = std.os.linux.epoll_data{
+            .ptr = 0
+        }
+    };
+
+    try std.posix.epoll_ctl(self.blocking_tasks_epoll_fd, std.os.linux.EPOLL.CTL_ADD, unlock_epoll_fd, &epoll_event);
 }
 
 pub fn release(self: *Loop) void {

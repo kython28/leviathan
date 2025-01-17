@@ -91,5 +91,6 @@ pub var PythonTimerHandleType = python_c.PyTypeObject{
     .tp_new = &python_c.PyType_GenericNew,
     .tp_init = @ptrCast(&handle_init),
     .tp_methods = @constCast(PythonTimerHandleMethods.ptr),
+    .tp_members = null
 };
 

@@ -45,7 +45,6 @@ LOOPS: List[Tuple[str, Callable[[], asyncio.AbstractEventLoop]]] = [
     ("asyncio", asyncio.new_event_loop),
     ("uvloop", uvloop.new_event_loop),
     ("leviathan", leviathan.Loop),
-    ("leviathan (Thread-safe)", leviathan.ThreadSafeLoop),
 ]
 
 @dataclasses.dataclass

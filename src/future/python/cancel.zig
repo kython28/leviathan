@@ -10,7 +10,7 @@ const utils = @import("../../utils/utils.zig");
 
 pub inline fn future_fast_cancel(instance: *PythonFutureObject, cancel_msg_py_object: ?PyObject) bool {
     if (cancel_msg_py_object) |pyobj| {
-        if (python_c.PyUnicode_Check(pyobj) == 0) {
+        if (python_c.unicode_check(pyobj)) {
             python_c.raise_python_type_error("Cancel message must be a string\x00");
             return false;
         }

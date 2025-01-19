@@ -47,8 +47,11 @@ fn initialize_python_module() !*python_c.PyObject {
     const module: *python_c.PyObject = python_c.PyModule_Create(&leviathan_module) orelse return error.PythonError;
     errdefer python_c.py_decref(module);
 
+    std.log.info("Initializing Python module {}", .{builtin.single_threaded});
     if (!builtin.single_threaded) {
-        python_c.pyunstable_module_setgil(module, python_c.Py_MOD_GIL_NOT_USED);
+        if (python_c.PyUnstable_Module_SetGIL(module, python_c.Py_MOD_GIL_NOT_USED) < 0) {
+            return error.PythonError;
+        }
     }
 
     const leviathan_modules_name = .{
@@ -79,4 +82,4 @@ fn initialize_python_module() !*python_c.PyObject {
 export fn PyInit_leviathan_zig() ?*python_c.PyObject {
     initialize_leviathan_types() catch return null;
     return initialize_python_module() catch return null;
-}
+} 

@@ -1,9 +1,10 @@
-// https://github.com/ziglang/zig/issues/1499
-pub usingnamespace @import("python_header.zig");
-// pub usingnamespace @cImport({
-//     @cDefine("PY_SSIZE_T_CLEAN", {});
-//     @cInclude("Python.h");
-// });
+pub usingnamespace @cImport({
+    @cDefine("PY_SSIZE_T_CLEAN", {});
+    @cInclude("Python.h");
+});
+
+const builtin = @import("builtin");
+const std = @import("std");
 
 pub inline fn get_type(obj: *Python.PyObject) *Python.PyTypeObject {
     return obj.ob_type orelse unreachable;
@@ -16,6 +17,28 @@ pub inline fn is_type(obj: *Python.PyObject, @"type": *Python.PyTypeObject) bool
 pub inline fn type_check(obj: *Python.PyObject, @"type": *Python.PyTypeObject) bool {
     return is_type(obj, @"type") or Python.PyType_IsSubtype(get_type(obj), @"type") != 0;
 }
+
+// -------------------------------------------------
+// Problems when compiling with Python3.13.1t
+inline fn type_hasfeature(arg_type: *Python.PyTypeObject, arg_feature: c_ulong) bool {
+    const flags: c_ulong = blk: {
+        if (builtin.single_threaded) {
+            break :blk arg_type.tp_flags;
+        }else{
+            break :blk @atomicLoad(c_ulong, &arg_type.tp_flags, .unordered);
+        }
+    };
+    return (flags & arg_feature) == 0;
+}
+
+pub inline fn long_check(obj: *Python.PyObject) bool {
+    return type_hasfeature(get_type(obj), Python.Py_TPFLAGS_LONG_SUBCLASS);
+}
+
+pub inline fn unicode_check(obj: *Python.PyObject) bool {
+    return type_hasfeature(get_type(obj), Python.Py_TPFLAGS_UNICODE_SUBCLASS);
+}
+// -------------------------------------------------
 
 pub inline fn get_py_true() *Python.PyObject {
     const py_true_struct: *Python.PyObject = @ptrCast(&Python._Py_TrueStruct);
@@ -40,35 +63,71 @@ pub inline fn is_none(obj: *Python.PyObject) bool {
     return obj == py_none_struct;
 }
 
-pub inline fn py_incref(op: *Python.PyObject) void {
-    const new_refcnt = op.unnamed_0.ob_refcnt_split[0] +| 1;
-    if (new_refcnt == 0) {
-        return;
-    }
-
-    op.unnamed_0.ob_refcnt_split[0] = new_refcnt;
+inline fn get_refcnt_ptr(obj: *Python.PyObject) *Python.Py_ssize_t {
+    return @ptrCast(obj);
 }
 
-pub inline fn py_xinref(op: ?*Python.PyObject) void {
+inline fn get_refcnt_split(obj: *Python.PyObject) *[2]u32 {
+    return @ptrCast(obj);
+}
+
+pub inline fn py_incref(op: *Python.PyObject) void {
+    if (builtin.single_threaded) {
+        const refcnt_ptr = get_refcnt_split(op);
+        refcnt_ptr.*[0] +|= 1;
+    }else{
+        const new_local = @atomicLoad(u32, &op.ob_ref_local, .unordered) +| 1;
+        if (op.ob_tid == std.Thread.getCurrentId()) {
+            @atomicStore(u32, &op.ob_ref_local, new_local, .unordered);
+        }else{
+            _ = @atomicRmw(
+                Python.Py_ssize_t, &op.ob_ref_shared, .Add,
+                @as(Python.Py_ssize_t, @bitCast(@as(c_long, @as(c_int, 1) << @intCast(2)))),
+                .monotonic
+            );
+        }
+    }
+}
+
+pub inline fn py_xincref(op: ?*Python.PyObject) void {
     if (op) |o| {
         py_incref(o);
     }
 }
 
-inline fn _Py_IsImmortal(arg_op: *Python.PyObject) bool {
-    return @as(i32, @bitCast(@as(c_int, @truncate(arg_op.unnamed_0.ob_refcnt)))) < @as(c_int, 0);
+inline fn _Py_IsImmortal(refcnt: Python.Py_ssize_t) bool {
+    return @as(i32, @bitCast(@as(c_int, @truncate(refcnt)))) < @as(c_int, 0);
 }
 
 pub inline fn py_decref(op: *Python.PyObject) void {
-    var ref = op.unnamed_0.ob_refcnt;
-    if (_Py_IsImmortal(op)) {
-        return;
-    }
+    if (builtin.single_threaded) {
+        const ref_ptr = get_refcnt_ptr(op);
+        var ref = ref_ptr.*;
+        if (_Py_IsImmortal(ref)) {
+            return;
+        }
 
-    ref -= 1;
-    op.unnamed_0.ob_refcnt = ref;
-    if (ref == 0) {
-        op.ob_type.?.tp_dealloc.?(op);
+        ref -= 1;
+        ref_ptr.* = ref;
+        if (ref == 0) {
+            const ob_type: *Python.PyTypeObject = op.ob_type orelse unreachable;
+            ob_type.tp_dealloc.?(op);
+        }
+    }else{
+        var local = @atomicLoad(u32, &op.ob_ref_local, .unordered);
+        if (_Py_IsImmortal(local)) {
+            return;
+        }
+
+        if (op.ob_tid == std.Thread.getCurrentId()) {
+            local -= 1;
+            @atomicStore(u32, &op.ob_ref_local, local, .unordered);
+            if (local == 0) {
+                Python._Py_MergeZeroLocalRefcount(op);
+            }
+        }else{
+            Python._Py_DecRefShared(op);
+        }
     }
 }
 

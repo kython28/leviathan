@@ -215,13 +215,13 @@ inline fn z_task_init(
     }
     errdefer python_c.py_decref(context.?);
 
-    if (name) |*v| {
-        if (python_c.is_none(v.*)) {
+    if (name) |v| {
+        if (python_c.is_none(v)) {
             python_c.py_decref_and_set_null(&name);
-        }else if (python_c.PyUnicode_Check(v.*) == 0) {
-            v.* = python_c.PyObject_Str(v.*) orelse return error.PythonError;
+        }else if (python_c.unicode_check(v)) {
+            name = python_c.PyObject_Str(v) orelse return error.PythonError;
         }else{
-            v.* = python_c.py_newref(v.*);
+            name = python_c.py_newref(v);
         }
     }
     errdefer python_c.py_xdecref(name);

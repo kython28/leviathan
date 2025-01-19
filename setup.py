@@ -11,18 +11,21 @@ from typing import Literal, Any
 if sys.version_info < (3, 13):
     raise RuntimeError("leviathan requires Python 3.13 or later")
 
-is_gil_enabled = sys._is_gil_enabled()  # type: ignore
 zig_mode: Literal["Debug", "ReleaseSafe"] = "Debug"
 zig_compiler_options = []
+
+include_dir = sysconfig.get_config_var("INCLUDEPY")
+zig_compiler_options.append(f"-Dpython-include-dir={include_dir}")
 
 so_path = sysconfig.get_config_var("LIBDIR")
 so_name = sysconfig.get_config_var("INSTSONAME")
 full_path = f"{so_path}/{so_name}"
-
 zig_compiler_options.append(f"-Dpython-lib-dir={so_path}")
+zig_compiler_options.append(f"-Dpython-lib={full_path}")
 
-if is_gil_enabled:
-    zig_compiler_options.append("-Dpython-gil-enabled")
+is_gil_enabled = sys._is_gil_enabled()  # type: ignore
+if not is_gil_enabled:
+    zig_compiler_options.append("-Dpython-gil-disabled")
 
 
 class LeviathanBench(Command):
@@ -131,7 +134,7 @@ setup(
         exclude=["tests", "zig-out", "src"], include=["leviathan", "leviathan.*"]
     ),
     package_data={
-        "leviathan": ["leviathan_zig.so", "leviathan_zig_single_thread.so"],
+        "leviathan": ["leviathan_zig.so"],
         "": ["tests/"],
     },
     cmdclass={

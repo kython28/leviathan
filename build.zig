@@ -38,13 +38,16 @@ pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
 
     // https://github.com/ziglang/zig/issues/1499
-    // const python_include_dir = b.option([]const u8, "python-include-dir", "Path to python include directory")
-    //     orelse "/usr/include/python3.13";
-    const python_lib_dir = b.option([]const u8, "python-lib-dir", "Path to python library directory");
-    const python_is_gil_enabled = b.option(bool, "python-gil-enabled", "Enable python GIL") orelse true;
+    const python_include_dir = b.option([]const u8, "python-include-dir", "Path to python include directory")
+        orelse "/usr/include/python3.13";
 
-    const leviathan_module_configuration = b.addOptions();
-    leviathan_module_configuration.addOption(bool, "python_gil_enabled", python_is_gil_enabled);
+    const python_lib_dir = b.option([]const u8, "python-lib-dir", "Path to python library directory");
+
+    const python_lib= b.option([]const u8, "python-lib", "Name of the python library")
+        orelse "/usr/lib/libpython3.13.so";
+
+    const python_is_gil_disabled = b.option(bool, "python-gil-disabled", "Is GIL disabled")
+        orelse false;
 
     const jdz_allocator = b.dependency("jdz_allocator", .{
         .target = target,
@@ -59,9 +62,9 @@ pub fn build(b: *std.Build) void {
         .link_libc = true
     });
 
-    // python_c_module.addIncludePath(.{
-    //     .cwd_relative = python_include_dir
-    // });
+    python_c_module.addIncludePath(.{
+        .cwd_relative = python_include_dir
+    });
 
     if (python_lib_dir) |dir| {
         python_c_module.addLibraryPath(.{
@@ -69,7 +72,9 @@ pub fn build(b: *std.Build) void {
         });
     }
 
-    python_c_module.linkSystemLibrary("python3.13", .{});
+    python_c_module.addObjectFile(.{
+        .cwd_relative = python_lib
+    });
 
 
     const leviathan_module = b.addModule("leviathan", .{
@@ -85,18 +90,13 @@ pub fn build(b: *std.Build) void {
     const install_step = b.getInstallStep();
 
     create_build_step(
-        b, "leviathan", "src/lib.zig", target, optimize, python_is_gil_enabled,
+        b, "leviathan", "src/lib.zig", target, optimize, !python_is_gil_disabled,
         &modules_name, &modules, true, install_step
     );
 
     const check_step = b.step("check", "Run checking for ZLS");
     create_build_step(
-        b, "leviathan", "src/lib.zig", target, optimize, false,
-        &modules_name, &modules, false, check_step
-    );
-
-    create_build_step(
-        b, "leviathan_single_thread", "src/lib.zig", target, optimize, true,
+        b, "leviathan", "src/lib.zig", target, optimize, true,
         &modules_name, &modules, false, check_step
     );
 
@@ -104,6 +104,7 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("tests/main.zig"),
         .target = target,
         .optimize = optimize,
+        .single_threaded = !python_is_gil_disabled
     });
     lib_unit_tests.root_module.addImport("leviathan", leviathan_module);
 

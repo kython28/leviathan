@@ -1,28 +1,24 @@
-from leviathan import Task, ThreadSafeTask, Loop, ThreadSafeLoop
+from leviathan import Task, Loop
+
 from unittest.mock import AsyncMock
 
 from contextvars import copy_context, Context
-from typing import Type, Any
+from typing import Any
+
 import pytest, asyncio, io
 
 
-@pytest.mark.parametrize("task_obj, loop_obj", [
-    (Task, Loop),
-    (ThreadSafeTask, ThreadSafeLoop),
-])
-def test_checking_subclassing_and_arguments(
-    task_obj: Type[asyncio.Task[Any]], loop_obj: Type[asyncio.AbstractEventLoop]
-) -> None:
+def test_checking_subclassing_and_arguments() -> None:
     another_loop = asyncio.new_event_loop()
-    loop = loop_obj()
+    loop = Loop()
     try:
         coro = AsyncMock()()
         with pytest.raises(TypeError):
-            task_obj(coro, loop=another_loop)
+            Task(coro, loop=another_loop)
 
-        assert asyncio.isfuture(task_obj(coro, loop=loop))
+        assert asyncio.isfuture(Task(coro, loop=loop))
         with pytest.raises(TypeError):
-            task_obj(None, loop=loop)  # type: ignore
+            Task(None, loop=loop)  # type: ignore
 
         loop.call_soon(loop.stop)
         loop.run_forever()
@@ -30,69 +26,45 @@ def test_checking_subclassing_and_arguments(
         loop.close()
 
 
-@pytest.mark.parametrize("task_obj, loop_obj", [
-    (Task, Loop),
-    (ThreadSafeTask, ThreadSafeLoop),
-])
-def test_get_coro(
-    task_obj: Type[asyncio.Task[Any]], loop_obj: Type[asyncio.AbstractEventLoop]
-) -> None:
-    loop = loop_obj()
+def test_get_coro() -> None:
+    loop = Loop()
     try:
         coro = AsyncMock()()
-        task = task_obj(coro, loop=loop)
+        task = Task(coro, loop=loop)
         assert task.get_coro() is coro
     finally:
         loop.close()
 
 
-@pytest.mark.parametrize("task_obj, loop_obj", [
-    (Task, Loop),
-    (ThreadSafeTask, ThreadSafeLoop),
-])
-def test_get_context(
-    task_obj: Type[asyncio.Task[Any]], loop_obj: Type[asyncio.AbstractEventLoop]
-) -> None:
-    loop = loop_obj()
+def test_get_context() -> None:
+    loop = Loop()
     try:
-        task = task_obj(AsyncMock()(), loop=loop)
+        task = Task(AsyncMock()(), loop=loop)
         assert type(task.get_context()) is Context
 
         ctx = copy_context()
-        task = task_obj(AsyncMock()(), loop=loop, context=ctx)
+        task = Task(AsyncMock()(), loop=loop, context=ctx)
         assert task.get_context() is ctx
     finally:
         loop.close()
 
 
-@pytest.mark.parametrize("task_obj, loop_obj", [
-    (Task, Loop),
-    (ThreadSafeTask, ThreadSafeLoop)
-])
-def test_get_loop(
-    task_obj: Type[asyncio.Task[Any]], loop_obj: Type[asyncio.AbstractEventLoop]
-) -> None:
-    loop = loop_obj()
+def test_get_loop() -> None:
+    loop = Loop()
     try:
-        task = task_obj(AsyncMock()(), loop=loop)
+        task = Task(AsyncMock()(), loop=loop)
         assert task.get_loop() is loop
     finally:
         loop.close()
 
 
-@pytest.mark.parametrize("task_obj, loop_obj", [
-    (Task, Loop),
-    (ThreadSafeTask, ThreadSafeLoop)
-])
-def test_name(
-    task_obj: Type[asyncio.Task[Any]], loop_obj: Type[asyncio.AbstractEventLoop]
-) -> None:
-    loop = loop_obj()
+def test_name() -> None:
+    loop = Loop()
     try:
-        task = task_obj(AsyncMock()(), loop=loop)
+        task = Task(AsyncMock()(), loop=loop)
         assert task.get_name()
 
-        task = task_obj(AsyncMock()(), loop=loop, name="test")
+        task = Task(AsyncMock()(), loop=loop, name="test")
         assert task.get_name() == "test"
 
         task.set_name("test2")
@@ -104,16 +76,10 @@ def test_name(
         loop.close()
 
 
-@pytest.mark.parametrize("task_obj, loop_obj", [
-    (Task, Loop),
-    (ThreadSafeTask, ThreadSafeLoop)
-])
-def test_stack(
-    task_obj: Type[asyncio.Task[Any]], loop_obj: Type[asyncio.AbstractEventLoop]
-) -> None:
-    loop = loop_obj()
+def test_stack() -> None:
+    loop = Loop()
     try:
-        task = task_obj(AsyncMock()(), loop=loop)
+        task = Task(AsyncMock()(), loop=loop)
         with io.StringIO() as buf:
             task.print_stack(file=buf)
             assert buf.getvalue()
@@ -121,17 +87,11 @@ def test_stack(
         loop.close()
 
 
-@pytest.mark.parametrize("task_obj, loop_obj", [
-    (Task, Loop),
-    (ThreadSafeTask, ThreadSafeLoop)
-])
-def test_coro_running(
-    task_obj: Type[asyncio.Task[Any]], loop_obj: Type[asyncio.AbstractEventLoop]
-) -> None:
-    loop = loop_obj()
+def test_coro_running() -> None:
+    loop = Loop()
     try:
         coro = AsyncMock(return_value=42)
-        task = task_obj(coro(), loop=loop)
+        task = Task(coro(), loop=loop)
         loop.call_soon(loop.stop)
         loop.run_forever()
 
@@ -141,19 +101,13 @@ def test_coro_running(
         loop.close()
 
 
-@pytest.mark.parametrize("task_obj, loop_obj", [
-    (Task, Loop),
-    (ThreadSafeTask, ThreadSafeLoop)
-])
-def test_current_task(
-    task_obj: Type[asyncio.Task[Any]], loop_obj: Type[asyncio.AbstractEventLoop]
-) -> None:
+def test_current_task() -> None:
     async def test_func(loop: asyncio.AbstractEventLoop) -> asyncio.Task[Any]|None:
         return asyncio.current_task(loop)
 
-    loop = loop_obj()
+    loop = Loop()
     try:
-        task = task_obj(test_func(loop), loop=loop)
+        task = Task(test_func(loop), loop=loop)
         loop.call_soon(loop.stop)
         loop.run_forever()
 
@@ -161,8 +115,7 @@ def test_current_task(
     finally:
         loop.close()
 
-@pytest.mark.parametrize("loop_obj", [Loop, ThreadSafeLoop])
-def test_parent_task_cancels_child(loop_obj: Type[asyncio.AbstractEventLoop]) -> None:
+def test_parent_task_cancels_child() -> None:
     async def child_task() -> str|None:
         try:
             await asyncio.sleep(1)
@@ -177,15 +130,14 @@ def test_parent_task_cancels_child(loop_obj: Type[asyncio.AbstractEventLoop]) ->
         result = await child
         return result
 
-    loop = loop_obj()
+    loop = Loop()
     try:
         result = loop.run_until_complete(parent_task())
         assert result == "Child cancelled"
     finally:
         loop.close()
 
-@pytest.mark.parametrize("loop_obj", [Loop, ThreadSafeLoop])
-def test_parent_task_cancels_while_awaiting(loop_obj: Type[asyncio.AbstractEventLoop]) -> None:
+def test_parent_task_cancels_while_awaiting() -> None:
     async def child_task() -> str|None:
         try:
             await asyncio.sleep(1)
@@ -197,7 +149,7 @@ def test_parent_task_cancels_while_awaiting(loop_obj: Type[asyncio.AbstractEvent
         result = await child
         return result
 
-    loop = loop_obj()
+    loop = Loop()
     try:
         task2 = loop.create_task(child_task())
         loop.call_later(0.1, task2.cancel)
@@ -206,8 +158,7 @@ def test_parent_task_cancels_while_awaiting(loop_obj: Type[asyncio.AbstractEvent
     finally:
         loop.close()
 
-@pytest.mark.parametrize("loop_obj", [Loop, ThreadSafeLoop])
-def test_cancel_parent_not_child(loop_obj: Type[asyncio.AbstractEventLoop]) -> None:
+def test_cancel_parent_not_child() -> None:
     child_done = asyncio.Event()
 
     async def child_task() -> str:
@@ -227,7 +178,7 @@ def test_cancel_parent_not_child(loop_obj: Type[asyncio.AbstractEventLoop]) -> N
             await child
             return "Parent cancelled", await child
 
-    loop = loop_obj()
+    loop = Loop()
     try:
         parent = asyncio.ensure_future(parent_task(), loop=loop)
         loop.call_later(0.1, parent.cancel)
@@ -237,8 +188,7 @@ def test_cancel_parent_not_child(loop_obj: Type[asyncio.AbstractEventLoop]) -> N
     finally:
         loop.close()
 
-@pytest.mark.parametrize("loop_obj", [Loop, ThreadSafeLoop])
-def test_cancel_parent_with_long_wait(loop_obj: Type[asyncio.AbstractEventLoop]) -> None:
+def test_cancel_parent_with_long_wait() -> None:
     child_done = asyncio.Event()
 
     async def child_task() -> str:
@@ -258,7 +208,7 @@ def test_cancel_parent_with_long_wait(loop_obj: Type[asyncio.AbstractEventLoop])
             await child
             return "Parent cancelled", await child
 
-    loop = loop_obj()
+    loop = Loop()
     try:
         parent = asyncio.ensure_future(parent_task(), loop=loop)
         loop.call_later(0.1, parent.cancel)
@@ -268,28 +218,26 @@ def test_cancel_parent_with_long_wait(loop_obj: Type[asyncio.AbstractEventLoop])
     finally:
         loop.close()
 
-@pytest.mark.parametrize("loop_obj", [Loop, ThreadSafeLoop])
-def test_task_exception_propagation(loop_obj: Type[asyncio.AbstractEventLoop]) -> None:
+def test_task_exception_propagation() -> None:
     async def raise_exception() -> None:
         raise ValueError("Test exception")
 
     async def parent_task() -> None:
         await asyncio.create_task(raise_exception())
 
-    loop = loop_obj()
+    loop = Loop()
     try:
         with pytest.raises(ValueError, match="Test exception"):
             loop.run_until_complete(parent_task())
     finally:
         loop.close()
 
-@pytest.mark.parametrize("loop_obj", [Loop, ThreadSafeLoop])
-def test_task_result_timing(loop_obj: Type[asyncio.AbstractEventLoop]) -> None:
+def test_task_result_timing() -> None:
     async def slow_task() -> str:
         await asyncio.sleep(0.1)
         return "Done"
 
-    loop = loop_obj()
+    loop = Loop()
     try:
         task = asyncio.ensure_future(slow_task(), loop=loop)
         with pytest.raises(asyncio.InvalidStateError):
@@ -299,8 +247,7 @@ def test_task_result_timing(loop_obj: Type[asyncio.AbstractEventLoop]) -> None:
     finally:
         loop.close()
 
-@pytest.mark.parametrize("loop_obj", [Loop, ThreadSafeLoop])
-def test_task_cancel_callback(loop_obj: Type[asyncio.AbstractEventLoop]) -> None:
+def test_task_cancel_callback() -> None:
     cancel_called = False
 
     def on_cancel(_: asyncio.Task[None]) -> None:
@@ -313,7 +260,7 @@ def test_task_cancel_callback(loop_obj: Type[asyncio.AbstractEventLoop]) -> None
         except asyncio.CancelledError:
             raise
 
-    loop = loop_obj()
+    loop = Loop()
     try:
         task = asyncio.ensure_future(cancelable_task(), loop=loop)
         task.add_done_callback(on_cancel)

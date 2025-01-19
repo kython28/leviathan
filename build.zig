@@ -41,7 +41,10 @@ pub fn build(b: *std.Build) void {
     // const python_include_dir = b.option([]const u8, "python-include-dir", "Path to python include directory")
     //     orelse "/usr/include/python3.13";
     const python_lib_dir = b.option([]const u8, "python-lib-dir", "Path to python library directory");
+    const python_is_gil_enabled = b.option(bool, "python-gil-enabled", "Enable python GIL") orelse true;
 
+    const leviathan_module_configuration = b.addOptions();
+    leviathan_module_configuration.addOption(bool, "python_gil_enabled", python_is_gil_enabled);
 
     const jdz_allocator = b.dependency("jdz_allocator", .{
         .target = target,
@@ -61,10 +64,13 @@ pub fn build(b: *std.Build) void {
     // });
 
     if (python_lib_dir) |dir| {
-        python_c_module.addLibraryPath(b.path(dir));
+        python_c_module.addLibraryPath(.{
+            .cwd_relative = dir
+        });
     }
 
     python_c_module.linkSystemLibrary("python3.13", .{});
+
 
     const leviathan_module = b.addModule("leviathan", .{
         .root_source_file = b.path("src/main.zig"),
@@ -79,12 +85,7 @@ pub fn build(b: *std.Build) void {
     const install_step = b.getInstallStep();
 
     create_build_step(
-        b, "leviathan", "src/lib.zig", target, optimize, false,
-        &modules_name, &modules, true, install_step
-    );
-
-    create_build_step(
-        b, "leviathan_single_thread", "src/lib.zig", target, optimize, true,
+        b, "leviathan", "src/lib.zig", target, optimize, python_is_gil_enabled,
         &modules_name, &modules, true, install_step
     );
 

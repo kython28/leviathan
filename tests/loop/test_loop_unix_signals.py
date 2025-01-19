@@ -1,12 +1,12 @@
-from leviathan import Loop, ThreadSafeLoop
-from typing import Type, Callable
+from leviathan import Loop
 
-import asyncio, pytest, os, signal
+from typing import Callable
+import pytest, os, signal
 
-@pytest.mark.parametrize("loop_obj", [Loop, ThreadSafeLoop])
-def test_add_and_remove_signal_handler(loop_obj: Type[asyncio.AbstractEventLoop]) -> None:
-    loop = loop_obj()
-    
+
+def test_add_and_remove_signal_handler() -> None:
+    loop = Loop()
+
     try:
         callback_called = False
 
@@ -30,26 +30,30 @@ def test_add_and_remove_signal_handler(loop_obj: Type[asyncio.AbstractEventLoop]
         loop.remove_signal_handler(signal.SIGUSR1)
 
         # Try to remove again, should return False
-        assert not loop.remove_signal_handler(signal.SIGUSR1), "Removing non-existent handler should return False"
+        assert not loop.remove_signal_handler(signal.SIGUSR1), (
+            "Removing non-existent handler should return False"
+        )
 
     finally:
         loop.close()
 
-@pytest.mark.parametrize("loop_obj", [Loop, ThreadSafeLoop])
-def test_remove_signal_handler_not_registered(loop_obj: Type[asyncio.AbstractEventLoop]) -> None:
-    loop = loop_obj()
-    
+
+def test_remove_signal_handler_not_registered() -> None:
+    loop = Loop()
+
     try:
         # Try to remove a signal handler that was never added
-        assert not loop.remove_signal_handler(signal.SIGUSR2), "Removing non-existent handler should return False"
+        assert not loop.remove_signal_handler(signal.SIGUSR2), (
+            "Removing non-existent handler should return False"
+        )
 
     finally:
         loop.close()
 
-@pytest.mark.parametrize("loop_obj", [Loop, ThreadSafeLoop])
-def test_add_signal_handler_invalid_signal(loop_obj: Type[asyncio.AbstractEventLoop]) -> None:
-    loop = loop_obj()
-    
+
+def test_add_signal_handler_invalid_signal() -> None:
+    loop = Loop()
+
     try:
         with pytest.raises(ValueError):
             loop.add_signal_handler(-1, lambda: None)
@@ -57,10 +61,10 @@ def test_add_signal_handler_invalid_signal(loop_obj: Type[asyncio.AbstractEventL
     finally:
         loop.close()
 
-@pytest.mark.parametrize("loop_obj", [Loop, ThreadSafeLoop])
-def test_multiple_signal_handlers(loop_obj: Type[asyncio.AbstractEventLoop]) -> None:
-    loop = loop_obj()
-    
+
+def test_multiple_signal_handlers() -> None:
+    loop = Loop()
+
     try:
         handlers_called = set()
 
@@ -69,6 +73,7 @@ def test_multiple_signal_handlers(loop_obj: Type[asyncio.AbstractEventLoop]) -> 
                 handlers_called.add(sig)
                 if len(handlers_called) == 2:
                     loop.stop()
+
             return handler
 
         # Add signal handlers
@@ -82,11 +87,17 @@ def test_multiple_signal_handlers(loop_obj: Type[asyncio.AbstractEventLoop]) -> 
         # Run the loop
         loop.run_forever()
 
-        assert handlers_called == {signal.SIGUSR1, signal.SIGUSR2}, "Not all signal handlers were called"
+        assert handlers_called == {signal.SIGUSR1, signal.SIGUSR2}, (
+            "Not all signal handlers were called"
+        )
 
         # Remove signal handlers
-        assert loop.remove_signal_handler(signal.SIGUSR1), "Failed to remove SIGUSR1 handler"
-        assert loop.remove_signal_handler(signal.SIGUSR2), "Failed to remove SIGUSR2 handler"
+        assert loop.remove_signal_handler(signal.SIGUSR1), (
+            "Failed to remove SIGUSR1 handler"
+        )
+        assert loop.remove_signal_handler(signal.SIGUSR2), (
+            "Failed to remove SIGUSR2 handler"
+        )
 
     finally:
         loop.close()

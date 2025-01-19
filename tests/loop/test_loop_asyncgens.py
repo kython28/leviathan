@@ -1,11 +1,10 @@
+from leviathan import Loop
+from typing import AsyncGenerator
+
 import asyncio
-import pytest
-from leviathan import Loop, ThreadSafeLoop
-from typing import Type, AsyncGenerator
 
 
-@pytest.mark.parametrize("loop_obj", [Loop, ThreadSafeLoop])
-def test_normal_async_generator(loop_obj: Type[asyncio.AbstractEventLoop]) -> None:
+def test_normal_async_generator() -> None:
     async def async_gen() -> AsyncGenerator[int, None]:
         for i in range(3):
             await asyncio.sleep(0.1)
@@ -17,7 +16,7 @@ def test_normal_async_generator(loop_obj: Type[asyncio.AbstractEventLoop]) -> No
             results.append(item)
         return results
 
-    loop = loop_obj()
+    loop = Loop()
     try:
         results = loop.run_until_complete(run_gen())
         assert results == [0, 1, 2]
@@ -25,8 +24,7 @@ def test_normal_async_generator(loop_obj: Type[asyncio.AbstractEventLoop]) -> No
         loop.close()
 
 
-@pytest.mark.parametrize("loop_obj", [Loop, ThreadSafeLoop])
-def test_unfinished_async_generator(loop_obj: Type[asyncio.AbstractEventLoop]) -> None:
+def test_unfinished_async_generator() -> None:
     cleanup_called = False
 
     async def async_gen() -> AsyncGenerator[int, None]:
@@ -50,7 +48,7 @@ def test_unfinished_async_generator(loop_obj: Type[asyncio.AbstractEventLoop]) -
             pass
         return results, ag
 
-    loop = loop_obj()
+    loop = Loop()
     try:
         results, _ = loop.run_until_complete(run_gen())
         assert results == [0, 1]

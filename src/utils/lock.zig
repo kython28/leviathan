@@ -6,12 +6,30 @@ const _Lock = enum {
     locked,
 
     pub inline fn tryLock(self: *_Lock) bool {
-        if (builtin.single_threaded) return true;
+        if (builtin.single_threaded) {
+            if (builtin.mode == .Debug) {
+                return switch (self.*) {
+                    .locked => false,
+                    .unlocked => true,
+                };
+            }
+            return true;
+        }
         return @cmpxchgStrong(_Lock, self, .unlocked, .locked, .acquire, .monotonic) == null;
     }
 
     pub inline fn lock(self: *_Lock) void {
-        if (builtin.single_threaded) return;
+        if (builtin.single_threaded) {
+            if (builtin.mode == .Debug) {
+                if (self.* == .locked) {
+                    @panic("Deadlock detected");
+                }
+
+                self.* = .locked;
+                return;
+            }
+            return;
+        }
 
         while (@cmpxchgWeak(_Lock, self, .unlocked, .locked, .acquire, .monotonic) != null) {
             std.atomic.spinLoopHint();

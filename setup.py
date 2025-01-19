@@ -3,12 +3,26 @@ from setuptools.command.develop import develop
 from setuptools.command.install import install
 from setuptools.command.build_ext import build_ext
 from setuptools.command.build import build
-import os, shutil, subprocess, stat, sys
+
+import os, shutil, subprocess, stat, sys, sysconfig
 
 from typing import Literal, Any
 
+if sys.version_info < (3, 13):
+    raise RuntimeError("leviathan requires Python 3.13 or later")
 
+is_gil_enabled = sys._is_gil_enabled()  # type: ignore
 zig_mode: Literal["Debug", "ReleaseSafe"] = "Debug"
+zig_compiler_options = []
+
+so_path = sysconfig.get_config_var("LIBDIR")
+so_name = sysconfig.get_config_var("INSTSONAME")
+full_path = f"{so_path}/{so_name}"
+
+zig_compiler_options.append(f"-Dpython-lib-dir={so_path}")
+
+if is_gil_enabled:
+    zig_compiler_options.append("-Dpython-gil-enabled")
 
 
 class LeviathanBench(Command):
@@ -52,7 +66,7 @@ class LeviathanTest(Command):
         pass
 
     def run(self) -> None:
-        subprocess.check_call(["zig", "build", "test"])
+        subprocess.check_call(["zig", "build", "test", *zig_compiler_options])
         self.run_command("build")
 
         errno = subprocess.call(
@@ -64,27 +78,20 @@ class LeviathanTest(Command):
 
 class ZigBuildExtCommand(build_ext):
     def run(self) -> None:
-        subprocess.check_call(["zig", "build", "install", f"-Doptimize={zig_mode}"])
+        subprocess.check_call(
+            ["zig", "build", "install", f"-Doptimize={zig_mode}", *zig_compiler_options]
+        )
         self.copy_zig_files()
 
     def copy_zig_files(self) -> None:
         build_dir = "./zig-out/lib"
 
         src_path = os.path.join(build_dir, "libleviathan.so")
-        src_path2 = os.path.join(build_dir, "libleviathan_single_thread.so")
-
         dest_path = os.path.join("build", "lib", "leviathan", "leviathan_zig.so")
-        dest_path2 = os.path.join(
-            "build", "lib", "leviathan", "leviathan_zig_single_thread.so"
-        )
         shutil.copyfile(src_path, dest_path)
-        shutil.copyfile(src_path2, dest_path2)
 
         st = os.stat(dest_path)
         os.chmod(dest_path, st.st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
-
-        st = os.stat(dest_path2)
-        os.chmod(dest_path2, st.st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
 
 class ZigBuildCommand(build):

@@ -21,7 +21,7 @@ pub inline fn get_data_ptr(comptime T: type, leviathan_pyobject: anytype) *T {
         @compileError("leviathan_pyobject must be a pointer");
     }
 
-    if (type_info.pointer.size != .One) {
+    if (type_info.pointer.size != .one) {
         @compileError("leviathan_pyobject must be a single pointer");
     }
 
@@ -38,7 +38,7 @@ pub inline fn get_parent_ptr(comptime T: type, leviathan_object: anytype) *T {
         @compileError("leviathan_pyobject must be a pointer");
     }
 
-    if (type_info.pointer.size != .One) {
+    if (type_info.pointer.size != .one) {
         @compileError("leviathan_pyobject must be a single pointer");
     }
     

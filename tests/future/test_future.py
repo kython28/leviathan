@@ -1,85 +1,57 @@
-from leviathan import Future, ThreadSafeFuture, Loop, ThreadSafeLoop
+from leviathan import Future, Loop
+
 from unittest.mock import MagicMock
-from typing import Type, Any
+from typing import Any
+
 import pytest, asyncio
 
 
-@pytest.mark.parametrize("fut_obj, loop_obj", [
-    (Future, Loop),
-    (ThreadSafeFuture, ThreadSafeLoop),
-])
-def test_checking_subclassing(
-    fut_obj: Type[asyncio.Future[Any]], loop_obj: Type[asyncio.AbstractEventLoop]
-) -> None:
-    loop = loop_obj()
+def test_checking_subclassing() -> None:
+    loop = Loop()
     try:
-        assert asyncio.isfuture(fut_obj(loop=loop))
+        assert asyncio.isfuture(Future(loop=loop))
     finally:
         loop.close()
 
 
-@pytest.mark.parametrize("fut_obj, loop_obj", [
-    (Future, Loop),
-    (ThreadSafeFuture, ThreadSafeLoop),
-])
-def test_getting_loop(
-    fut_obj: Type[asyncio.Future[Any]], loop_obj: Type[asyncio.AbstractEventLoop]
-) -> None:
-    loop = loop_obj()
+def test_getting_loop() -> None:
+    loop = Loop()
     try:
-        future = fut_obj(loop=loop)
+        future = Future(loop=loop)
         assert future.get_loop() is loop
     finally:
         loop.close()
 
 
-@pytest.mark.parametrize("fut_obj, loop_obj", [
-    (Future, Loop),
-    (ThreadSafeFuture, ThreadSafeLoop),
-])
-def test_setting_value_and_done(
-    fut_obj: Type[asyncio.Future[int]], loop_obj: Type[asyncio.AbstractEventLoop]
-) -> None:
-    loop = loop_obj()
+def test_setting_value_and_done() -> None:
+    loop = Loop()
     try:
-        future = fut_obj(loop=loop)
+        future = Future(loop=loop)
         future.set_result(42)
-        assert not(future.cancelled())
+        assert not (future.cancelled())
         assert future.result() == 42
         assert future.done()
     finally:
         loop.close()
 
 
-@pytest.mark.parametrize("fut_obj, loop_obj", [
-    (Future, Loop),
-    (ThreadSafeFuture, ThreadSafeLoop),
-])
-def test_cancelling_after_value(
-    fut_obj: Type[asyncio.Future[int]], loop_obj: Type[asyncio.AbstractEventLoop]
-) -> None:
-    loop = loop_obj()
+def test_cancelling_after_value() -> None:
+    loop = Loop()
     try:
-        future = fut_obj(loop=loop)
+        future = Future(loop=loop)
         future.set_result(42)
-        assert not(future.cancel())
-        assert not(future.cancelled())
+        assert not (future.cancel())
+        assert not (future.cancelled())
         assert future.result() == 42
         assert future.done()
     finally:
         loop.close()
 
 
-@pytest.mark.parametrize("fut_obj, loop_obj", [
-    (Future, Loop),
-    (ThreadSafeFuture, ThreadSafeLoop),
-])
-def test_cancelling_before_value(
-    fut_obj: Type[asyncio.Future[int]], loop_obj: Type[asyncio.AbstractEventLoop]
-) -> None:
-    loop = loop_obj()
+def test_cancelling_before_value() -> None:
+    loop = Loop()
     try:
-        future = fut_obj(loop=loop)
+        future = Future(loop=loop)
         assert future.cancel()
         with pytest.raises(asyncio.InvalidStateError):
             future.set_result(42)
@@ -87,17 +59,11 @@ def test_cancelling_before_value(
     finally:
         loop.close()
 
-    
-@pytest.mark.parametrize("fut_obj, loop_obj", [
-    (Future, Loop),
-    (ThreadSafeFuture, ThreadSafeLoop),
-])
-def test_cancelling(
-    fut_obj: Type[asyncio.Future[int]], loop_obj: Type[asyncio.AbstractEventLoop]
-) -> None:
-    loop = loop_obj()
+
+def test_cancelling() -> None:
+    loop = Loop()
     try:
-        future = fut_obj(loop=loop)
+        future = Future(loop=loop)
         assert future.cancel()
         assert future.cancelled()
         assert future.done()
@@ -105,20 +71,14 @@ def test_cancelling(
         loop.close()
 
 
-@pytest.mark.parametrize("fut_obj, loop_obj", [
-    (Future, Loop),
-    (ThreadSafeFuture, ThreadSafeLoop),
-])
-def test_setting_exception(
-    fut_obj: Type[asyncio.Future[int]], loop_obj: Type[asyncio.AbstractEventLoop]
-) -> None:
-    loop = loop_obj()
+def test_setting_exception() -> None:
+    loop = Loop()
     try:
-        future = fut_obj(loop=loop)
+        future = Future(loop=loop)
         exc = RuntimeError("test")
         future.set_exception(exc)
         assert future.exception() is exc
-        assert not(future.cancelled())
+        assert not (future.cancelled())
         assert future.done()
         with pytest.raises(RuntimeError) as exc_info:
             future.result()
@@ -127,16 +87,10 @@ def test_setting_exception(
         loop.close()
 
 
-@pytest.mark.parametrize("fut_obj, loop_obj", [
-    (Future, Loop),
-    (ThreadSafeFuture, ThreadSafeLoop),
-])
-def test_cancelling_with_message(
-    fut_obj: Type[asyncio.Future[int]], loop_obj: Type[asyncio.AbstractEventLoop]
-) -> None:
-    loop = loop_obj()
+def test_cancelling_with_message() -> None:
+    loop = Loop()
     try:
-        future = fut_obj(loop=loop)
+        future = Future(loop=loop)
         future.cancel(msg="test")
         assert future.cancelled()
         assert future.done()
@@ -146,30 +100,20 @@ def test_cancelling_with_message(
     finally:
         loop.close()
 
-@pytest.mark.parametrize("fut_obj, loop_obj", [
-    (Future, ThreadSafeLoop),
-    (ThreadSafeFuture, Loop),
-])
-def test_initializing_with_wrong_loop(
-    fut_obj: Type[asyncio.Future[Any]], loop_obj: Type[asyncio.AbstractEventLoop]
-) -> None:
-    loop = loop_obj()
+
+def test_initializing_with_wrong_loop() -> None:
+    loop = asyncio.new_event_loop()
     try:
         with pytest.raises(TypeError):
-            fut_obj(loop=loop)
+            Future(loop=loop)
     finally:
         loop.close()
 
-@pytest.mark.parametrize("fut_obj, loop_obj", [
-    (Future, Loop),
-    (ThreadSafeFuture, ThreadSafeLoop),
-])
-def test_adding_callback(
-    fut_obj: Type[asyncio.Future[Any]], loop_obj: Type[asyncio.AbstractEventLoop]
-) -> None:
-    loop = loop_obj()
+
+def test_adding_callback() -> None:
+    loop = Loop()
     try:
-        future = fut_obj(loop=loop)
+        future = Future(loop=loop)
         mock_func = MagicMock()
         future.add_done_callback(mock_func)
         future.set_result(42)
@@ -182,16 +126,10 @@ def test_adding_callback(
         loop.close()
 
 
-@pytest.mark.parametrize("fut_obj, loop_obj", [
-    (Future, Loop),
-    (ThreadSafeFuture, ThreadSafeLoop),
-])
-def test_adding_several_callbacks(
-    fut_obj: Type[asyncio.Future[Any]], loop_obj: Type[asyncio.AbstractEventLoop]
-) -> None:
-    loop = loop_obj()
+def test_adding_several_callbacks() -> None:
+    loop = Loop()
     try:
-        future = fut_obj(loop=loop)
+        future = Future(loop=loop)
         mock_func = MagicMock()
         mock_func2 = MagicMock()
         mock_func3 = MagicMock()
@@ -216,16 +154,10 @@ def test_adding_several_callbacks(
         loop.close()
 
 
-@pytest.mark.parametrize("fut_obj, loop_obj", [
-    (Future, Loop),
-    (ThreadSafeFuture, ThreadSafeLoop),
-])
-def test_adding_several_callbacks_and_removing(
-    fut_obj: Type[asyncio.Future[Any]], loop_obj: Type[asyncio.AbstractEventLoop]
-) -> None:
-    loop = loop_obj()
+def test_adding_several_callbacks_and_removing() -> None:
+    loop = Loop()
     try:
-        future = fut_obj(loop=loop)
+        future = Future(loop=loop)
         mock_func = MagicMock()
         mock_func2 = MagicMock()
         mock_func3 = MagicMock()
@@ -253,16 +185,10 @@ def test_adding_several_callbacks_and_removing(
         loop.close()
 
 
-@pytest.mark.parametrize("fut_obj, loop_obj", [
-    (Future, Loop),
-    (ThreadSafeFuture, ThreadSafeLoop),
-])
-def test_adding_callbacks_after_setting_result(
-    fut_obj: Type[asyncio.Future[Any]], loop_obj: Type[asyncio.AbstractEventLoop]
-) -> None:
-    loop = loop_obj()
+def test_adding_callbacks_after_setting_result() -> None:
+    loop = Loop()
     try:
-        future = fut_obj(loop=loop)
+        future = Future(loop=loop)
         mock_func = MagicMock()
         mock_func2 = MagicMock()
         mock_func3 = MagicMock()
@@ -288,22 +214,16 @@ def test_adding_callbacks_after_setting_result(
         loop.close()
 
 
-@pytest.mark.parametrize("fut_obj, loop_obj", [
-    (Future, Loop),
-    (ThreadSafeFuture, ThreadSafeLoop),
-])
-def test_future_await(
-    fut_obj: Type[asyncio.Future[Any]], loop_obj: Type[asyncio.AbstractEventLoop]
-) -> None:
+def test_future_await() -> None:
     async def test_func(fut: asyncio.Future[int]) -> int:
         loop = asyncio.get_running_loop()
         loop.call_soon(fut.set_result, 42)
         result = await fut
         return result
 
-    loop = loop_obj()
+    loop = Loop()
     try:
-        future = fut_obj(loop=loop)
+        future = Future(loop=loop)
         result = loop.run_until_complete(test_func(future))
         assert future.done()
         assert future.result() == 42
@@ -312,82 +232,61 @@ def test_future_await(
         loop.close()
 
 
-@pytest.mark.parametrize("fut_obj, loop_obj", [
-    (Future, Loop),
-    (ThreadSafeFuture, ThreadSafeLoop),
-])
-def test_future_cancel_during_callback(
-    fut_obj: Type[asyncio.Future[Any]], loop_obj: Type[asyncio.AbstractEventLoop]
-) -> None:
+def test_future_cancel_during_callback() -> None:
     def callback(fut: asyncio.Future[Any]) -> None:
         fut.cancel()
 
-    loop = loop_obj()
+    loop = Loop()
     try:
-        future = fut_obj(loop=loop)
+        future = Future(loop=loop)
         future.add_done_callback(callback)
         future.set_result("Done")
-        
+
         loop.run_until_complete(future)
         assert not future.cancelled()
     finally:
         loop.close()
 
-@pytest.mark.parametrize("fut_obj, loop_obj", [
-    (Future, Loop),
-    (ThreadSafeFuture, ThreadSafeLoop),
-])
-def test_future_remove_done_callback(
-    fut_obj: Type[asyncio.Future[Any]], loop_obj: Type[asyncio.AbstractEventLoop]
-) -> None:
-    loop = loop_obj()
+
+def test_future_remove_done_callback() -> None:
+    loop = Loop()
     try:
-        future = fut_obj(loop=loop)
+        future = Future(loop=loop)
         mock_callback = MagicMock()
         future.add_done_callback(mock_callback)
         future.remove_done_callback(mock_callback)
         future.set_result("Done")
-        
+
         loop.run_until_complete(future)
         mock_callback.assert_not_called()
     finally:
         loop.close()
 
-@pytest.mark.parametrize("fut_obj, loop_obj", [
-    (Future, Loop),
-    (ThreadSafeFuture, ThreadSafeLoop),
-])
-def test_future_callbacks_exception_handling(
-    fut_obj: Type[asyncio.Future[Any]], loop_obj: Type[asyncio.AbstractEventLoop]
-) -> None:
+
+def test_future_callbacks_exception_handling() -> None:
     def callback_with_exception(_: asyncio.Future[Any]) -> None:
         raise ValueError("Callback exception")
 
-    loop = loop_obj()
+    loop = Loop()
     try:
-        future = fut_obj(loop=loop)
+        future = Future(loop=loop)
         future.add_done_callback(callback_with_exception)
-        
+
         future.set_result("Done")
         loop.run_until_complete(future)
     finally:
         loop.close()
 
-@pytest.mark.parametrize("fut_obj, loop_obj", [
-    (Future, Loop),
-    (ThreadSafeFuture, ThreadSafeLoop),
-])
-def test_future_set_result_after_done(
-    fut_obj: Type[asyncio.Future[Any]], loop_obj: Type[asyncio.AbstractEventLoop]
-) -> None:
-    loop = loop_obj()
+
+def test_future_set_result_after_done() -> None:
+    loop = Loop()
     try:
-        future = fut_obj(loop=loop)
+        future = Future(loop=loop)
         future.set_result("First")
-        
+
         with pytest.raises(asyncio.InvalidStateError):
             future.set_result("Second")
-        
+
         assert future.result() == "First"
     finally:
         loop.close()

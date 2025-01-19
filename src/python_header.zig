@@ -6,6 +6,7 @@
 // 3. Use optional pointers: If you’re returning functions or need pointers, make sure they’re optional to keep the code secure and avoid confusion.
 
 const std = @import("std");
+const builtin = @import("builtin");
 
 pub const __off_t = c_long;
 pub const __off64_t = c_long;
@@ -6208,3 +6209,6 @@ pub const PyFPE_START_PROTECT = @compileError("unable to translate C expr: unexp
 pub const PyFPE_END_PROTECT = @compileError("unable to translate C expr: unexpected token ''");
 // /usr/include/python3.13/cpython/pyfpe.h:12:9
 pub const Py_TRACEMALLOC_H = "";
+
+extern fn PyUnstable_Module_SetGIL(module: *PyObject, gil: ?*anyopaque) void;
+pub const pyunstable_module_setgil = if (builtin.single_threaded) null else PyUnstable_Module_SetGIL;

@@ -1,4 +1,3 @@
-from .leviathan_zig_single_thread import Loop as _LoopSingleThread
 from .leviathan_zig import Loop as _Loop
 
 from concurrent.futures import ThreadPoolExecutor
@@ -13,7 +12,7 @@ from typing import (
 )
 from logging import getLogger
 
-import asyncio, socket, weakref
+import asyncio, socket
 import threading
 
 logger = getLogger(__package__)
@@ -33,8 +32,12 @@ class ExceptionContext(TypedDict):
     asyncgen: NotRequired[AsyncGenerator[Any]]
 
 
-class _LoopHelpers:
-    def __init__(self) -> None:
+class Loop(_Loop):  # type: ignore
+    def __init__(self, ready_tasks_queue_min_bytes_capacity: int = 10**6) -> None:
+        _Loop.__init__(
+            self, ready_tasks_queue_min_bytes_capacity, self._call_exception_handler
+        )
+
         self._exception_handler: Callable[[ExceptionContext], None] = (
             self.default_exception_handler
         )
@@ -75,7 +78,7 @@ class _LoopHelpers:
 
         self._exception_handler(context)
 
-    def default_exception_handler(self, context: ExceptionContext) -> None:
+    def default_exception_handler(self, context: ExceptionContext) -> None: # type: ignore
         message = context.get("message")
         if not message:
             message = "Unhandled exception in event loop"
@@ -89,7 +92,7 @@ class _LoopHelpers:
         exception = context.get("exception")
         logger.error("\n".join(log_lines), exc_info=exception)
 
-    def call_exception_handler(self, context: ExceptionContext) -> None:
+    def call_exception_handler(self, context: ExceptionContext) -> None: # type: ignore
         self._exception_handler(context)
 
     # --------------------------------------------------------------------------------------------------------
@@ -103,9 +106,8 @@ class _LoopHelpers:
 
     # --------------------------------------------------------------------------------------------------------
 
-    async def _shutdown_asyncgenerators(
-        self, asyncgens: weakref.WeakSet[AsyncGenerator[Any]]
-    ) -> None:
+    async def shutdown_asyncgens(self) -> None:
+        asyncgens = self._asyncgens
         closing_agens = list(asyncgens)
         asyncgens.clear()
 
@@ -128,17 +130,15 @@ class _LoopHelpers:
         loop = future.get_loop()
         loop.stop()
 
-    def _run_until_complete(
-        self, loop: asyncio.AbstractEventLoop, future: Awaitable[_T]
-    ) -> _T:
-        if loop.is_closed() or loop.is_running():
+    def run_until_complete(self, future: Awaitable[_T]) -> _T:
+        if self.is_closed() or self.is_running():
             raise RuntimeError("Event loop is closed or already running")
 
         new_task = not asyncio.isfuture(future)
-        new_future = asyncio.ensure_future(future, loop=loop)
+        new_future = asyncio.ensure_future(future, loop=self)
         new_future.add_done_callback(self.__run_until_complete_cb)
         try:
-            loop.run_forever()
+            self.run_forever()
         except:
             if new_task and new_future.done() and not new_future.cancelled():
                 new_future.exception()
@@ -204,30 +204,3 @@ class _LoopHelpers:
             executor.shutdown(wait=False)
         else:
             thread.join()
-
-class Loop(_LoopSingleThread, _LoopHelpers):  # type: ignore
-    def __init__(self, ready_tasks_queue_min_bytes_capacity: int = 10**6) -> None:
-        _LoopHelpers.__init__(self)
-        _LoopSingleThread.__init__(
-            self, ready_tasks_queue_min_bytes_capacity, self._call_exception_handler
-        )
-
-    async def shutdown_asyncgens(self) -> None:
-        await self._shutdown_asyncgenerators(self._asyncgens)
-
-    def run_until_complete(self, future: Awaitable[_T]) -> _T:
-        return self._run_until_complete(self, future)
-
-
-class ThreadSafeLoop(_Loop, _LoopHelpers):  # type: ignore
-    def __init__(self, ready_tasks_queue_min_bytes_capacity: int = 10**6) -> None:
-        _LoopHelpers.__init__(self)
-        _Loop.__init__(
-            self, ready_tasks_queue_min_bytes_capacity, self._call_exception_handler
-        )
-
-    async def shutdown_asyncgens(self) -> None:
-        await self._shutdown_asyncgenerators(self._asyncgens)
-
-    def run_until_complete(self, future: Awaitable[_T]) -> _T:
-        return self._run_until_complete(self, future)

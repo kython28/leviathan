@@ -1,19 +1,16 @@
 from concurrent.futures import ThreadPoolExecutor
 
-from leviathan import Loop, ThreadSafeLoop
+from leviathan import Loop
 
-from typing import Type
-
-import asyncio, pytest, time
+import pytest, time
 
 
 def simple_function(return_value: str) -> str:
     time.sleep(0.01)
     return return_value
 
-@pytest.mark.parametrize("loop_obj", [Loop, ThreadSafeLoop])
-def test_run_in_executor_with_specific_executor(loop_obj: Type[asyncio.AbstractEventLoop]) -> None:
-    loop = loop_obj()
+def test_run_in_executor_with_specific_executor() -> None:
+    loop = Loop()
     executor = ThreadPoolExecutor(max_workers=1)
     try:
         future = loop.run_in_executor(executor, simple_function, "test")
@@ -25,9 +22,8 @@ def test_run_in_executor_with_specific_executor(loop_obj: Type[asyncio.AbstractE
 
         executor.shutdown(wait=True)
 
-@pytest.mark.parametrize("loop_obj", [Loop, ThreadSafeLoop])
-def test_run_in_executor_with_default_executor(loop_obj: Type[asyncio.AbstractEventLoop]) -> None:
-    loop = loop_obj()
+def test_run_in_executor_with_default_executor() -> None:
+    loop = Loop()
     try:
         future = loop.run_in_executor(None, simple_function, "test")
         result = loop.run_until_complete(future)
@@ -36,9 +32,8 @@ def test_run_in_executor_with_default_executor(loop_obj: Type[asyncio.AbstractEv
         loop.run_until_complete(loop.shutdown_default_executor())
         loop.close()
 
-@pytest.mark.parametrize("loop_obj", [Loop, ThreadSafeLoop])
-def test_set_new_default_executor(loop_obj: Type[asyncio.AbstractEventLoop]) -> None:
-    loop = loop_obj()
+def test_set_new_default_executor() -> None:
+    loop = Loop()
     try:
         executor = ThreadPoolExecutor(max_workers=1)
         loop.set_default_executor(executor)
@@ -50,9 +45,8 @@ def test_set_new_default_executor(loop_obj: Type[asyncio.AbstractEventLoop]) -> 
         loop.close()
 
 
-@pytest.mark.parametrize("loop_obj", [Loop, ThreadSafeLoop])
-def test_set_incorrect_executor(loop_obj: Type[asyncio.AbstractEventLoop]) -> None:
-    loop = loop_obj()
+def test_set_incorrect_executor() -> None:
+    loop = Loop()
     try:
         with pytest.raises(TypeError):
             loop.set_default_executor("No an executor") # type: ignore

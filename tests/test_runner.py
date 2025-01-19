@@ -1,19 +1,15 @@
-from leviathan.loop import Loop, ThreadSafeLoop
+from leviathan.loop import Loop
+
 from leviathan.runner import run
 
-from typing import Type
-import pytest, asyncio
+import asyncio
 
 
-@pytest.mark.parametrize("thread_safe, expected_loop", [
-    (False, Loop),
-    (True, ThreadSafeLoop),
-])
-def test_run(thread_safe: bool, expected_loop: Type[asyncio.AbstractEventLoop]) -> None:
-    async def test_coro(expected_loop: Type[asyncio.AbstractEventLoop]) -> tuple[str, bool]:
-        return "test result", isinstance(asyncio.get_running_loop(), expected_loop)
+def test_run() -> None:
+    async def test_coro() -> tuple[str, bool]:
+        return "test result", isinstance(asyncio.get_running_loop(), Loop)
 
-    result = run(test_coro(expected_loop), thread_safe=thread_safe)
+    result = run(test_coro())
 
     assert isinstance(result, tuple)
     assert len(result) == 2

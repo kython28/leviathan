@@ -47,8 +47,8 @@ fn initialize_python_module() !*python_c.PyObject {
     const module: *python_c.PyObject = python_c.PyModule_Create(&leviathan_module) orelse return error.PythonError;
     errdefer python_c.py_decref(module);
 
-    if (@hasField(python_c, "Py_GIL_DISABLED")) {
-        python_c.PyUnstable_Module_SetGIL(module, python_c.Py_MOD_GIL_NOT_USED);
+    if (!builtin.single_threaded) {
+        python_c.pyunstable_module_setgil(module, python_c.Py_MOD_GIL_NOT_USED);
     }
 
     const leviathan_modules_name = .{
@@ -77,21 +77,6 @@ fn initialize_python_module() !*python_c.PyObject {
 }
 
 export fn PyInit_leviathan_zig() ?*python_c.PyObject {
-    if (builtin.single_threaded) {
-        python_c.raise_python_runtime_error("leviathan_zig is not supported in single-threaded mode\x00");
-        return null;
-    }else{
-        initialize_leviathan_types() catch return null;
-        return initialize_python_module() catch return null;
-    }
-}
-
-export fn PyInit_leviathan_zig_single_thread() ?*python_c.PyObject {
-    if (builtin.single_threaded) {
-        initialize_leviathan_types() catch return null;
-        return initialize_python_module() catch return null;
-    }else{
-        python_c.raise_python_runtime_error("leviathan_zig_single_thread is not supported in multi-threaded mode\x00");
-        return null;
-    }
+    initialize_leviathan_types() catch return null;
+    return initialize_python_module() catch return null;
 }

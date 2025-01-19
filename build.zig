@@ -37,7 +37,6 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    // https://github.com/ziglang/zig/issues/1499
     const python_include_dir = b.option([]const u8, "python-include-dir", "Path to python include directory")
         orelse "/usr/include/python3.13";
 

@@ -36,7 +36,7 @@ except IOError as e:
     )
 
 N: int = 11
-ITERATIONS = 5
+ITERATIONS = 10
 
 M_INITIAL: int = 1024
 M_MULTIPLIER: int = 2

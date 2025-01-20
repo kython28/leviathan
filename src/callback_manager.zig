@@ -68,7 +68,7 @@ pub inline fn release_set(allocator: std.mem.Allocator, set: CallbacksSet) void 
     allocator.free(set.callbacks);
 }
 
-pub inline fn cancel_callback(callback: *Callback, can_release: bool) void {
+pub inline fn cancel_callback(callback: *Callback, can_release: ?bool) void {
     const type_info = @typeInfo(CallbackType);
     const tag = @intFromEnum(callback.*);
     inline for (type_info.@"enum".fields) |field| {
@@ -86,7 +86,9 @@ pub inline fn cancel_callback(callback: *Callback, can_release: bool) void {
             }
 
             if (@hasField(data_type, "can_release")) {
-                data.can_release = can_release;
+                if (can_release) |_can_release| {
+                    data.can_release = _can_release;
+                }
             }
         }
     }

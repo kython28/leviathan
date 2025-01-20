@@ -59,7 +59,7 @@ fn signal_handler(
         .buffer = @as([*]u8, @ptrCast(&loop.unix_signals.signalfd_info))[0..@sizeOf(std.os.linux.signalfd_siginfo)],
     };
 
-    Loop.Scheduling.IO.queue(loop, Loop.Scheduling.IO.BlockingOperationData{
+    _ = Loop.Scheduling.IO.queue(loop, Loop.Scheduling.IO.BlockingOperationData{
         .PerformRead = .{
             .fd = loop.unix_signals.fd,
             .data = buffer_to_read,
@@ -170,7 +170,7 @@ pub fn init(loop: *Loop) !void {
         .buffer = @as([*]u8, @ptrCast(&unix_signals.signalfd_info))[0..@sizeOf(std.os.linux.signalfd_siginfo)],
     };
 
-    try Loop.Scheduling.IO.queue(loop, Loop.Scheduling.IO.BlockingOperationData{
+    _ = try Loop.Scheduling.IO.queue(loop, Loop.Scheduling.IO.BlockingOperationData{
         .PerformRead = .{
             .fd = unix_signals.fd,
             .data = buffer_to_read,

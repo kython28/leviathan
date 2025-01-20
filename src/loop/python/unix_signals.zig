@@ -47,7 +47,7 @@ inline fn z_loop_add_signal_handler(
             allocator.free(_args);
         }
     }
-    const py_handle: *Handle.PythonHandleObject = try Handle.fast_new_handle(context);
+    const py_handle: *Handle.PythonHandleObject = try Handle.fast_new_handle(context, loop_data);
     errdefer python_c.py_decref(@ptrCast(py_handle));
 
     const py_callback = python_c.py_newref(args[1].?);

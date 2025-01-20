@@ -10,7 +10,7 @@ pub const PerformData = struct {
     offset: usize
 };
 
-pub fn wait_ready(set: *IO.BlockingTasksSet, data: IO.WaitData) !void {
+pub fn wait_ready(set: *IO.BlockingTasksSet, data: IO.WaitData) !usize {
     const data_ptr = try set.push(.WaitWritable, data.callback);
     errdefer set.pop(data_ptr) catch unreachable;
 
@@ -20,9 +20,10 @@ pub fn wait_ready(set: *IO.BlockingTasksSet, data: IO.WaitData) !void {
     if (ret != 1) {
         @panic("Unexpected number of submitted sqes");
     }
+    return @intFromPtr(data_ptr);
 }
 
-pub fn perform(set: *IO.BlockingTasksSet, data: PerformData) !void {
+pub fn perform(set: *IO.BlockingTasksSet, data: PerformData) !usize {
     const data_ptr = try set.push(.PerformWrite, data.callback);
     errdefer set.pop(data_ptr) catch unreachable;
 
@@ -32,4 +33,5 @@ pub fn perform(set: *IO.BlockingTasksSet, data: PerformData) !void {
     if (ret != 1) {
         @panic("Unexpected number of submitted sqes");
     }
+    return @intFromPtr(data_ptr);
 }

@@ -14,7 +14,7 @@ pub const WaitData = struct {
     delay_type: DelayType
 };
 
-pub fn wait(set: *IO.BlockingTasksSet, data: WaitData) !void {
+pub fn wait(set: *IO.BlockingTasksSet, data: WaitData) !usize {
     const data_ptr = try set.push(.WaitTimer, data.callback);
     errdefer set.pop(data_ptr) catch unreachable;
 
@@ -48,4 +48,6 @@ pub fn wait(set: *IO.BlockingTasksSet, data: WaitData) !void {
     if (ret != 1) {
         @panic("Unexpected number of submitted sqes");
     }
+
+    return @intFromPtr(data_ptr);
 }

@@ -5,12 +5,16 @@ const python_c = @import("python_c");
 const PyObject = *python_c.PyObject;
 
 const CallbackManager = @import("callback_manager.zig");
+const Loop = @import("loop/main.zig");
 const utils = @import("utils/utils.zig");
 
 pub const PythonHandleObject = extern struct {
     ob_base: python_c.PyObject,
     contextvars: ?PyObject,
-    cancelled: bool
+    loop_data: ?*Loop,
+    blocking_task_id: usize,
+    cancelled: bool,
+    finished: bool
 };
 
 pub const GenericCallbackData = struct {
@@ -31,8 +35,16 @@ pub inline fn release_python_generic_callback(allocator: std.mem.Allocator, data
         allocator.free(args);
     }
 
-    python_c.py_decref(data.py_callback);
-    python_c.py_decref(@ptrCast(data.py_handle));
+    python_c.py_decref(data.py_callback); 
+
+    const handle = data.py_handle;
+    if (builtin.single_threaded) {
+        handle.finished = true;
+    }else{
+        @atomicStore(bool, &handle.finished, true, .monotonic);
+    }
+
+    python_c.py_decref(@ptrCast(handle));
 }
 
 pub fn callback_for_python_generic_callbacks(
@@ -118,12 +130,15 @@ pub fn callback_for_python_generic_callbacks(
     return .Continue;
 }
 
-pub inline fn fast_new_handle(contextvars: PyObject) !*PythonHandleObject {
+pub inline fn fast_new_handle(contextvars: PyObject, loop_data: *Loop) !*PythonHandleObject {
     const instance: *PythonHandleObject = @ptrCast(
         PythonHandleType.tp_alloc.?(&PythonHandleType, 0) orelse return error.PythonError
     );
     instance.contextvars = contextvars;
+    instance.loop_data = loop_data;
+    instance.blocking_task_id = 0;
     instance.cancelled = false;
+    instance.finished = false;
 
     return instance;
 }
@@ -172,12 +187,51 @@ fn handle_get_context(self: ?*PythonHandleObject, _: ?PyObject) callconv(.C) ?Py
 }
 
 fn handle_cancel(self: ?*PythonHandleObject, _: ?PyObject) callconv(.C) ?PyObject {
-    @atomicStore(bool, &self.?.cancelled, true, .monotonic);
+    const instance = self.?;
+
+    const finished = switch (builtin.single_threaded) {
+        true => instance.finished,
+        false => @atomicLoad(bool, &instance.finished, .monotonic)
+    };
+    if (finished) {
+        return python_c.get_py_none();
+    }
+
+    const cancelled = switch (builtin.single_threaded) {
+        true => instance.cancelled,
+        false => @atomicLoad(bool, &instance.cancelled, .monotonic)
+    };
+
+    if (!cancelled) {
+        const blocking_task_id = instance.blocking_task_id;
+        if (blocking_task_id > 0) {
+            const loop_data = instance.loop_data.?;
+
+            const mutex = &loop_data.mutex;
+            mutex.lock();
+            defer mutex.unlock();
+
+            _ = Loop.Scheduling.IO.queue(loop_data, .{
+                .Cancel = blocking_task_id
+            }) catch |err| {
+                return utils.handle_zig_function_error(err, null);
+            };
+        }
+
+        switch (builtin.single_threaded) {
+            true => instance.cancelled = true,
+            false => @atomicStore(bool, &instance.cancelled, true, .monotonic)
+        }
+    }
     return python_c.get_py_none();
 }
 
 fn handle_cancelled(self: ?*PythonHandleObject, _: ?PyObject) callconv(.C) ?PyObject {
-    const cancelled = @atomicLoad(bool, &self.?.cancelled, .monotonic);
+    const cancelled = switch (builtin.single_threaded) {
+        true => self.?.cancelled,
+        false => @atomicLoad(bool, &self.?.cancelled, .monotonic)
+    };
+
     return python_c.PyBool_FromLong(@intCast(@intFromBool(cancelled)));
 }
 

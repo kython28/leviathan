@@ -10,9 +10,10 @@ const Loop = @import("../../main.zig");
 pub const Read = @import("read.zig");
 pub const Write = @import("write.zig");
 pub const Timer = @import("timer.zig");
+pub const Cancel = @import("cancel.zig");
 
 pub const BlockingTaskData = struct {
-    callback_data: CallbackManger.Callback,
+    callback_data: ?CallbackManger.Callback,
     operation: BlockingOperation
 };
 
@@ -54,7 +55,7 @@ pub const BlockingTasksSet = struct {
 
         for (0..TotalItems) |_| {
             try set.free_items.append(.{
-                .callback_data = undefined,
+                .callback_data = null,
                 .operation = undefined
             });
         }
@@ -84,7 +85,7 @@ pub const BlockingTasksSet = struct {
 
     pub fn push(
         self: *BlockingTasksSet, operation: BlockingOperation,
-        data: CallbackManger.Callback
+        data: ?CallbackManger.Callback
     ) !BlockingTaskDataLinkedList.Node {
         const free_items = &self.free_items;
         if (free_items.len == 0) {
@@ -114,9 +115,10 @@ pub const BlockingTasksSet = struct {
     pub fn cancel_all(self: *BlockingTasksSet, loop: *Loop) !void {
         while (self.tasks_data.len > 0) {
             var task_data = try self.tasks_data.pop();
-            CallbackManger.cancel_callback(&task_data.callback_data, true);
-
-            try Loop.Scheduling.Soon.dispatch(loop, task_data.callback_data);
+            if (task_data.callback_data) |*callback| {
+                CallbackManger.cancel_callback(callback, true);
+                try Loop.Scheduling.Soon.dispatch(loop, callback.*);
+            }
         }
     }
 };
@@ -126,7 +128,8 @@ pub const BlockingOperation = enum {
     WaitWritable,
     PerformRead,
     PerformWrite,
-    WaitTimer
+    WaitTimer,
+    Cancel
 };
 
 pub const WaitData = struct {
@@ -139,7 +142,8 @@ pub const BlockingOperationData = union(BlockingOperation) {
     WaitWritable: WaitData,
     PerformRead: Read.PerformData,
     PerformWrite: Write.PerformData,
-    WaitTimer: Timer.WaitData
+    WaitTimer: Timer.WaitData,
+    Cancel: usize
 };
 
 inline fn get_blocking_tasks_set(
@@ -187,7 +191,7 @@ pub inline fn remove_tasks_set(
     blocking_tasks_queue.release_node(node);
 }
 
-pub fn queue(self: *Loop, event: BlockingOperationData) !void {
+pub fn queue(self: *Loop, event: BlockingOperationData) !usize {
     const blocking_tasks_queue = &self.blocking_tasks_queue;
     const epoll_fd = self.blocking_tasks_epoll_fd;
     const blocking_tasks_set = try get_blocking_tasks_set(
@@ -199,11 +203,12 @@ pub fn queue(self: *Loop, event: BlockingOperationData) !void {
         }
     }
 
-    switch (event) {
+    return switch (event) {
         .WaitReadable => |data| try Read.wait_ready(blocking_tasks_set, data),
         .WaitWritable => |data| try Write.wait_ready(blocking_tasks_set, data),
         .PerformRead => |data| try Read.perform(blocking_tasks_set, data),
         .PerformWrite => |data| try Write.perform(blocking_tasks_set, data),
         .WaitTimer => |data| try Timer.wait(blocking_tasks_set, data),
-    }
+        .Cancel => |data| try Cancel.perform(blocking_tasks_set, data)
+    };
 }

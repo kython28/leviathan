@@ -83,7 +83,7 @@ inline fn z_loop_call_soon(
         }
     }
 
-    const py_handle: *Handle.PythonHandleObject = try Handle.fast_new_handle(context.?);
+    const py_handle: *Handle.PythonHandleObject = try Handle.fast_new_handle(context.?, loop_data);
     errdefer python_c.py_decref(@ptrCast(py_handle));
 
     const py_callback = python_c.py_newref(args[0].?);
@@ -193,7 +193,9 @@ inline fn z_loop_delayed_call(
         }
     };
 
-    const py_timer_handle: *TimerHandle.PythonTimerHandleObject = try TimerHandle.fast_new_timer_handle(time, context.?);
+    const py_timer_handle: *TimerHandle.PythonTimerHandleObject = try TimerHandle.fast_new_timer_handle(
+        time, context.?, loop_data
+    );
     errdefer python_c.py_decref(@ptrCast(py_timer_handle));
 
     const py_callback = python_c.py_newref(args[1].?);
@@ -228,7 +230,7 @@ inline fn z_loop_delayed_call(
             .cancelled = &py_timer_handle.handle.cancelled
         }
     };
-    try Loop.Scheduling.IO.queue(loop_data, .{
+    py_timer_handle.handle.blocking_task_id = try Loop.Scheduling.IO.queue(loop_data, .{
         .WaitTimer = .{
             .callback = callback,
             .duration = time,

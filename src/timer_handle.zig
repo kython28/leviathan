@@ -4,6 +4,7 @@ const builtin = @import("builtin");
 const python_c = @import("python_c");
 const PyObject = *python_c.PyObject;
 
+const Loop = @import("loop/main.zig");
 const Handle = @import("handle.zig");
 const utils = @import("utils/utils.zig");
 
@@ -13,12 +14,18 @@ pub const PythonTimerHandleObject = extern struct {
     when: std.posix.timespec
 };
 
-pub inline fn fast_new_timer_handle(time: std.posix.timespec, contextvars: PyObject) !*PythonTimerHandleObject {
+pub inline fn fast_new_timer_handle(
+    time: std.posix.timespec,
+    contextvars: PyObject,
+    loop_data: *Loop
+) !*PythonTimerHandleObject {
     const instance: *PythonTimerHandleObject = @ptrCast(
         PythonTimerHandleType.tp_alloc.?(&PythonTimerHandleType, 0) orelse return error.PythonError
     );
     instance.handle.contextvars = contextvars;
+    instance.handle.loop_data = loop_data;
     instance.handle.cancelled = false;
+    instance.handle.finished = false;
     instance.when = time;
 
     return instance;

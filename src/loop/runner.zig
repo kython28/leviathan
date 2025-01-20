@@ -91,11 +91,33 @@ inline fn fetch_completed_tasks(
         const ring = &set.ring;
         const nevents = try ring.copy_cqes(blocking_ready_tasks, 0);
         for (blocking_ready_tasks[0..nevents]) |cqe| {
-            const blocking_task_data: Loop.Scheduling.IO.BlockingTaskDataLinkedList.Node = @ptrFromInt(cqe.user_data);
-            try set.pop(blocking_task_data);
+            const user_data = cqe.user_data;
+            const result: std.os.linux.E = @call(.always_inline, std.os.linux.io_uring_cqe.err, .{cqe});
+
+            const blocking_task_data_node: Loop.Scheduling.IO.BlockingTaskDataLinkedList.Node = @ptrFromInt(user_data);
+            try set.pop(blocking_task_data_node);
+
+            const blocking_task_data = blocking_task_data_node.data;
+            var callback = blocking_task_data.callback_data;
+            switch (blocking_task_data.operation) {
+                .WaitTimer => {
+                    switch (result) {
+                        .TIME => {},
+                        .CANCELED => CallbackManager.cancel_callback(&callback, true),
+                        else => unreachable
+                    }
+                },
+                else => {
+                    switch (result) {
+                        .SUCCESS => {},
+                        .CANCELED => CallbackManager.cancel_callback(&callback, true),
+                        else => unreachable
+                    }
+                }
+            }
 
             _ = try CallbackManager.append_new_callback(
-                allocator, ready_queue, blocking_task_data.data, Loop.MaxCallbacks
+                allocator, ready_queue, callback, Loop.MaxCallbacks
             );
         }
 

@@ -11,7 +11,10 @@ pub const Read = @import("read.zig");
 pub const Write = @import("write.zig");
 pub const Timer = @import("timer.zig");
 
-pub const BlockingTaskData = CallbackManger.Callback;
+pub const BlockingTaskData = struct {
+    callback_data: CallbackManger.Callback,
+    operation: BlockingOperation
+};
 
 pub const TotalItems = 1024;
 
@@ -50,7 +53,10 @@ pub const BlockingTasksSet = struct {
         }
 
         for (0..TotalItems) |_| {
-            try set.free_items.append(undefined);
+            try set.free_items.append(.{
+                .callback_data = undefined,
+                .operation = undefined
+            });
         }
 
         node.data = set;
@@ -76,14 +82,20 @@ pub const BlockingTasksSet = struct {
         return node;
     }
 
-    pub fn push(self: *BlockingTasksSet, data: CallbackManger.Callback) !BlockingTaskDataLinkedList.Node {
+    pub fn push(
+        self: *BlockingTasksSet, operation: BlockingOperation,
+        data: CallbackManger.Callback
+    ) !BlockingTaskDataLinkedList.Node {
         const free_items = &self.free_items;
         if (free_items.len == 0) {
             return error.NoFreeItems;
         }
 
         const node = try free_items.popleft_node();
-        node.data = data;
+        node.data = .{
+            .callback_data = data,
+            .operation = operation
+        };
         self.tasks_data.append_node(node);
 
         return node;
@@ -101,10 +113,10 @@ pub const BlockingTasksSet = struct {
 
     pub fn cancel_all(self: *BlockingTasksSet, loop: *Loop) !void {
         while (self.tasks_data.len > 0) {
-            var callback = try self.tasks_data.pop();
-            CallbackManger.cancel_callback(&callback, true);
+            var task_data = try self.tasks_data.pop();
+            CallbackManger.cancel_callback(&task_data.callback_data, true);
 
-            try Loop.Scheduling.Soon.dispatch(loop, callback);
+            try Loop.Scheduling.Soon.dispatch(loop, task_data.callback_data);
         }
     }
 };

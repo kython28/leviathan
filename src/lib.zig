@@ -47,7 +47,6 @@ fn initialize_python_module() !*python_c.PyObject {
     const module: *python_c.PyObject = python_c.PyModule_Create(&leviathan_module) orelse return error.PythonError;
     errdefer python_c.py_decref(module);
 
-    std.log.info("Initializing Python module {}", .{builtin.single_threaded});
     if (!builtin.single_threaded) {
         if (python_c.PyUnstable_Module_SetGIL(module, python_c.Py_MOD_GIL_NOT_USED) < 0) {
             return error.PythonError;

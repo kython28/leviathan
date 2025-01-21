@@ -17,16 +17,13 @@ pub fn init(comptime T: type) type {
         };
 
         allocator: std.mem.Allocator,
-        first: ?Node,
-        last: ?Node,
-        len: usize,
+        first: ?Node = null,
+        last: ?Node = null,
+        len: usize = 0,
 
         pub fn init(allocator: std.mem.Allocator) @This() {
             return @This(){
                 .allocator = allocator,
-                .first = null,
-                .last = null,
-                .len = 0
             };
         }
 
@@ -154,6 +151,16 @@ pub fn init(comptime T: type) type {
 
         pub fn is_empty(self: *@This()) bool {
             return (self.len == 0);
+        }
+
+        pub fn clear(self: *@This()) void {
+            const allocator = self.allocator;
+            var node = self.first;
+            while (node) |n| {
+                node = n.next;
+                allocator.destroy(n);
+            }
+            self.* = @This().init(allocator);
         }
     };
 }

@@ -218,9 +218,10 @@ fn handle_cancel(self: ?*PythonHandleObject, _: ?PyObject) callconv(.C) ?PyObjec
             };
         }
 
-        switch (builtin.single_threaded) {
-            true => instance.cancelled = true,
-            false => @atomicStore(bool, &instance.cancelled, true, .monotonic)
+        if (builtin.single_threaded) {
+            instance.cancelled = true;
+        }else{
+            @atomicStore(bool, &instance.cancelled, true, .monotonic);
         }
     }
     return python_c.get_py_none();

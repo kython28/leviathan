@@ -14,6 +14,7 @@ pub const Cancel = @import("cancel.zig");
 
 pub const BlockingTaskData = struct {
     callback_data: ?CallbackManger.Callback,
+    set: *BlockingTasksSet, // Cancel helper
     operation: BlockingOperation
 };
 
@@ -22,8 +23,10 @@ pub const TotalItems = 1024;
 pub const BlockingTasksSet = struct {
     allocator: std.mem.Allocator,
     ring: std.os.linux.IoUring,
+
     tasks_data: BlockingTaskDataLinkedList,
     free_items: BlockingTaskDataLinkedList,
+    free_cancel_items: BlockingTaskDataLinkedList,
 
     eventfd: std.posix.fd_t,
 
@@ -38,24 +41,34 @@ pub const BlockingTasksSet = struct {
 
         set.* = .{
             .allocator = allocator,
-            .ring = try std.os.linux.IoUring.init(TotalItems, 0),
+            .ring = try std.os.linux.IoUring.init(TotalItems * 2, 0),
             .tasks_data = BlockingTaskDataLinkedList.init(allocator),
             .free_items = BlockingTaskDataLinkedList.init(allocator),
+            .free_cancel_items = BlockingTaskDataLinkedList.init(allocator),
             .node = node,
             .eventfd = eventfd
         };
         errdefer set.ring.deinit();
 
         try set.ring.register_eventfd(eventfd);
+
+        const free_items = &set.free_items;
+        const free_cancel_items = &set.free_cancel_items;
         errdefer {
-            while (set.free_items.len > 0) {
-                _ = set.free_items.pop() catch unreachable;
-            }
+            free_items.clear();
+            free_cancel_items.clear();
         }
 
         for (0..TotalItems) |_| {
-            try set.free_items.append(.{
+            try free_items.append(.{
                 .callback_data = null,
+                .set = set,
+                .operation = undefined
+            });
+
+            try free_cancel_items.append(.{
+                .callback_data = null,
+                .set = set,
                 .operation = undefined
             });
         }
@@ -66,19 +79,19 @@ pub const BlockingTasksSet = struct {
 
     pub fn deinit(self: *BlockingTasksSet) BlockingTasksSetLinkedList.Node {
         if (self.tasks_data.len > 0) {
-            @panic("Free items count is not equal to total items");
+            @panic("Tasks set is not empty");
         }
 
-        while (self.free_items.len > 0) {
-            _ = self.free_items.pop() catch unreachable;
-        }
+        self.free_items.clear();
+        self.free_cancel_items.clear();
 
         const node = self.node;
 
         self.ring.unregister_eventfd() catch unreachable;
-        std.posix.close(self.eventfd);
 
         self.ring.deinit();
+        std.posix.close(self.eventfd);
+
         self.allocator.destroy(self);
         return node;
     }
@@ -87,7 +100,11 @@ pub const BlockingTasksSet = struct {
         self: *BlockingTasksSet, operation: BlockingOperation,
         data: ?CallbackManger.Callback
     ) !BlockingTaskDataLinkedList.Node {
-        const free_items = &self.free_items;
+        const free_items = switch (operation) {
+            .Cancel => &self.free_cancel_items,
+            else => &self.free_items
+        };
+
         if (free_items.len == 0) {
             return error.NoFreeItems;
         }
@@ -95,6 +112,7 @@ pub const BlockingTasksSet = struct {
         const node = try free_items.popleft_node();
         node.data = .{
             .callback_data = data,
+            .set = self,
             .operation = operation
         };
         self.tasks_data.append_node(node);
@@ -109,17 +127,36 @@ pub const BlockingTasksSet = struct {
         }
 
         try tasks_data.unlink_node(node);
-        self.free_items.append_node(node);
+
+        switch (node.data.operation) {
+            .Cancel => self.free_cancel_items.append_node(node),
+            else => self.free_items.append_node(node),
+        }
     }
 
     pub fn cancel_all(self: *BlockingTasksSet, loop: *Loop) !void {
-        while (self.tasks_data.len > 0) {
-            var task_data = try self.tasks_data.pop();
+        const allocator = self.allocator;
+        var node = self.tasks_data.first;
+
+        errdefer {
+            self.tasks_data.first = node;
+            if (node) |n| {
+                n.prev = null;
+            }
+        }
+
+        while (node) |n| {
+            node = n.next;
+            defer allocator.destroy(n);
+
+            var task_data = n.data;
             if (task_data.callback_data) |*callback| {
                 CallbackManger.cancel_callback(callback, true);
                 try Loop.Scheduling.Soon.dispatch(loop, callback.*);
             }
         }
+
+        self.tasks_data = BlockingTaskDataLinkedList.init(allocator);
     }
 };
 
@@ -192,6 +229,10 @@ pub inline fn remove_tasks_set(
 }
 
 pub fn queue(self: *Loop, event: BlockingOperationData) !usize {
+    if (event == .Cancel) {
+        return try Cancel.perform(event.Cancel);
+    }
+
     const blocking_tasks_queue = &self.blocking_tasks_queue;
     const epoll_fd = self.blocking_tasks_epoll_fd;
     const blocking_tasks_set = try get_blocking_tasks_set(
@@ -209,6 +250,6 @@ pub fn queue(self: *Loop, event: BlockingOperationData) !usize {
         .PerformRead => |data| try Read.perform(blocking_tasks_set, data),
         .PerformWrite => |data| try Write.perform(blocking_tasks_set, data),
         .WaitTimer => |data| try Timer.wait(blocking_tasks_set, data),
-        .Cancel => |data| try Cancel.perform(blocking_tasks_set, data)
+        else => unreachable
     };
 }

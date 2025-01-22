@@ -37,6 +37,16 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    if (target.result.os.tag != .linux) {
+        @panic("Only Linux is supported");
+    }else if (target.result.os.isAtLeast(.linux, .{ .major = 5, .minor = 1, .patch = 0 })) |_is_at_least| {
+        if (!_is_at_least) {
+            @panic("Only Linux >= 5.1.0 is supported");
+        }
+    }else{
+        @panic("Not able to detect Linux version");
+    }
+
     const python_include_dir = b.option([]const u8, "python-include-dir", "Path to python include directory")
         orelse "/usr/include/python3.13";
 

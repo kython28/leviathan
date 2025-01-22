@@ -13,6 +13,7 @@ From the depths of the sea, where darkness meets vastness, emerges Leviathan: an
 
 - Python 3.13+
 - Zig 0.14.x (for development or contributions)
+- Linux >= 5.1
 
 ## 🔧 Installation
 

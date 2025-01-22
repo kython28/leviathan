@@ -37,10 +37,6 @@ pub fn future_cancel(
     const instance = self.?;
 
     const future_data = utils.get_data_ptr(Future, instance);
-    const mutex = &future_data.mutex;
-    mutex.lock();
-    defer mutex.unlock();
-
     switch (future_data.status) {
         .FINISHED,.CANCELED => return python_c.get_py_false(),
         else => {}
@@ -64,10 +60,6 @@ pub fn future_cancel(
 
 pub fn future_cancelled(self: ?*PythonFutureObject, _: ?PyObject) callconv(.C) ?PyObject {
     const future_data = utils.get_data_ptr(Future, self.?);
-    const mutex = &future_data.mutex;
-    mutex.lock();
-    defer mutex.unlock();
-
     return switch (future_data.status) {
         .CANCELED => python_c.get_py_true(),
         else => python_c.get_py_false()

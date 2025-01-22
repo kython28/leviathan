@@ -23,6 +23,7 @@ def test_checking_subclassing_and_arguments() -> None:
         loop.call_soon(loop.stop)
         loop.run_forever()
     finally:
+        another_loop.close()
         loop.close()
 
 

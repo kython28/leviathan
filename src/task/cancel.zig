@@ -49,9 +49,6 @@ pub fn task_cancel(self: ?*PythonTaskObject, args: ?PyObject, kwargs: ?PyObject)
     const instance = self.?;
 
     const future_data = utils.get_data_ptr(Future, &instance.fut);
-    const mutex = &future_data.mutex;
-    mutex.lock();
-    defer mutex.unlock();
 
     switch (future_data.status) {
         .FINISHED,.CANCELED => return python_c.get_py_false(),
@@ -81,12 +78,6 @@ pub fn task_cancel(self: ?*PythonTaskObject, args: ?PyObject, kwargs: ?PyObject)
 
 pub fn task_uncancel(self: ?*PythonTaskObject) callconv(.C) ?PyObject {
     const instance = self.?;
-    const future_data = utils.get_data_ptr(Future, &instance.fut);
-
-    const mutex = &future_data.mutex;
-    mutex.lock();
-    defer mutex.unlock();
-
     const new_cancel_requests = instance.cancel_requests -| 1;
     instance.cancel_requests = new_cancel_requests;
     instance.must_cancel = (new_cancel_requests > 0);
@@ -97,10 +88,6 @@ pub fn task_cancelling(self: ?*PythonTaskObject) callconv(.C) ?PyObject {
     const instance = self.?;
 
     const future_data = utils.get_data_ptr(Future, &instance.fut);
-    const mutex = &future_data.mutex;
-    mutex.lock();
-    defer mutex.unlock();
-
     return switch (future_data.status) {
         .CANCELED,.FINISHED => python_c.PyLong_FromUnsignedLongLong(0),
         else => python_c.PyLong_FromUnsignedLongLong(@intCast(instance.cancel_requests))

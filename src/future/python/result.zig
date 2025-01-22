@@ -47,22 +47,13 @@ pub inline fn get_result(self: *PythonFutureObject) ?PyObject {
 
 
 pub fn future_result(self: ?*PythonFutureObject, _: ?PyObject) callconv(.C) ?PyObject {
-    const instance = self.?;
-    const future_data = utils.get_data_ptr(Future, instance);
-    const mutex = &future_data.mutex;
-    mutex.lock();
-    defer mutex.unlock();
-
-    return get_result(instance);
+    return get_result(self.?);
 }
 
 pub fn future_exception(self: ?*PythonFutureObject, _: ?PyObject) callconv(.C) ?PyObject {
     const instance = self.?;
 
     const future_data = utils.get_data_ptr(Future, instance);
-    const mutex = &future_data.mutex;
-    mutex.lock();
-    defer mutex.unlock();
 
     return switch (future_data.status) {
         .PENDING => blk: {
@@ -95,9 +86,6 @@ pub inline fn future_fast_set_exception(self: *PythonFutureObject, obj: *Future,
 
 inline fn z_future_set_exception(self: *PythonFutureObject, exception: PyObject) !PyObject {
     const future_data = utils.get_data_ptr(Future, self);
-    const mutex = &future_data.mutex;
-    mutex.lock();
-    defer mutex.unlock();
 
     switch (future_data.status) {
         .FINISHED,.CANCELED => {
@@ -124,9 +112,6 @@ pub inline fn future_fast_set_result(obj: *Future, result: PyObject) !void {
 
 inline fn z_future_set_result(self: *PythonFutureObject, result: PyObject) !PyObject {
     const future_data = utils.get_data_ptr(Future, self);
-    const mutex = &future_data.mutex;
-    mutex.lock();
-    defer mutex.unlock();
 
     switch (future_data.status) {
         .FINISHED,.CANCELED => {
@@ -146,10 +131,6 @@ pub fn future_set_result(self: ?*PythonFutureObject, result: ?PyObject) callconv
 
 pub fn future_done(self: ?*PythonFutureObject, _: ?PyObject) callconv(.C) ?PyObject {
     const future_data = utils.get_data_ptr(Future, self.?);
-    const mutex = &future_data.mutex;
-    mutex.lock();
-    defer mutex.unlock();
-
     return switch (future_data.status) {
         .FINISHED,.CANCELED => python_c.get_py_true(),
         else => python_c.get_py_false()

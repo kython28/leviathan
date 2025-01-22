@@ -13,8 +13,6 @@ pub const FutureStatus = enum {
 result: ?*anyopaque = null,
 status: FutureStatus = .PENDING,
 
-mutex: lock.Mutex = lock.init(),
-
 callbacks_arena: std.heap.ArenaAllocator,
 callbacks_arena_allocator: std.mem.Allocator = undefined,
 callbacks_queue: CallbackManager.CallbacksSetsQueue = undefined,

@@ -154,10 +154,6 @@ pub fn future_iternext(self: ?*PythonFutureObject) callconv(.C) ?PyObject {
 
     const future_data = utils.get_data_ptr(Future, instance);
 
-    const mutex = &future_data.mutex;
-    mutex.lock();
-    defer mutex.unlock();
-
     if (future_data.status != .PENDING) {
         const res = result.get_result(instance);
         if (res) |py_res| {

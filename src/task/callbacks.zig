@@ -197,10 +197,6 @@ inline fn handle_leviathan_future_object(
     const allocator = loop_data.allocator;
 
     const future_data = utils.get_data_ptr(Future, future);
-    const mutex = &future_data.mutex;
-
-    mutex.lock();
-    defer mutex.unlock();
 
     if (loop_data != utils.get_data_ptr(Loop, future.py_loop.?)) {
         return execute_zig_function(
@@ -362,10 +358,6 @@ pub fn step_run_and_handle_result(
     const loop_data = utils.get_data_ptr(Loop, py_loop);
     const future_data = utils.get_data_ptr(Future, py_fut);
 
-    const mutex = &future_data.mutex;
-    mutex.lock();
-    defer mutex.unlock();
-
     if (future_data.status != .PENDING) {
         python_c.raise_python_runtime_error(
             "Task already finished\x00"
@@ -404,9 +396,6 @@ pub fn step_run_and_handle_result(
     python_c.py_decref(ret);
 
     const new_status = blk: {
-        mutex.unlock();
-        defer mutex.lock();
-
         const context = task.py_context.?;
         if (python_c.PyContext_Enter(context) < 0) {
             return .Exception;

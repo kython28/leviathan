@@ -55,11 +55,6 @@ pub fn task_set_name(self: ?*Task.PythonTaskObject, args: ?PyObject) callconv(.C
         return null;
     }
 
-    const future_data = utils.get_data_ptr(Future, &instance.fut);
-    const mutex = &future_data.mutex;
-    mutex.lock();
-    defer mutex.unlock();
-
     instance.name = python_c.PyObject_Str(name.?) orelse return null;
     return python_c.get_py_none();
 }

@@ -44,10 +44,6 @@ inline fn z_future_add_done_callback(
     errdefer python_c.py_decref(context.?);
 
     const future_data = utils.get_data_ptr(Future, self);
-    const mutex = &future_data.mutex;
-    mutex.lock();
-    defer mutex.unlock();
-
     const callback = python_c.py_newref(args[0].?);
     errdefer python_c.py_decref(callback);
 
@@ -89,10 +85,6 @@ pub fn future_add_done_callback(
 
 pub fn future_remove_done_callback(self: ?*PythonFutureObject, callback: ?PyObject) callconv(.C) ?PyObject {
     const future_data = utils.get_data_ptr(Future, self.?);
-    const mutex = &future_data.mutex;
-    mutex.lock();
-    defer mutex.unlock();
-
     const removed_count = Future.Callback.remove_done_callback(
         future_data, @intCast(@intFromPtr(callback.?))
     );

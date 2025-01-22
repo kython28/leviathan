@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 
 const linked_list =  @import("../../../utils/linked_list.zig");
 pub const BlockingTasksSetLinkedList = linked_list.init(*BlockingTasksSet);
@@ -87,11 +88,8 @@ pub const BlockingTasksSet = struct {
 
         const node = self.node;
 
-        self.ring.unregister_eventfd() catch unreachable;
-
         self.ring.deinit();
         std.posix.close(self.eventfd);
-
         self.allocator.destroy(self);
         return node;
     }

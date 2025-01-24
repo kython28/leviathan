@@ -186,44 +186,47 @@ fn handle_get_context(self: ?*PythonHandleObject, _: ?PyObject) callconv(.C) ?Py
     return python_c.py_newref(self.?.contextvars.?);
 }
 
-fn handle_cancel(self: ?*PythonHandleObject, _: ?PyObject) callconv(.C) ?PyObject {
-    const instance = self.?;
-
+pub inline fn fast_handle_cancel(self: *PythonHandleObject) !void {
     const finished = switch (builtin.single_threaded) {
-        true => instance.finished,
-        false => @atomicLoad(bool, &instance.finished, .monotonic)
+        true => self.finished,
+        false => @atomicLoad(bool, &self.finished, .monotonic)
     };
     if (finished) {
-        return python_c.get_py_none();
+        return;
     }
 
     const cancelled = switch (builtin.single_threaded) {
-        true => instance.cancelled,
-        false => @atomicLoad(bool, &instance.cancelled, .monotonic)
+        true => self.cancelled,
+        false => @atomicLoad(bool, &self.cancelled, .monotonic)
     };
 
     if (!cancelled) {
-        const blocking_task_id = instance.blocking_task_id;
+        const blocking_task_id = self.blocking_task_id;
         if (blocking_task_id > 0) {
-            const loop_data = instance.loop_data.?;
+            const loop_data = self.loop_data.?;
 
             const mutex = &loop_data.mutex;
             mutex.lock();
             defer mutex.unlock();
 
-            _ = Loop.Scheduling.IO.queue(loop_data, .{
+            _ = try Loop.Scheduling.IO.queue(loop_data, .{
                 .Cancel = blocking_task_id
-            }) catch |err| {
-                return utils.handle_zig_function_error(err, null);
-            };
+            });
         }
 
         if (builtin.single_threaded) {
-            instance.cancelled = true;
+            self.cancelled = true;
         }else{
-            @atomicStore(bool, &instance.cancelled, true, .monotonic);
+            @atomicStore(bool, &self.cancelled, true, .monotonic);
         }
     }
+}
+
+fn handle_cancel(self: ?*PythonHandleObject, _: ?PyObject) callconv(.C) ?PyObject {
+    fast_handle_cancel(self.?) catch |err| {
+        return utils.handle_zig_function_error(err, null);
+    };
+
     return python_c.get_py_none();
 }
 

@@ -81,8 +81,6 @@ inline fn z_loop_new(
 
     @memset(&instance.data, 0);
 
-    instance.thread_id = std.Thread.getCurrentId();
-
     instance.get_asyncgen_hooks = get_asyncgen_hooks;
     instance.set_asyncgen_hooks = set_asyncgen_hooks;
 

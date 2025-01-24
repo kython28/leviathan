@@ -53,16 +53,6 @@ pub fn asyncgen_finalizer_hook(
         orelse return null;
     python_c.py_decref(discard_ret);
 
-    if (builtin.single_threaded) {
-        const thread_id = std.Thread.getCurrentId();
-        if (thread_id != instance.thread_id) {
-            python_c.raise_python_runtime_error(
-                "Event loop is not thread-safe. Only one thread can be used at the same time.\x00"
-            );
-            return null;
-        }
-    }
-
     return utils.execute_zig_function(append_new_task, .{instance, _agen});
 }
 

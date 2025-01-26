@@ -5,7 +5,9 @@ pub fn init(
     comptime Value: type,
     comptime Degree: usize
 ) type {
-    if (Degree&@as(usize, 1) == 1) {
+    if (Degree == 1) {
+        @compileError("Degree must be greater than 1");
+    }else if (Degree&@as(usize, 1) == 0) {
         @compileError("Degree must be a odd number");
     }
 
@@ -17,7 +19,7 @@ pub fn init(
             values: [Degree]Value,
             childs: [Degree + 1]?*Node,
 
-            nkeys: std.meta.Int(.unsigned, std.math.log2(Degree)),
+            nkeys: std.meta.Int(.unsigned, 1 + std.math.log2(Degree)),
         };
 
         allocator: std.mem.Allocator,
@@ -59,18 +61,36 @@ pub fn init(
                 const nkeys = current_node.nkeys;
                 if (nkeys == 0) break;
 
-                for (
-                    current_node.keys[0..nkeys], current_node.values[0..nkeys],
-                    current_node.childs[0..nkeys]
-                ) |k, *v, ch| {
-                    if (k == key) {
-                        value = v;
-                        break :loop;
-                    }else if (k > key) {
-                        current_node = ch orelse break :loop;
-                        continue :loop;
+                if (@typeInfo(Key) == .float) {
+                    const eps = std.math.floatEps(Key);
+                    for (
+                        current_node.keys[0..nkeys], current_node.values[0..nkeys],
+                        current_node.childs[0..nkeys]
+                    ) |k, *v, ch| {
+                        const diff = k - key;
+                        if (@abs(diff) <= eps) {
+                            value = v;
+                            break :loop;
+                        }else if (diff > eps) {
+                            current_node = ch orelse break :loop;
+                            continue :loop;
+                        }
+                    }
+                }else{
+                    for (
+                        current_node.keys[0..nkeys], current_node.values[0..nkeys],
+                        current_node.childs[0..nkeys]
+                    ) |k, *v, ch| {
+                        if (k == key) {
+                            value = v;
+                            break :loop;
+                        }else if (k > key) {
+                            current_node = ch orelse break :loop;
+                            continue :loop;
+                        }
                     }
                 }
+
                 current_node = current_node.childs[nkeys] orelse break;
             }
 
@@ -140,9 +160,11 @@ pub fn init(
             return value_ptr.*;
         }
 
-        inline fn insert_in_empty_node(node: *Node, keys: []Key, values: []Value) void {
-            @memcpy(node.keys[0..], keys);
-            @memcpy(node.value[0..], values);
+        inline fn insert_in_empty_node(node: *Node, keys: []const Key, values: []const Value) void {
+            if (keys.len != values.len) unreachable;
+
+            @memcpy(node.keys[0..keys.len], keys);
+            @memcpy(node.values[0..values.len], values);
             node.nkeys = @intCast(keys.len);
         }
 
@@ -153,7 +175,7 @@ pub fn init(
 
             const nkeys = node.nkeys;
             if (nkeys == 0) {
-                insert_in_empty_node(node, key, value);
+                insert_in_empty_node(node, &.{key}, &.{value});
                 node.childs[1] = new_child;
                 return;
             }
@@ -164,19 +186,39 @@ pub fn init(
             const values = &node.values;
             const childs = &node.childs;
 
-            for (0..nkeys) |index| {
-                if (key < keys[index]) {
-                    var i: usize = nkeys;
-                    while (i > index) : (i -= 1) {
-                        keys[i] = keys[i - 1];
-                        values[i] = values[i - 1];
-                        childs[i + 1] = childs[i];
+            if (@typeInfo(Key) == .float) {
+                const eps = std.math.floatEps(Key);
+                for (0..nkeys) |index| {
+                    const diff = key - keys[index];
+                    if (diff < -eps) {
+                        var i: usize = nkeys;
+                        while (i > index) : (i -= 1) {
+                            keys[i] = keys[i - 1];
+                            values[i] = values[i - 1];
+                            childs[i + 1] = childs[i];
+                        }
+
+                        keys[index] = key;
+                        values[index] = value;
+                        childs[index + 1] = new_child;
+                        return;
                     }
-                    
-                    keys[index] = key;
-                    values[index] = value;
-                    childs[index + 1] = new_child;
-                    return;
+                }
+            }else{
+                for (0..nkeys) |index| {
+                    if (key < keys[index]) {
+                        var i: usize = nkeys;
+                        while (i > index) : (i -= 1) {
+                            keys[i] = keys[i - 1];
+                            values[i] = values[i - 1];
+                            childs[i + 1] = childs[i];
+                        }
+
+                        keys[index] = key;
+                        values[index] = value;
+                        childs[index + 1] = new_child;
+                        return;
+                    }
                 }
             }
 
@@ -221,14 +263,16 @@ pub fn init(
             keys: []Key, values: []Value, childs: []?*Node,
             parent: *Node, new_child: *Node
         ) void {
-            insert_in_empty_node(new_child, keys[2], values[2]);
-            new_child.childs[0] = childs[2];
-            new_child.childs[1] = childs[3];
+            const middle_index = (Degree - 1)/2;
+            const middle_index_plus_one = middle_index + 1;
+
+            insert_in_empty_node(new_child, keys[middle_index_plus_one..], values[middle_index_plus_one..]);
+            @memcpy(new_child.childs[0..middle_index_plus_one], childs[middle_index_plus_one..]);
 
             change_parent(new_child);
 
-            @memset(childs[2..], null);
-            do_insertion(parent, keys[1], values[1], new_child);
+            @memset(childs[middle_index_plus_one..], null);
+            do_insertion(parent, keys[middle_index], values[middle_index], new_child);
         }
 
         fn split_nodes(allocator: std.mem.Allocator, node: *Node) void {
@@ -385,21 +429,30 @@ pub fn init(
         }
 
         pub fn delete(self: *BTree, key: Key) ?Value {
-            var node: ?*Node = null;
+            var node: *Node = undefined;
             const value = get_value(self, key, &node)
                 orelse return null;
 
-            const n = node.?;
+            const keys = &node.keys;
+            const values = &node.values;
+            const childs = &node.childs;
 
-            const keys = &n.keys;
-            const values = &n.values;
-            const childs = &n.childs;
-
-            const nkeys = n.nkeys;
-            for (0..nkeys) |i| {
-                if (key == keys[i]) {
-                    delete_key_from_node(self.allocator, n, keys, values, childs, i);
-                    break;
+            const nkeys = node.nkeys;
+            if (@typeInfo(Key) == .float) {
+                const eps = std.math.floatEps(Key);
+                for (0..nkeys) |i| {
+                    const diff = key - keys[i];
+                    if (@abs(diff) <= eps) {
+                        delete_key_from_node(self.allocator, node, keys, values, childs, i);
+                        break;
+                    }
+                }
+            }else{
+                for (0..nkeys) |i| {
+                    if (key == keys[i]) {
+                        delete_key_from_node(self.allocator, node, keys, values, childs, i);
+                        break;
+                    }
                 }
             }
 
@@ -407,16 +460,14 @@ pub fn init(
         }
 
         pub fn pop(self: *BTree, key: ?*Key) ?Value {
-            var node: ?*Node = null;
+            var node: *Node = undefined;
             const value = get_max_value(self, key, &node)
                 orelse return null;
 
-            const n = node.?;
-
-            const keys = &n.keys;
-            const values = &n.values;
-            const childs = &n.childs;
-            delete_key_from_node(self.allocator, n, keys, values, childs, n.nkeys - 1);
+            const keys = &node.keys;
+            const values = &node.values;
+            const childs = &node.childs;
+            delete_key_from_node(self.allocator, node, keys, values, childs, node.nkeys - 1);
 
             return value;
         }

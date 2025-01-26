@@ -5,7 +5,7 @@ const std = @import("std");
 const allocator = std.testing.allocator;
 
 test "Create and release" {
-    const new_btree = try BTree.init(usize, usize, 3).init(allocator);
+    var new_btree = try BTree.init(usize, usize, 3).init(allocator);
     defer new_btree.deinit() catch unreachable;
 
     try std.testing.expectEqual(0, new_btree.parent.nkeys);
@@ -14,12 +14,12 @@ test "Create and release" {
 }
 
 test "Inserting elements and removing" {
-    const new_btree = try BTree.init(usize, usize, 3).init(allocator);
+    var new_btree = try BTree.init(usize, usize, 3).init(allocator);
     defer new_btree.deinit() catch unreachable;
 
     for (0..20) |v| {
         const value = (v + 1) * 23;
-        const inserted = new_btree.insert(v, value, false);
+        const inserted = new_btree.insert(v, value);
         try std.testing.expect(inserted);
     }
 
@@ -35,7 +35,7 @@ test "Inserting elements and removing" {
 }
 
 test "Inserting in random order, searching and removing" {
-    const new_btree = try BTree.init(usize, usize, 3).init(allocator);
+    var new_btree = try BTree.init(usize, usize, 3).init(allocator);
     defer new_btree.deinit() catch unreachable;
 
     var values: [30]usize = undefined;
@@ -46,7 +46,7 @@ test "Inserting in random order, searching and removing" {
 
     for (values) |v| {
         const value = (v + 1) * 23;
-        const inserted = new_btree.insert(v, value, false);
+        const inserted = new_btree.insert(v, value);
         try std.testing.expect(inserted);
     }
 
@@ -65,7 +65,7 @@ test "Inserting in random order, searching and removing" {
 }
 
 test "Inserting in random float elements, searching and removing" {
-    const new_btree = try BTree.init(f64, f64, 3).init(allocator);
+    var new_btree = try BTree.init(f64, f64, 3).init(allocator);
     defer new_btree.deinit() catch unreachable;
 
     const randpgr = std.crypto.random;
@@ -76,7 +76,7 @@ test "Inserting in random float elements, searching and removing" {
 
     for (values) |v| {
         const value = v * 33.0 + 10.0;
-        const inserted = new_btree.insert(v, value, false);
+        const inserted = new_btree.insert(v, value);
         try std.testing.expect(inserted);
     }
 

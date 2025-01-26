@@ -25,16 +25,11 @@ pub fn init(
         allocator: std.mem.Allocator,
         parent: *Node,
 
-        pub fn init(allocator: std.mem.Allocator) !*BTree {
-            const new_btree = try allocator.create(BTree);
-            errdefer allocator.destroy(new_btree);
-
-            new_btree.* = .{
+        pub fn init(allocator: std.mem.Allocator) !BTree {
+            return .{
                 .allocator = allocator,
                 .parent = try create_node(allocator)
             };
-
-            return new_btree;
         }
 
         pub fn deinit(self: *BTree) !void {
@@ -42,7 +37,6 @@ pub fn init(
 
             const allocator = self.allocator;
             allocator.destroy(self.parent);
-            allocator.destroy(self);
         }
 
         fn create_node(allocator: std.mem.Allocator) !*Node {
@@ -305,23 +299,36 @@ pub fn init(
             split_nodes(allocator, node);
         }
 
-        pub fn insert(self: *BTree, key: Key, value: Value, comptime replace: bool) bool {
+        pub fn insert(self: *BTree, key: Key, value: Value) bool {
             const allocator = self.allocator;
 
             var node: *Node = self.parent;
             if (node.nkeys > 0) {
-                const previous_value = get_value_ptr(self, key, &node);
-                if (previous_value) |v| {
-                    if (replace) {
-                        v.* = value;
-                    }else{
-                        return false;
-                    }
+                const previous_value_ptr = get_value_ptr(self, key, &node);
+                if (previous_value_ptr != null) {
+                    return false;
                 }
             }
 
             insert_in_node(allocator, node, key, value);
             return true;
+        }
+
+        pub fn replace(self: *BTree, key: Key, value: Value) ?Value {
+            const allocator = self.allocator;
+
+            var node: *Node = self.parent;
+            if (node.nkeys > 0) {
+                const previous_value_ptr = get_value_ptr(self, key, &node);
+                if (previous_value_ptr) |v| {
+                    const previous_value = v.*;
+                    v.* = value;
+                    return previous_value;
+                }
+            }
+
+            insert_in_node(allocator, node, key, value);
+            return null;
         }
 
         inline fn delete_from_left(node: *?*Node, key: *Key, value: *Value) *Node {

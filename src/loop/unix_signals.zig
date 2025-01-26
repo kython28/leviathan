@@ -10,7 +10,9 @@ const c = @cImport({
     @cInclude("signal.h");
 });
 
-callbacks: std.AutoHashMap(u6, CallbackManager.Callback),
+const BTree = @import("../utils/btree.zig").init(u6, CallbackManager.Callback, 3);
+
+callbacks: BTree,
 fd: std.posix.fd_t,
 mask: std.posix.sigset_t,
 loop: *Loop,
@@ -48,7 +50,7 @@ fn signal_handler(
     const loop: *Loop = @alignCast(@ptrCast(data.?));
 
     const sig = loop.unix_signals.signalfd_info.signo;
-    const callback = loop.unix_signals.callbacks.get(@intCast(sig)).?;
+    const callback = loop.unix_signals.callbacks.get_value(@intCast(sig), null).?;
     const ret = CallbackManager.run_callback(loop.allocator, callback, .Continue);
 
     if (ret != .Continue) {
@@ -100,19 +102,15 @@ pub fn link(self: *UnixSignals, sig: u6, callback: CallbackManager.Callback) !vo
     // When the user create a new thread, we need to avoid that python catch the signal
     _ = c.signal(@intCast(sig), &dummy_signal_handler);
 
-    const prev = try self.callbacks.fetchPut(sig, callback);
-    self.callbacks.rehash();
-
-    if (prev) |v| {
-        var prev_callback = v.value;
-
-        CallbackManager.cancel_callback(&prev_callback, true);
-        try Loop.Scheduling.Soon._dispatch(self.loop, prev_callback);
+    var prev_callback = self.callbacks.replace(sig, callback);
+    if (prev_callback) |*v| {
+        CallbackManager.cancel_callback(v, true);
+        try Loop.Scheduling.Soon._dispatch(self.loop, v.*);
     }
 }
 
 pub fn unlink(self: *UnixSignals, sig: u6) !void {
-    var callback_info = self.callbacks.get(sig);
+    var callback_info = self.callbacks.delete(sig);
     if (callback_info) |*v| {
         CallbackManager.cancel_callback(v, true);
         try Loop.Scheduling.Soon._dispatch(self.loop, v.*);
@@ -129,7 +127,6 @@ pub fn unlink(self: *UnixSignals, sig: u6) !void {
             }
         },
         else => {
-            _ = self.callbacks.remove(sig);
             var mask: std.posix.sigset_t = std.posix.empty_sigset;
 
             sigaddset(&mask, sig);
@@ -143,15 +140,18 @@ pub fn unlink(self: *UnixSignals, sig: u6) !void {
         }
     };
 
-    try self.callbacks.put(sig, callback);
+    if (self.callbacks.insert(sig, callback)) {
+        @panic("Failed to insert callback");
+    }
 }
 
 pub fn init(loop: *Loop) !void {
     var mask: std.posix.sigset_t = std.posix.empty_sigset;
     const fd = try std.posix.signalfd(-1, &mask, 0);
+    errdefer std.posix.close(fd);
 
     loop.unix_signals = .{
-        .callbacks = std.AutoHashMap(u6, CallbackManager.Callback).init(loop.allocator),
+        .callbacks = try BTree.init(loop.allocator),
         .fd = fd,
         .mask = mask,
         .loop = loop
@@ -190,21 +190,20 @@ pub fn deinit(self: *UnixSignals) !void {
     std.posix.close(self.fd);
     const loop = self.loop;
 
-    var iter = self.callbacks.keyIterator();
     var mask: std.posix.sigset_t = std.posix.empty_sigset;
 
-    while (iter.next()) |sig| {
-        sigaddset(&mask, sig.*);
-        _ = c.signal(@intCast(sig.*), c.SIG_DFL);
-        var value = self.callbacks.get(sig.*).?;
+    while (true) {
+        var sig: u6 = undefined;
+        var value = self.callbacks.pop(&sig) orelse break;
+        sigaddset(&mask, sig);
+
+        _ = c.signal(@intCast(sig), c.SIG_DFL);
         CallbackManager.cancel_callback(&value, true);
         try Loop.Scheduling.Soon._dispatch(loop, value);
-
-        const removed = self.callbacks.remove(sig.*);
-        if (!removed) @panic("Error removing signal");
     }
+
     std.posix.sigprocmask(std.os.linux.SIG.UNBLOCK, &mask, null);
-    self.callbacks.deinit();
+    try self.callbacks.deinit();
 }
 
 const UnixSignals = @This();

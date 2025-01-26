@@ -10,6 +10,7 @@ const Scheduling = @import("scheduling.zig");
 const Control = @import("control.zig");
 const Utils = @import("utils/main.zig");
 const UnixSignal = @import("unix_signals.zig");
+const Watchers = @import("io/watchers.zig");
 pub const Hooks = @import("hooks.zig");
 
 const PythonLoopMethods: []const python_c.PyMethodDef = &[_]python_c.PyMethodDef{
@@ -103,6 +104,33 @@ const PythonLoopMethods: []const python_c.PyMethodDef = &[_]python_c.PyMethodDef
         .ml_name = "remove_signal_handler\x00",
         .ml_meth = @ptrCast(&UnixSignal.loop_remove_signal_handler),
         .ml_doc = "Schedule callback to be called with args arguments at the next iteration of the event loop.\x00",
+        .ml_flags = python_c.METH_O
+    },
+
+    // --------------------- Watchers ---------------------
+    python_c.PyMethodDef{
+        .ml_name = "add_reader\x00",
+        .ml_meth = @ptrCast(&Watchers.loop_add_reader),
+        .ml_doc = "Start monitoring the fd file descriptor for read availability\x00",
+        .ml_flags = python_c.METH_FASTCALL
+    },
+    python_c.PyMethodDef{
+        .ml_name = "add_writer\x00",
+        .ml_meth = @ptrCast(&Watchers.loop_add_writer),
+        .ml_doc = "Start monitoring the fd file descriptor for write availability\x00",
+        .ml_flags = python_c.METH_FASTCALL
+    },
+
+    python_c.PyMethodDef{
+        .ml_name = "remove_reader\x00",
+        .ml_meth = @ptrCast(&Watchers.loop_remove_reader),
+        .ml_doc = "Stop monitoring the fd file descriptor for read availability\x00",
+        .ml_flags = python_c.METH_O
+    },
+    python_c.PyMethodDef{
+        .ml_name = "remove_writer\x00",
+        .ml_meth = @ptrCast(&Watchers.loop_remove_writer),
+        .ml_doc = "Stop monitoring the fd file descriptor for write availability\x00",
         .ml_flags = python_c.METH_O
     },
     // --------------------- Sentinel ---------------------

@@ -4,8 +4,19 @@ const builtin = @import("builtin");
 const CallbackManager = @import("../callback_manager.zig");
 const python_c = @import("python_c");
 
+
 const CallbacksSetLinkedList = CallbackManager.LinkedList;
 const BlockingTasksSetLinkedList = Scheduling.IO.BlockingTasksSetLinkedList;
+
+pub const FDWatcher = struct {
+    callback: CallbackManager.Callback,
+    loop_data: *Loop,
+    blocking_task_id: usize = 0,
+    event_type: u32,
+    fd: std.posix.fd_t
+};
+
+const WatchersBTree = @import("../utils/btree.zig").init(std.posix.fd_t, *FDWatcher, 11);
 
 const lock = @import("../utils/lock.zig");
 
@@ -21,6 +32,9 @@ blocking_tasks_epoll_fd: std.posix.fd_t = -1,
 blocking_ready_epoll_events: []std.os.linux.epoll_event,
 blocking_tasks_queue: BlockingTasksSetLinkedList,
 blocking_ready_tasks: []std.os.linux.io_uring_cqe,
+
+reader_watchers: WatchersBTree,
+writer_watchers: WatchersBTree,
 
 unlock_epoll_fd: std.posix.fd_t = -1,
 epoll_locked: bool = false,
@@ -55,6 +69,15 @@ pub fn init(self: *Loop, allocator: std.mem.Allocator, rtq_min_capacity: usize) 
     const unlock_epoll_fd = try std.posix.eventfd(0, std.os.linux.EFD.NONBLOCK|std.os.linux.EFD.CLOEXEC);
     errdefer std.posix.close(unlock_epoll_fd);
 
+    const blocking_tasks_epoll_fd = try std.posix.epoll_create1(0);
+    errdefer std.posix.close(blocking_tasks_epoll_fd);
+
+    var reader_watchers = try WatchersBTree.init(allocator);
+    errdefer reader_watchers.deinit() catch unreachable;
+
+    var writer_watchers = try WatchersBTree.init(allocator);
+    errdefer writer_watchers.deinit() catch unreachable;
+
     self.* = .{
         .allocator = allocator,
         .mutex = lock.init(),
@@ -75,6 +98,8 @@ pub fn init(self: *Loop, allocator: std.mem.Allocator, rtq_min_capacity: usize) 
         .blocking_ready_tasks = blocking_ready_tasks,
         .blocking_tasks_epoll_fd = try std.posix.epoll_create1(0),
         .blocking_ready_epoll_events = blocking_ready_epoll_events,
+        .reader_watchers = reader_watchers,
+        .writer_watchers = writer_watchers,
         .unix_signals = undefined,
         .unlock_epoll_fd = unlock_epoll_fd
     };
@@ -121,6 +146,9 @@ pub fn release(self: *Loop) void {
              CallbackManager.release_set(allocator, set);
         }
     }
+
+    self.reader_watchers.deinit() catch unreachable;
+    self.writer_watchers.deinit() catch unreachable;
 
     if (self.blocking_tasks_epoll_fd != -1) {
         std.posix.close(self.blocking_tasks_epoll_fd);

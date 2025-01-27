@@ -25,7 +25,12 @@ fn loop_watchers_callback(
         allocator, watcher.callback, status
     );
 
-    if (status == .Continue and new_status == .Continue) {
+    const returned_without_problem = (
+        @intFromEnum(status)&@intFromEnum(new_status)
+    ) == @intFromEnum(CallbackManager.ExecuteCallbacksReturn.Continue);
+
+    const fd = watcher.fd;
+    if (returned_without_problem and fd >= 0) {
         const blocking_task_id = Loop.Scheduling.IO.queue(
             loop_data, switch (watcher.event_type) {
                 std.c.POLL.IN => Loop.Scheduling.IO.BlockingOperationData{
@@ -54,8 +59,8 @@ fn loop_watchers_callback(
             }
         ) catch |err| {
             _ = switch (watcher.event_type) {
-                std.c.POLL.IN => loop_data.reader_watchers.delete(watcher.fd),
-                std.c.POLL.OUT => loop_data.writer_watchers.delete(watcher.fd),
+                std.c.POLL.IN => loop_data.reader_watchers.delete(fd),
+                std.c.POLL.OUT => loop_data.writer_watchers.delete(fd),
                 else => unreachable
             };
             allocator.destroy(watcher);
@@ -67,11 +72,13 @@ fn loop_watchers_callback(
         return .Continue;
     }
 
-    _ = switch (watcher.event_type) {
-        std.c.POLL.IN => loop_data.reader_watchers.delete(watcher.fd),
-        std.c.POLL.OUT => loop_data.writer_watchers.delete(watcher.fd),
-        else => unreachable
-    };
+    if (fd >= 0) {
+        _ = switch (watcher.event_type) {
+            std.c.POLL.IN => loop_data.reader_watchers.delete(fd),
+            std.c.POLL.OUT => loop_data.writer_watchers.delete(fd),
+            else => unreachable
+        };
+    }
     allocator.destroy(watcher);
     return new_status;
 }
@@ -269,12 +276,13 @@ inline fn z_loop_remove_watcher(
 
     const existing_watcher_ptr: ?*Loop.FDWatcher = watchers.delete(fd);
     if (existing_watcher_ptr) |existing_watcher_data| {
-        CallbackManager.cancel_callback(&existing_watcher_data.callback, true);
-
         const blocking_task_id = existing_watcher_data.blocking_task_id;
         if (blocking_task_id == 0) {
             @panic("Unexpected blocking task id");
         }
+
+        CallbackManager.cancel_callback(&existing_watcher_data.callback, true);
+        existing_watcher_data.fd = -1;
 
         _ = try Loop.Scheduling.IO.queue(
             loop_data, Loop.Scheduling.IO.BlockingOperationData{

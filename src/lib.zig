@@ -14,12 +14,13 @@ const timer_handle = leviathan.TimerHandle;
 const leviathan_types = .{
     &future.Python.FutureType,
     &task.PythonTaskType,
-    &loop.Python.LoopType,
+    // &loop.Python.LoopType,
     &handle.PythonHandleType,
     &timer_handle.PythonTimerHandleType
 };
 
 fn on_module_exit() callconv(.C) void {
+    leviathan.utils.PythonImports.release_python_imports();
     _ = utils.gpa.deinit();
 }
 
@@ -30,6 +31,7 @@ var leviathan_module = python_c.PyModuleDef{
 };
 
 fn initialize_leviathan_types() !void {
+    try loop.Python.create_loop_type();
     inline for (leviathan_types) |v| {
         if (python_c.PyType_Ready(v) < 0) {
             return error.PythonError;
@@ -53,10 +55,18 @@ fn initialize_python_module() !*python_c.PyObject {
         }
     }
 
+    if (
+        python_c.PyModule_AddObject(
+            module, "Loop\x00", @as(*python_c.PyObject, @ptrCast(loop.Python.LoopType))
+        ) < 0
+    ) {
+        return error.PythonError;
+    }
+
     const leviathan_modules_name = .{
         "Future\x00",
         "Task\x00",
-        "Loop\x00",
+        // "Loop\x00",
         "Handle\x00",
         "TimerHandle\x00"
     };
@@ -79,6 +89,7 @@ fn initialize_python_module() !*python_c.PyObject {
 }
 
 export fn PyInit_leviathan_zig() ?*python_c.PyObject {
+    leviathan.utils.PythonImports.initialize_python_imports() catch return null;
     initialize_leviathan_types() catch return null;
     return initialize_python_module() catch return null;
 } 

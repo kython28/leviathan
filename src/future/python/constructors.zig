@@ -126,7 +126,7 @@ inline fn z_future_init(
     }
 
     const leviathan_loop: *LoopObject = @ptrCast(py_loop.?);
-    if (!python_c.type_check(@ptrCast(leviathan_loop), &Loop.Python.LoopType)) {
+    if (!python_c.type_check(@ptrCast(leviathan_loop), Loop.Python.LoopType)) {
         python_c.raise_python_type_error("Invalid asyncio event loop. Only Leviathan's event loops are allowed\x00");
         return error.PythonError;
     }

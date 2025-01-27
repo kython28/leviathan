@@ -3,7 +3,15 @@ from leviathan import Loop
 from contextvars import Context, copy_context
 from unittest.mock import AsyncMock
 from time import monotonic
+import asyncio
 
+
+def test_subclassing() -> None:
+    loop = Loop()
+    try:
+        assert isinstance(loop, asyncio.AbstractEventLoop)
+    finally:
+        loop.close()
 
 def test_create_future() -> None:
     loop = Loop()

@@ -94,6 +94,31 @@ pub inline fn cancel_callback(callback: *Callback, can_release: ?bool) void {
     }
 }
 
+pub inline fn is_callback_cancelled(callback: Callback) bool {
+    const type_info = @typeInfo(CallbackType);
+    const tag = @intFromEnum(callback);
+    inline for (type_info.@"enum".fields) |field| {
+        if (field.value == tag) {
+            const data = &@field(callback, field.name);
+            const data_type = @TypeOf(data.*);
+            if (@hasField(data_type, "can_execute")) { // Any other event
+                return !data.can_execute;
+            }else if (@hasField(data_type, "cancelled")) { // Handle
+                if (builtin.single_threaded) {
+                    data.cancelled.* = true;
+                    return !data.cancelled.*;
+                }else{
+                    return @atomicLoad(bool, data.cancelled, .monotonic);
+                }
+            }else{
+                @compileError(
+                    "Invalid callback type: callback must have either 'can_execute' or 'cancelled' field"
+                );
+            }
+        }
+    }
+}
+
 pub inline fn append_new_callback(
     allocator: std.mem.Allocator, sets_queue: *CallbacksSetsQueue, callback: Callback,
     max_callbacks: usize

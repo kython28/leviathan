@@ -331,7 +331,7 @@ pub fn init(
             return null;
         }
 
-        inline fn delete_from_left(node: *?*Node, key: *Key, value: *Value) *Node {
+        inline fn delete_from_left(allocator: std.mem.Allocator, node: *?*Node, key: *Key, value: *Value) void {
             var node_with_bigger_value: *Node = undefined;
             value.* = find_max_from_node(node.*.?, key, &node_with_bigger_value).?.*;
 
@@ -346,12 +346,12 @@ pub fn init(
                     node.* = rem_child;
                 }
                 if (rem_child) |child| child.parent = p_node;
-            }
 
-            return node_with_bigger_value;
+                allocator.destroy(node_with_bigger_value);
+            }
         }
 
-        inline fn delete_from_right(node: *?*Node, key: *Key, value: *Value) *Node {
+        inline fn delete_from_right(allocator: std.mem.Allocator, node: *?*Node, key: *Key, value: *Value) void {
             var node_with_smaller_value: *Node = undefined;
             value.* = find_min_from_node(node.*.?, key, &node_with_smaller_value).?.*;
 
@@ -368,6 +368,8 @@ pub fn init(
                     node.* = rem_child;
                 }
                 if (rem_child) |child| child.parent = p_node;
+
+                allocator.destroy(node_with_smaller_value);
             }else{
                 const keys = &node_with_smaller_value.keys;
                 const values = &node_with_smaller_value.values;
@@ -379,8 +381,6 @@ pub fn init(
                 }
                 childs[nkeys] = childs[nkeys + 1];
             }
-
-            return node_with_smaller_value;
         }
 
         inline fn perform_delete(
@@ -389,10 +389,7 @@ pub fn init(
         ) void {
             var key: Key = undefined;
             var value: Value = undefined;
-            const child: *Node = func(node, &key, &value);
-            if (child.nkeys == 0) {
-                allocator.destroy(child);
-            }
+            func(allocator, node, &key, &value);
 
             keys[index] = key;
             values[index] = value;

@@ -103,11 +103,6 @@ inline fn z_loop_call_soon(
         return error.PythonError;
     }
 
-    if (loop_data.stopping) {
-        python_c.raise_python_runtime_error("Loop is stopping\x00");
-        return error.PythonError;
-    }
-
     const callback: CallbackManager.Callback = .{
         .PythonGeneric = .{
             .args = callback_info,
@@ -212,11 +207,6 @@ inline fn z_loop_delayed_call(
 
     if (!loop_data.initialized) {
         python_c.raise_python_runtime_error("Loop is closed\x00");
-        return error.PythonError;
-    }
-
-    if (loop_data.stopping) {
-        python_c.raise_python_runtime_error("Loop is stopping\x00");
         return error.PythonError;
     }
 

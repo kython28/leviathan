@@ -10,8 +10,9 @@ from typing import (
     TextIO,
     AsyncGenerator,
 )
-from types import FrameType
+from _typeshed import FileDescriptorLike
 from contextvars import Context
+from types import FrameType
 import asyncio, weakref
 
 _T = TypeVar("_T")
@@ -51,9 +52,9 @@ class Task(asyncio.Task[_T]):
         self, *, limit: Optional[int] = None, file: Optional[TextIO] = None
     ) -> None: ...
 
-_Tcs = TypeVarTuple("_Tcs")
+_Ts = TypeVarTuple("_Ts")
 
-class Loop(asyncio.AbstractEventLoop): # type: ignore
+class Loop(asyncio.AbstractEventLoop):  # type: ignore
     _asyncgens: weakref.WeakSet[AsyncGenerator[Any]]
 
     def __init__(
@@ -77,31 +78,45 @@ class Loop(asyncio.AbstractEventLoop): # type: ignore
     def time(self) -> float: ...
     def call_soon(
         self,
-        callback: Callable[[Unpack[_Tcs]], object],
-        *args: Unpack[_Tcs],
+        callback: Callable[[Unpack[_Ts]], object],
+        *args: Unpack[_Ts],
         context: Context | None = ...,
     ) -> asyncio.Handle: ...
     def call_soon_threadsafe(
         self,
-        callback: Callable[[Unpack[_Tcs]], object],
-        *args: Unpack[_Tcs],
+        callback: Callable[[Unpack[_Ts]], object],
+        *args: Unpack[_Ts],
         context: Context | None = ...,
     ) -> asyncio.Handle: ...
     def call_at(
         self,
         when: float,
-        callback: Callable[[Unpack[_Tcs]], object],
-        *args: Unpack[_Tcs],
+        callback: Callable[[Unpack[_Ts]], object],
+        *args: Unpack[_Ts],
         context: Context | None = ...,
     ) -> asyncio.TimerHandle: ...
     def call_later(
         self,
         delay: float,
-        callback: Callable[[Unpack[_Tcs]], object],
-        *args: Unpack[_Tcs],
+        callback: Callable[[Unpack[_Ts]], object],
+        *args: Unpack[_Ts],
         context: Context | None = ...,
     ) -> asyncio.TimerHandle: ...
     def add_signal_handler(
-        self, sig: int, callback: Callable[[Unpack[_Tcs]], object], *args: Unpack[_Tcs]
+        self, sig: int, callback: Callable[[Unpack[_Ts]], object], *args: Unpack[_Ts]
     ) -> None: ...
     def remove_signal_handler(self, sig: int) -> bool: ...
+    def add_reader(
+        self,
+        fd: FileDescriptorLike,
+        callback: Callable[[Unpack[_Ts]], Any],
+        *args: Unpack[_Ts],
+    ) -> None: ...
+    def remove_reader(self, fd: FileDescriptorLike) -> bool: ...
+    def add_writer(
+        self,
+        fd: FileDescriptorLike,
+        callback: Callable[[Unpack[_Ts]], Any],
+        *args: Unpack[_Ts],
+    ) -> None: ...
+    def remove_writer(self, fd: FileDescriptorLike) -> bool: ...

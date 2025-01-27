@@ -9,6 +9,8 @@ from typing import (
     AsyncGenerator,
     Awaitable,
     TypeVar,
+    TypeVarTuple,
+    Unpack
 )
 from logging import getLogger
 
@@ -18,6 +20,7 @@ import threading
 logger = getLogger(__package__)
 
 _T = TypeVar("_T")
+_Ts = TypeVarTuple("_Ts")
 
 
 class ExceptionContext(TypedDict):
@@ -32,7 +35,7 @@ class ExceptionContext(TypedDict):
     asyncgen: NotRequired[AsyncGenerator[Any]]
 
 
-class Loop(_Loop):  # type: ignore
+class Loop(_Loop):
     def __init__(self, ready_tasks_queue_min_bytes_capacity: int = 10**6) -> None:
         _Loop.__init__(
             self, ready_tasks_queue_min_bytes_capacity, self._call_exception_handler
@@ -152,7 +155,7 @@ class Loop(_Loop):  # type: ignore
         return new_future.result()
 
     def run_in_executor(
-        self, executor: ThreadPoolExecutor|None, func: Callable[..., _T], *args: Any
+        self, executor: Any, func: Callable[[Unpack[_Ts]], _T], *args: Unpack[_Ts]
     ) -> asyncio.Future[_T]:
         if executor is None and (executor := self._default_executor) is None:
             if self._shutdown_executor_called:

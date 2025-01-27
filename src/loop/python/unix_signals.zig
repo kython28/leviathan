@@ -66,11 +66,6 @@ inline fn z_loop_add_signal_handler(
         return error.PythonError;
     }
 
-    if (loop_data.stopping) {
-        python_c.raise_python_runtime_error("Loop is stopping\x00");
-        return error.PythonError;
-    }
-
     const callback: CallbackManager.Callback = .{
         .PythonGeneric = .{
             .args = callback_info,

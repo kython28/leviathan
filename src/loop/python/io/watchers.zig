@@ -31,19 +31,29 @@ fn loop_watchers_callback(
                 std.c.POLL.IN => Loop.Scheduling.IO.BlockingOperationData{
                     .WaitReadable = .{
                         .fd = watcher.fd,
-                        .callback = watcher.callback
+                        .callback = .{
+                            .ZigGeneric = .{
+                                .callback = &loop_watchers_callback,
+                                .data = watcher
+                            }
+                        }
                     },
                 },
                 std.c.POLL.OUT => Loop.Scheduling.IO.BlockingOperationData{
                     .WaitWritable = .{
                         .fd = watcher.fd,
-                        .callback = watcher.callback
+                        .callback = .{
+                            .ZigGeneric = .{
+                                .callback = &loop_watchers_callback,
+                                .data = watcher
+                            }
+                        }
                     },
                 },
                 else => unreachable
             }
         ) catch |err| {
-            _ = switch (watcher.blocking_task_id) {
+            _ = switch (watcher.event_type) {
                 std.c.POLL.IN => loop_data.reader_watchers.delete(watcher.fd),
                 std.c.POLL.OUT => loop_data.writer_watchers.delete(watcher.fd),
                 else => unreachable
@@ -57,7 +67,7 @@ fn loop_watchers_callback(
         return .Continue;
     }
 
-    _ = switch (watcher.blocking_task_id) {
+    _ = switch (watcher.event_type) {
         std.c.POLL.IN => loop_data.reader_watchers.delete(watcher.fd),
         std.c.POLL.OUT => loop_data.writer_watchers.delete(watcher.fd),
         else => unreachable
@@ -120,16 +130,6 @@ inline fn z_loop_add_watcher(
     defer mutex.unlock();
     if (!loop_data.initialized) {
         python_c.raise_python_runtime_error("Loop is closed\x00");
-        return error.PythonError;
-    }
-    
-    if (!loop_data.running) {
-        python_c.raise_python_runtime_error("Loop is not running\x00");
-        return error.PythonError;
-    }
-
-    if (loop_data.stopping) {
-        python_c.raise_python_runtime_error("Loop is stopping\x00");
         return error.PythonError;
     }
 
@@ -258,16 +258,6 @@ inline fn z_loop_remove_watcher(
 
     if (!loop_data.initialized) {
         python_c.raise_python_runtime_error("Loop is closed\x00");
-        return error.PythonError;
-    }
-    
-    if (!loop_data.running) {
-        python_c.raise_python_runtime_error("Loop is not running\x00");
-        return error.PythonError;
-    }
-
-    if (loop_data.stopping) {
-        python_c.raise_python_runtime_error("Loop is stopping\x00");
         return error.PythonError;
     }
 

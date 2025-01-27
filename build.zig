@@ -39,7 +39,7 @@ pub fn build(b: *std.Build) void {
 
     if (target.result.os.tag != .linux) {
         @panic("Only Linux is supported");
-    }else if (target.result.os.isAtLeast(.linux, .{ .major = 5, .minor = 1, .patch = 0 })) |_is_at_least| {
+    }else if (target.result.os.isAtLeast(.linux, .{ .major = 5, .minor = 11, .patch = 0 })) |_is_at_least| {
         if (!_is_at_least) {
             @panic("Only Linux >= 5.1.0 is supported");
         }

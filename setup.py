@@ -125,7 +125,7 @@ class ZigInstallCommand(install):
 
 setup(
     name="leviathan",
-    version="0.2.1",
+    version="0.3.0",
     description="Leviathan: A lightning-fast Zig-powered event loop for Python's asyncio.",
     author="Enrique Miguel Mora Meza",
     author_email="kike28.py@pm.me",

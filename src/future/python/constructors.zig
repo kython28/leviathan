@@ -1,7 +1,7 @@
 const python_c = @import("python_c");
 const PyObject = *python_c.PyObject;
 
-const utils = @import("../../utils/utils.zig");
+const utils = @import("../../utils/main.zig");
 const result = @import("result.zig");
 
 const Future = @import("../main.zig");
@@ -16,10 +16,6 @@ pub inline fn future_set_initial_values(self: *PythonFutureObject) void {
     const future_data = utils.get_data_ptr(Future, self);
     future_data.released = true;
 
-    self.asyncio_module = null;
-    self.invalid_state_exc = null;
-    self.cancelled_error_exc = null;
-
     self.exception_tb = null;
     self.exception = null;
 
@@ -33,10 +29,6 @@ pub inline fn future_init_configuration(self: *PythonFutureObject, leviathan_loo
     const future_data = utils.get_data_ptr(Future, self);
     future_data.init(loop_data);
     self.py_loop = python_c.py_newref(leviathan_loop);
-
-    self.asyncio_module = leviathan_loop.asyncio_module.?;
-    self.invalid_state_exc = leviathan_loop.invalid_state_exc.?;
-    self.cancelled_error_exc = leviathan_loop.cancelled_error_exc.?;
 }
 
 pub inline fn fast_new_future(leviathan_loop: *LoopObject) !*PythonFutureObject {
@@ -95,9 +87,6 @@ pub fn future_traverse(self: ?*PythonFutureObject, visit: python_c.visitproc, ar
             instance.exception,
             instance.exception_tb,
             instance.cancel_msg_py_object,
-            instance.invalid_state_exc,
-            instance.cancelled_error_exc,
-            instance.asyncio_module,
         }, visit, arg
     );
 }

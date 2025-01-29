@@ -4,14 +4,14 @@ const PyObject = *python_c.PyObject;
 const Future = @import("../main.zig");
 const PythonFutureObject = Future.Python.FutureObject;
 
-const utils = @import("../../utils/utils.zig");
+const utils = @import("../../utils/main.zig");
 
 
 inline fn raise_cancel_exception(self: *PythonFutureObject) void {
     if (self.cancel_msg_py_object) |cancel_msg_py_object| {
-        python_c.PyErr_SetObject(self.cancelled_error_exc.?, cancel_msg_py_object);
+        python_c.PyErr_SetObject(utils.PythonImports.cancelled_error_exc, cancel_msg_py_object);
     }else{
-        python_c.PyErr_SetNone(self.cancelled_error_exc.?);
+        python_c.PyErr_SetNone(utils.PythonImports.cancelled_error_exc);
     }
 }
 
@@ -19,7 +19,7 @@ pub inline fn get_result(self: *PythonFutureObject) ?PyObject {
     const future_data = utils.get_data_ptr(Future, self);
     return switch (future_data.status) {
         .PENDING => blk: {
-            python_c.PyErr_SetString(self.invalid_state_exc.?, "Result is not ready.\x00");
+            python_c.PyErr_SetString(utils.PythonImports.invalid_state_exc, "Result is not ready.\x00");
             break :blk null;
         },
         .FINISHED => blk: {
@@ -57,7 +57,7 @@ pub fn future_exception(self: ?*PythonFutureObject, _: ?PyObject) callconv(.C) ?
 
     return switch (future_data.status) {
         .PENDING => blk: {
-            python_c.PyErr_SetString(instance.invalid_state_exc.?, "Exception is not set.\x00");
+            python_c.PyErr_SetString(utils.PythonImports.invalid_state_exc, "Exception is not set.\x00");
             break :blk null;
         },
         .FINISHED => blk: {
@@ -89,7 +89,7 @@ inline fn z_future_set_exception(self: *PythonFutureObject, exception: PyObject)
 
     switch (future_data.status) {
         .FINISHED,.CANCELED => {
-            python_c.PyErr_SetString(self.invalid_state_exc.?, "Exception already setted\x00");
+            python_c.PyErr_SetString(utils.PythonImports.invalid_state_exc, "Exception already setted\x00");
             return error.PythonError;
         },
         else => {}
@@ -115,7 +115,7 @@ inline fn z_future_set_result(self: *PythonFutureObject, result: PyObject) !PyOb
 
     switch (future_data.status) {
         .FINISHED,.CANCELED => {
-            python_c.PyErr_SetString(self.invalid_state_exc.?, "Result already setted\x00");
+            python_c.PyErr_SetString(utils.PythonImports.invalid_state_exc, "Result already setted\x00");
             return error.PythonError;
         },
         else => {}

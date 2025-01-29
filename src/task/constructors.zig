@@ -1,7 +1,7 @@
 const python_c = @import("python_c");
 const PyObject = *python_c.PyObject;
 
-const utils = @import("../utils/utils.zig");
+const utils = @import("../utils/main.zig");
 
 const CallbackManager = @import("../callback_manager.zig");
 const Future = @import("../future/main.zig");
@@ -55,7 +55,7 @@ inline fn task_init_configuration(
 }
 
 inline fn task_schedule_coro(self: *PythonTaskObject, loop: *LoopObject) !void {
-    const ret: PyObject = python_c.PyObject_CallOneArg(loop.register_task_func.?, @ptrCast(self))
+    const ret: PyObject = python_c.PyObject_CallOneArg(utils.PythonImports.register_task_func, @ptrCast(self))
         orelse return error.PythonError;
     python_c.py_decref(ret);
 
@@ -150,9 +150,6 @@ pub fn task_traverse(self: ?*PythonTaskObject, visit: python_c.visitproc, arg: ?
             instance.fut.exception,
             instance.fut.exception_tb,
             instance.fut.cancel_msg_py_object,
-            instance.fut.invalid_state_exc,
-            instance.fut.cancelled_error_exc,
-            instance.fut.asyncio_module,
 
             instance.py_context,
             instance.name,

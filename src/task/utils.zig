@@ -1,7 +1,7 @@
 const python_c = @import("python_c");
 const PyObject = *python_c.PyObject;
 
-const utils = @import("../utils/utils.zig");
+const utils = @import("../utils/main.zig");
 const Future = @import("../future/main.zig");
 const Task = @import("main.zig");
 const Loop = @import("../loop/main.zig");
@@ -72,7 +72,7 @@ pub fn task_get_stack(self: ?*Task.PythonTaskObject, args: ?PyObject, kwargs: ?P
         return null;
     }
 
-    const asyncio_module = instance.fut.asyncio_module.?;
+    const asyncio_module = utils.PythonImports.asyncio_module;
     
     const base_tasks_module: PyObject = python_c.PyObject_GetAttrString(asyncio_module, "base_tasks\x00")
         orelse return null;
@@ -103,7 +103,7 @@ pub fn task_print_stack(self: ?*Task.PythonTaskObject, args: ?PyObject, kwargs: 
         return null;
     }
 
-    const asyncio_module = instance.fut.asyncio_module.?;
+    const asyncio_module = utils.PythonImports.asyncio_module;
     
     const base_tasks_module: PyObject = python_c.PyObject_GetAttrString(asyncio_module, "base_tasks\x00")
         orelse return null;

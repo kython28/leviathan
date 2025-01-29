@@ -1,7 +1,7 @@
 const python_c = @import("python_c");
 const PyObject = *python_c.PyObject;
 
-const utils = @import("../../utils/utils.zig");
+const utils = @import("../../utils/main.zig");
 
 const Loop = @import("../main.zig");
 const Task = @import("../../task/main.zig");
@@ -75,7 +75,7 @@ pub fn setup_asyncgen_hooks(self: *LoopObject) !void {
         @panic("Asyncgen hooks already set\x00");
     }
 
-    self.old_asyncgen_hooks = python_c.PyObject_CallNoArgs(self.get_asyncgen_hooks.?)
+    self.old_asyncgen_hooks = python_c.PyObject_CallNoArgs(utils.PythonImports.get_asyncgen_hooks)
         orelse return error.PythonError;
 
     var args: [2]PyObject = undefined;
@@ -88,13 +88,13 @@ pub fn setup_asyncgen_hooks(self: *LoopObject) !void {
     ) orelse return error.PythonError;
 
     const ret: PyObject = python_c.PyObject_Vectorcall(
-        self.set_asyncgen_hooks.?, &args, args.len, null
+        utils.PythonImports.set_asyncgen_hooks, &args, args.len, null
     ) orelse return error.PythonError;
     python_c.py_decref(ret);
 }
 
 pub fn cleanup_asyncgen_hooks(self: *LoopObject) void {
-    const ret: PyObject = python_c.PyObject_CallObject(self.set_asyncgen_hooks.?, self.old_asyncgen_hooks.?)
+    const ret: PyObject = python_c.PyObject_CallObject(utils.PythonImports.set_asyncgen_hooks, self.old_asyncgen_hooks.?)
         orelse return;
     python_c.py_decref(ret);
     python_c.py_decref_and_set_null(&self.old_asyncgen_hooks);

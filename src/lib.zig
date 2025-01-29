@@ -4,7 +4,7 @@ const builtin = @import("builtin");
 const python_c = @import("python_c");
 const leviathan = @import("leviathan");
 
-const utils = leviathan.utils.utils;
+const utils = leviathan.utils;
 const future = leviathan.Future;
 const task = leviathan.Task;
 const loop = leviathan.Loop;

@@ -156,27 +156,12 @@ pub const LoopObject = extern struct {
     ob_base: python_c.PyObject,
     data: [@sizeOf(Loop)]u8,
 
-    get_asyncgen_hooks: ?PyObject,
-    set_asyncgen_hooks: ?PyObject,
-
-    asyncio_module: ?PyObject,
-    invalid_state_exc: ?PyObject,
-    cancelled_error_exc: ?PyObject,
-
-    set_running_loop: ?PyObject,
-    
-    enter_task_func: ?PyObject,
-    leave_task_func: ?PyObject,
-    register_task_func: ?PyObject,
-
-    exception_handler: ?PyObject,
-
     asyncgens_set: ?PyObject,
     asyncgens_set_add: ?PyObject,
     asyncgens_set_discard: ?PyObject,
-
     old_asyncgen_hooks: ?PyObject,
 
+    exception_handler: ?PyObject,
     task_name_counter: u64,
 };
 
@@ -213,6 +198,10 @@ pub fn create_loop_type() !void {
 
     const type_obj = python_c.PyType_FromSpecWithBases(@constCast(&loop_spec), base) orelse return error.PythonError;
     LoopType = @ptrCast(type_obj);
+}
+
+pub fn destroy_loop_type() void {
+    python_c.py_decref_and_set_null(@ptrCast(LoopType));
 }
 
 // pub var LoopType = python_c.PyTypeObject{

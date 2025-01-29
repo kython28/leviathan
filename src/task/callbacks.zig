@@ -1,7 +1,7 @@
 const python_c = @import("python_c");
 const PyObject = *python_c.PyObject;
 
-const utils = @import("../utils/utils.zig");
+const utils = @import("../utils/main.zig");
 
 const CallbackManager = @import("../callback_manager.zig");
 
@@ -288,7 +288,7 @@ inline fn failed_execution(
         return set_result(task, future_data, stop_iteration.value orelse unreachable);
     }
 
-    const cancelled_error = py_loop.cancelled_error_exc.?;
+    const cancelled_error = utils.PythonImports.cancelled_error_exc;
     if (exc_match(exception, cancelled_error) > 0) {
         if (!Future.Python.Cancel.future_fast_cancel(fut, null)) {
             return .Exception;
@@ -368,16 +368,16 @@ pub fn step_run_and_handle_result(
     if (task.must_cancel) {
         if (
             exception_value == null or
-            python_c.PyErr_GivenExceptionMatches(exception_value.?, task.fut.cancelled_error_exc.?) > 0
+            python_c.PyErr_GivenExceptionMatches(exception_value.?, utils.PythonImports.cancelled_error_exc) > 0
         ) {
             python_c.py_xdecref(exception_value);
             exception_value = blk: {
                 if (task.fut.cancel_msg_py_object) |value| {
                     break :blk python_c.PyObject_CallOneArg(
-                               task.fut.cancelled_error_exc.?, value
+                               utils.PythonImports.cancelled_error_exc, value
                            ) orelse return .Exception;
                 }else{
-                    break :blk python_c.PyObject_CallNoArgs(task.fut.cancelled_error_exc.?) orelse return .Exception;
+                    break :blk python_c.PyObject_CallNoArgs(utils.PythonImports.cancelled_error_exc) orelse return .Exception;
                 }
             };
         }
@@ -391,8 +391,9 @@ pub fn step_run_and_handle_result(
     const py_none = python_c.get_py_none();
     defer python_c.py_decref(py_none);
 
-    var ret: PyObject = python_c.PyObject_Vectorcall(py_loop.enter_task_func.?, &enter_task_args, enter_task_args.len, null)
-        orelse return .Exception;
+    var ret: PyObject = python_c.PyObject_Vectorcall(
+        utils.PythonImports.enter_task_func, &enter_task_args, enter_task_args.len, null
+    ) orelse return .Exception;
     python_c.py_decref(ret);
 
     const new_status = blk: {
@@ -432,7 +433,7 @@ pub fn step_run_and_handle_result(
         };
     };
 
-    ret = python_c.PyObject_Vectorcall(py_loop.leave_task_func.?, &enter_task_args, enter_task_args.len, null)
+    ret = python_c.PyObject_Vectorcall(utils.PythonImports.leave_task_func, &enter_task_args, enter_task_args.len, null)
         orelse return .Exception;
     python_c.py_decref(ret);
 

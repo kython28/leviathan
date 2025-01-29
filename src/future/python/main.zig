@@ -79,10 +79,6 @@ pub const FutureObject = extern struct {
     ob_base: python_c.PyObject,
     data: [@sizeOf(Future)]u8,
 
-    asyncio_module: ?PyObject,
-    invalid_state_exc: ?PyObject,
-    cancelled_error_exc: ?PyObject,
-
     py_loop: ?*Loop.Python.LoopObject,
     exception: ?PyObject,
     exception_tb: ?PyObject,

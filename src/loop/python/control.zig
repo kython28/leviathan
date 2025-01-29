@@ -1,7 +1,7 @@
 const python_c = @import("python_c");
 const PyObject = *python_c.PyObject;
 
-const utils = @import("../../utils/utils.zig");
+const utils = @import("../../utils/main.zig");
 
 const Loop = @import("../main.zig");
 const LoopObject = Loop.Python.LoopObject;
@@ -15,7 +15,7 @@ inline fn z_loop_run_forever(self: *LoopObject) !PyObject {
 
     try Loop.Python.Hooks.setup_asyncgen_hooks(self);
 
-    const set_running_loop = self.set_running_loop.?;
+    const set_running_loop = utils.PythonImports.set_running_loop;
     if (python_c.PyObject_CallOneArg(set_running_loop, @ptrCast(self))) |v| {
         python_c.py_decref(v);
     }else{

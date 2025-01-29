@@ -19,22 +19,25 @@ inline fn z_loop_new(
 
     @memset(&instance.data, 0);
 
-    instance.get_asyncgen_hooks = python_c.py_newref(python_imports.get_asyncgen_hooks.?);
-    instance.set_asyncgen_hooks = python_c.py_newref(python_imports.set_asyncgen_hooks.?);
+    const weakref_set_class = python_c.PyObject_GetAttrString(python_imports.weakref_module, "WeakSet\x00")
+        orelse return error.PythonError;
+    defer python_c.py_decref(weakref_set_class);
 
-    instance.asyncio_module = python_c.py_newref(python_imports.asyncio_module.?);
-    instance.cancelled_error_exc = python_c.py_newref(python_imports.cancelled_error_exc.?);
-    instance.invalid_state_exc = python_c.py_newref(python_imports.invalid_state_exc.?);
+    const weakref_set = python_c.PyObject_CallNoArgs(weakref_set_class)
+        orelse return error.PythonError;
+    errdefer python_c.py_decref(weakref_set);
 
-    instance.set_running_loop = python_c.py_newref(python_imports.set_running_loop.?);
+    const weakref_add = python_c.PyObject_GetAttrString(weakref_set, "add\x00")
+        orelse return error.PythonError;
+    errdefer python_c.py_decref(weakref_add);
 
-    instance.enter_task_func = python_c.py_newref(python_imports.enter_task_func.?);
-    instance.leave_task_func = python_c.py_newref(python_imports.leave_task_func.?);
-    instance.register_task_func = python_c.py_newref(python_imports.register_task_func.?);
+    const weakref_discard = python_c.PyObject_GetAttrString(weakref_set, "discard\x00")
+        orelse return error.PythonError;
+    errdefer python_c.py_decref(weakref_discard);
 
-    instance.asyncgens_set = python_c.py_newref(python_imports.weakref_set.?);
-    instance.asyncgens_set_add = python_c.py_newref(python_imports.weakref_add.?);
-    instance.asyncgens_set_discard = python_c.py_newref(python_imports.weakref_discard.?);
+    instance.asyncgens_set = weakref_set;
+    instance.asyncgens_set_add = weakref_add;
+    instance.asyncgens_set_discard = weakref_discard;
 
     instance.old_asyncgen_hooks = null;
 
@@ -58,25 +61,13 @@ pub fn loop_clear(self: ?*LoopObject) callconv(.C) c_int {
         loop_data.release();
     }
 
-    python_c.py_decref_and_set_null(&py_loop.get_asyncgen_hooks);
-    python_c.py_decref_and_set_null(&py_loop.set_asyncgen_hooks);
-
-    python_c.py_decref_and_set_null(&py_loop.asyncio_module);
-    python_c.py_decref_and_set_null(&py_loop.invalid_state_exc);
-    python_c.py_decref_and_set_null(&py_loop.cancelled_error_exc);
-
-    python_c.py_decref_and_set_null(&py_loop.set_running_loop);
-
-    python_c.py_decref_and_set_null(&py_loop.enter_task_func);
-    python_c.py_decref_and_set_null(&py_loop.leave_task_func);
-
-    python_c.py_decref_and_set_null(&py_loop.exception_handler);
 
     python_c.py_decref_and_set_null(&py_loop.asyncgens_set);
     python_c.py_decref_and_set_null(&py_loop.asyncgens_set_add);
     python_c.py_decref_and_set_null(&py_loop.asyncgens_set_discard);
-
     python_c.py_decref_and_set_null(&py_loop.old_asyncgen_hooks);
+
+    python_c.py_decref_and_set_null(&py_loop.exception_handler);
 
     return 0;
 }
@@ -85,19 +76,11 @@ pub fn loop_traverse(self: ?*LoopObject, visit: python_c.visitproc, arg: ?*anyop
     const instance = self.?;
     return python_c.py_visit(
         &[_]?*python_c.PyObject{
-            instance.get_asyncgen_hooks,
-            instance.set_asyncgen_hooks,
-            instance.asyncio_module,
-            instance.invalid_state_exc,
-            instance.cancelled_error_exc,
-            instance.set_running_loop,
-            instance.enter_task_func,
-            instance.leave_task_func,
-            instance.exception_handler,
             instance.asyncgens_set,
             instance.asyncgens_set_add,
             instance.asyncgens_set_discard,
-            instance.old_asyncgen_hooks
+            instance.old_asyncgen_hooks,
+            instance.exception_handler
         }, visit, arg
     );
 }

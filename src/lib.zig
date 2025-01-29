@@ -26,6 +26,18 @@ const static_leviathan_modules_name = .{
     "TimerHandle\x00"
 };
 
+const dynamic_leviathan_modules_init_fns = .{
+    loop.Python.create_loop_type,
+};
+
+const dynamic_leviathan_types_ptrs = .{
+    &loop.Python.LoopType
+};
+
+const dynamic_leviathan_modules_names = .{
+    "Loop\x00",
+};
+
 fn module_cleanup(module: *python_c.PyObject) callconv(.C) void {
     deinitialize_leviathan_types();
     leviathan.utils.PythonImports.release_python_imports();
@@ -43,17 +55,25 @@ var leviathan_module = python_c.PyModuleDef{
 };
 
 fn initialize_leviathan_types() !void {
-    try loop.Python.create_loop_type();
     inline for (static_leviathan_types) |v| {
         if (python_c.PyType_Ready(v) < 0) {
             return error.PythonError;
         }
+    }
+
+    inline for (dynamic_leviathan_modules_init_fns) |func| {
+        try func();
     }
 }
 
 fn deinitialize_leviathan_types() void {
     inline for (static_leviathan_types) |v| {
         python_c.py_decref(@ptrCast(v));
+    }
+
+    inline for (dynamic_leviathan_types_ptrs) |ptr| {
+        python_c.py_decref(@ptrCast(ptr.*));
+        ptr.* = undefined;
     }
 }
 
@@ -75,11 +95,20 @@ fn initialize_python_module() !*python_c.PyObject {
         return error.PythonError;
     }
 
-
-    inline for (static_leviathan_modules_name, static_leviathan_types) |leviathan_module_name, leviathan_module_obj| {
+    inline for (dynamic_leviathan_modules_names, dynamic_leviathan_types_ptrs) |name, obj| {
         if (
             python_c.PyModule_AddObject(
-                module, leviathan_module_name, @as(*python_c.PyObject, @ptrCast(leviathan_module_obj))
+                module, name, @as(*python_c.PyObject, @ptrCast(obj.*))
+            ) < 0
+        ) {
+            return error.PythonError;
+        }
+    }
+
+    inline for (static_leviathan_modules_name, static_leviathan_types) |name, obj| {
+        if (
+            python_c.PyModule_AddObject(
+                module, name, @as(*python_c.PyObject, @ptrCast(obj))
             ) < 0
         ) {
             return error.PythonError;

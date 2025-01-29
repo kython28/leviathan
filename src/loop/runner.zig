@@ -11,6 +11,7 @@ const python_c = @import("python_c");
 const PyObject = *python_c.PyObject;
 
 const std = @import("std");
+const builtin = @import("builtin");
 
 // ------------------------------------------------------------
 // https://github.com/ziglang/zig/issues/1499
@@ -146,10 +147,14 @@ fn poll_blocking_events(
                 loop.epoll_locked = false;
             }
 
-            const py_thread_state = PyEval_SaveThread();
-            defer PyEval_RestoreThread(py_thread_state);
+            if (builtin.single_threaded) {
+                const py_thread_state = PyEval_SaveThread();
+                defer PyEval_RestoreThread(py_thread_state);
 
-            break :blk std.posix.epoll_wait(epoll_fd, blocking_ready_epoll_events, -1);
+                break :blk std.posix.epoll_wait(epoll_fd, blocking_ready_epoll_events, -1);
+            }else{
+                break :blk std.posix.epoll_wait(epoll_fd, blocking_ready_epoll_events, -1);
+            }
         }else{
             break :blk std.posix.epoll_wait(epoll_fd, blocking_ready_epoll_events, 0);
         }

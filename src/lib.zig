@@ -11,28 +11,40 @@ const loop = leviathan.Loop;
 const handle = leviathan.Handle;
 const timer_handle = leviathan.TimerHandle;
 
-const leviathan_types = .{
+
+const static_leviathan_types = .{
     &future.Python.FutureType,
     &task.PythonTaskType,
-    // &loop.Python.LoopType,
     &handle.PythonHandleType,
     &timer_handle.PythonTimerHandleType
 };
 
-fn on_module_exit() callconv(.C) void {
+const static_leviathan_modules_name = .{
+    "Future\x00",
+    "Task\x00",
+    "Handle\x00",
+    "TimerHandle\x00"
+};
+
+fn module_cleanup(module: *python_c.PyObject) callconv(.C) void {
+    deinitialize_leviathan_types();
     leviathan.utils.PythonImports.release_python_imports();
     _ = utils.gpa.deinit();
+
+    const @"type" = python_c.get_type(module);
+    @"type".tp_free.?(@ptrCast(module));
 }
 
 var leviathan_module = python_c.PyModuleDef{
     .m_name = "leviathan_zig\x00",
     .m_doc = "Leviathan: A lightning-fast Zig-powered event loop for Python's asyncio.\x00",
     .m_size = -1,
+    .m_free = @ptrCast(&module_cleanup)
 };
 
 fn initialize_leviathan_types() !void {
     try loop.Python.create_loop_type();
-    inline for (leviathan_types) |v| {
+    inline for (static_leviathan_types) |v| {
         if (python_c.PyType_Ready(v) < 0) {
             return error.PythonError;
         }
@@ -40,7 +52,7 @@ fn initialize_leviathan_types() !void {
 }
 
 fn deinitialize_leviathan_types() void {
-    inline for (leviathan_types) |v| {
+    inline for (static_leviathan_types) |v| {
         python_c.py_decref(@ptrCast(v));
     }
 }
@@ -63,15 +75,8 @@ fn initialize_python_module() !*python_c.PyObject {
         return error.PythonError;
     }
 
-    const leviathan_modules_name = .{
-        "Future\x00",
-        "Task\x00",
-        // "Loop\x00",
-        "Handle\x00",
-        "TimerHandle\x00"
-    };
 
-    inline for (leviathan_modules_name, leviathan_types) |leviathan_module_name, leviathan_module_obj| {
+    inline for (static_leviathan_modules_name, static_leviathan_types) |leviathan_module_name, leviathan_module_obj| {
         if (
             python_c.PyModule_AddObject(
                 module, leviathan_module_name, @as(*python_c.PyObject, @ptrCast(leviathan_module_obj))
@@ -79,10 +84,6 @@ fn initialize_python_module() !*python_c.PyObject {
         ) {
             return error.PythonError;
         }
-    }
-
-    if (python_c.Py_AtExit(&on_module_exit) < 0) {
-        return error.PythonError;
     }
 
     return module;

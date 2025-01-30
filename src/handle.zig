@@ -134,6 +134,7 @@ pub inline fn fast_new_handle(contextvars: PyObject, loop_data: *Loop) !*PythonH
     const instance: *PythonHandleObject = @ptrCast(
         PythonHandleType.tp_alloc.?(&PythonHandleType, 0) orelse return error.PythonError
     );
+
     instance.contextvars = contextvars;
     instance.loop_data = loop_data;
     instance.blocking_task_id = 0;
@@ -145,6 +146,7 @@ pub inline fn fast_new_handle(contextvars: PyObject, loop_data: *Loop) !*PythonH
 
 fn handle_dealloc(self: ?*PythonHandleObject) void {
     const instance = self.?;
+
     python_c.py_xdecref(instance.contextvars);
 
     const @"type": *python_c.PyTypeObject = @ptrCast(python_c.Py_TYPE(@ptrCast(instance)) orelse unreachable);

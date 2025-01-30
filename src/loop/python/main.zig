@@ -203,19 +203,3 @@ pub fn create_loop_type() !void {
 pub fn destroy_loop_type() void {
     python_c.py_decref_and_set_null(@ptrCast(LoopType));
 }
-
-// pub var LoopType = python_c.PyTypeObject{
-//     .tp_name = "leviathan.Loop\x00",
-//     .tp_doc = "Leviathan's loop class\x00",
-//     .tp_basicsize = @sizeOf(LoopObject),
-//     .tp_itemsize = 0,
-//     .tp_flags = python_c.Py_TPFLAGS_DEFAULT | python_c.Py_TPFLAGS_BASETYPE | python_c.Py_TPFLAGS_HAVE_GC,
-//     .tp_new = &Constructors.loop_new,
-//     .tp_traverse = @ptrCast(&Constructors.loop_traverse),
-//     .tp_clear = @ptrCast(&Constructors.loop_clear),
-//     .tp_init = @ptrCast(&Constructors.loop_init),
-//     .tp_dealloc = @ptrCast(&Constructors.loop_dealloc),
-//     .tp_methods = @constCast(PythonLoopMethods.ptr),
-//     .tp_members = @constCast(LoopMembers.ptr),
-// };
-

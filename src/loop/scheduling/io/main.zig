@@ -163,6 +163,7 @@ pub const BlockingOperation = enum {
     WaitWritable,
     PerformRead,
     PerformWrite,
+    PerformWriteV,
     WaitTimer,
     Cancel
 };
@@ -177,6 +178,7 @@ pub const BlockingOperationData = union(BlockingOperation) {
     WaitWritable: WaitData,
     PerformRead: Read.PerformData,
     PerformWrite: Write.PerformData,
+    PerformWriteV: Write.PerformVData,
     WaitTimer: Timer.WaitData,
     Cancel: usize
 };
@@ -247,6 +249,7 @@ pub fn queue(self: *Loop, event: BlockingOperationData) !usize {
         .WaitWritable => |data| try Write.wait_ready(blocking_tasks_set, data),
         .PerformRead => |data| try Read.perform(blocking_tasks_set, data),
         .PerformWrite => |data| try Write.perform(blocking_tasks_set, data),
+        .PerformWriteV => |data| try Write.perform_with_iovecs(blocking_tasks_set, data),
         .WaitTimer => |data| try Timer.wait(blocking_tasks_set, data),
         else => unreachable
     };

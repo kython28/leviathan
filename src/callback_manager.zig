@@ -17,18 +17,29 @@ pub const ExecuteCallbacksReturn = enum {
 };
 
 pub const CallbackType = enum {
-    ZigGeneric, PythonGeneric, PythonFutureCallbacksSet, PythonFuture, PythonTask
+    ZigGeneric, ZigGenericIO, PythonGeneric, PythonFutureCallbacksSet, PythonFuture, PythonTask
 };
 
-pub const ZigGenericCallback = *const fn (?*anyopaque, status: ExecuteCallbacksReturn) ExecuteCallbacksReturn;
+const ZigGenericCallback = *const fn (?*anyopaque, status: ExecuteCallbacksReturn) ExecuteCallbacksReturn;
 pub const ZigGenericCallbackData = struct {
     callback: ZigGenericCallback,
     data: ?*anyopaque,
     can_execute: bool = true,
 };
 
+const ZigGenericIOCallback = *const fn (
+    ?*anyopaque, std.os.linux.E
+) ExecuteCallbacksReturn;
+pub const ZigGenericIOCallbackData = struct {
+    callback: ZigGenericIOCallback,
+    data: ?*anyopaque,
+
+    io_uring_res: std.os.linux.E = .SUCCESS,
+};
+
 pub const Callback = union(CallbackType) {
     ZigGeneric: ZigGenericCallbackData,
+    ZigGenericIO: ZigGenericIOCallbackData,
     PythonGeneric: Handle.GenericCallbackData,
     PythonFutureCallbacksSet: Future.Callback.CallbacksSetData,
     PythonFuture: Future.Callback.Data,
@@ -83,6 +94,8 @@ pub inline fn cancel_callback(callback: *Callback, can_release: ?bool) void {
                 }else{
                     @atomicStore(bool, data.cancelled, true, .monotonic);
                 }
+            }else if (@hasField(data_type, "io_uring_res")) {
+                data.io_uring_res = std.os.linux.E.CANCELED;
             }
 
             if (@hasField(data_type, "can_release")) {
@@ -168,6 +181,7 @@ pub inline fn run_callback(
                     };
                 }
             },
+            .ZigGenericIO => |data| data.callback(data.data, data.io_uring_res),
             .PythonGeneric => |data| Handle.callback_for_python_generic_callbacks(allocator, data),
             .PythonFutureCallbacksSet => |data| Future.Callback.run_python_future_set_callbacks(
                 allocator, data, status
@@ -178,6 +192,7 @@ pub inline fn run_callback(
         else => blk: {
             const ret: ExecuteCallbacksReturn = switch (callback) {
                 .ZigGeneric => |data| data.callback(data.data, .Stop),
+                .ZigGenericIO => |data| data.callback(data.data, std.os.linux.E.CANCELED),
                 .PythonGeneric => |data| {
                     Handle.release_python_generic_callback(allocator, data);
                     break :blk .Continue;

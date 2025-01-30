@@ -15,44 +15,37 @@ const Scheduling = @import("../scheduling.zig");
 
 
 fn loop_watchers_callback(
-    data: ?*anyopaque, status: CallbackManager.ExecuteCallbacksReturn
+    data: ?*anyopaque, io_uring_res: std.os.linux.E
 ) CallbackManager.ExecuteCallbacksReturn {
     const watcher: *Loop.FDWatcher = @alignCast(@ptrCast(data.?));
 
     const loop_data = watcher.loop_data;
     const allocator = loop_data.allocator;
     const new_status = CallbackManager.run_callback(
-        allocator, watcher.callback, status
+        allocator, watcher.callback, if (io_uring_res == .SUCCESS) .Continue else .Stop
     );
 
-    const returned_without_problem = (
-        @intFromEnum(status)&@intFromEnum(new_status)
-    ) == @intFromEnum(CallbackManager.ExecuteCallbacksReturn.Continue);
-
     const fd = watcher.fd;
-    if (returned_without_problem and fd >= 0) {
+    if (io_uring_res == .SUCCESS and new_status == .Continue and fd >= 0) {
+        const callback: CallbackManager.Callback = .{
+            .ZigGenericIO = .{
+                .callback = &loop_watchers_callback,
+                .data = watcher
+            }
+        };
+
         const blocking_task_id = Loop.Scheduling.IO.queue(
             loop_data, switch (watcher.event_type) {
                 std.c.POLL.IN => Loop.Scheduling.IO.BlockingOperationData{
                     .WaitReadable = .{
-                        .fd = watcher.fd,
-                        .callback = .{
-                            .ZigGeneric = .{
-                                .callback = &loop_watchers_callback,
-                                .data = watcher
-                            }
-                        }
+                        .fd = fd,
+                        .callback = callback
                     },
                 },
                 std.c.POLL.OUT => Loop.Scheduling.IO.BlockingOperationData{
                     .WaitWritable = .{
-                        .fd = watcher.fd,
-                        .callback = .{
-                            .ZigGeneric = .{
-                                .callback = &loop_watchers_callback,
-                                .data = watcher
-                            }
-                        }
+                        .fd = fd,
+                        .callback = callback
                     },
                 },
                 else => unreachable

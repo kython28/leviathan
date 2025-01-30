@@ -83,6 +83,56 @@ pub inline fn call_once(
     return ret;
 }
 
+inline fn check_io_uring_result(
+    operation: Loop.Scheduling.IO.BlockingOperation, callback: *CallbackManager.Callback,
+    result: std.os.linux.E, comptime can_cancel: bool
+) void {
+    switch (operation) {
+        .WaitTimer => {
+            switch (result) {
+                .TIME => {},
+                .CANCELED => {
+                    if (can_cancel) {
+                        CallbackManager.cancel_callback(callback, null);
+                    }
+                },
+                .SUCCESS => unreachable, // Just to debug. This timeout isn't linked to any task
+                else => unreachable
+            }
+        },
+        .Cancel => unreachable, // Cancel operation doesn't have any callback
+        .PerformWriteV, .PerformWrite => {
+            switch (result) {
+                .SUCCESS => {},
+                .CANCELED => {
+                    if (can_cancel) {
+                        CallbackManager.cancel_callback(callback, null);
+                    }
+                },
+                .BADF, .FBIG, .INTR, .IO, .NOSPC, .INVAL, .CONNRESET,  // Expected errors
+                .PIPE, .NOBUFS, .NXIO, .ACCES, .NETDOWN, .NETUNREACH => {
+                    if (can_cancel) {
+                        CallbackManager.cancel_callback(callback, null);
+                    }
+                },
+                .AGAIN => unreachable, // This should not happen. Filtered by debugging porpuse
+                else => unreachable
+            }
+        },
+        else => {
+            switch (result) {
+                .SUCCESS => {},
+                .CANCELED => {
+                    if (can_cancel) {
+                        CallbackManager.cancel_callback(callback, null);
+                    }
+                },
+                else => unreachable
+            }
+        }
+    }
+}
+
 inline fn fetch_completed_tasks(
     allocator: std.mem.Allocator, epoll_fd: std.posix.fd_t, blocking_tasks_queue: *BlockingTasksSetLinkedList,
     blocking_tasks_set: ?*Loop.Scheduling.IO.BlockingTasksSet, blocking_ready_tasks: []std.os.linux.io_uring_cqe,
@@ -97,33 +147,24 @@ inline fn fetch_completed_tasks(
 
             const blocking_task_data_node: Loop.Scheduling.IO.BlockingTaskDataLinkedList.Node = @ptrFromInt(user_data);
 
-            var blocking_task_data = blocking_task_data_node.data;
+            const blocking_task_data = blocking_task_data_node.data;
             try set.pop(blocking_task_data_node);
 
-            if (blocking_task_data.callback_data) |*callback| {
-                switch (blocking_task_data.operation) {
-                    .WaitTimer => {
-                        switch (result) {
-                            .TIME => {},
-                            .CANCELED => CallbackManager.cancel_callback(callback, null),
-                            .SUCCESS => unreachable, // Just to debug. This timeout is linked to any task
-                            else => unreachable
-                        }
-                    },
-                    .Cancel => unreachable, // Cancel operation doesn't have any callback
-                    else => {
-                        switch (result) {
-                            .SUCCESS => {},
-                            .CANCELED => CallbackManager.cancel_callback(callback, null),
-                            else => unreachable
-                        }
-                    }
-                }
+            var callback = blocking_task_data.callback_data orelse continue;
 
-                _ = try CallbackManager.append_new_callback(
-                    allocator, ready_queue, callback.*, Loop.MaxCallbacks
-                );
+            switch (callback) {
+                .ZigGenericIO => |*data| {
+                    check_io_uring_result(blocking_task_data.operation, &callback, result, false);
+                    data.io_uring_res = result;
+                },
+                else => {
+                    check_io_uring_result(blocking_task_data.operation, &callback, result, true);
+                }
             }
+
+            _ = try CallbackManager.append_new_callback(
+                allocator, ready_queue, callback, Loop.MaxCallbacks
+            );
         }
 
         if (set.tasks_data.len == 0) {

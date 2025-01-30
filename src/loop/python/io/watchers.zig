@@ -189,7 +189,7 @@ inline fn z_loop_add_watcher(
     }
 
     const watcher_callback: CallbackManager.Callback = .{
-        .ZigGeneric = .{
+        .ZigGenericIO = .{
             .callback = &loop_watchers_callback,
             .data = watcher_data_ptr
         }

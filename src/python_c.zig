@@ -111,11 +111,6 @@ pub fn py_decref(op: *Python.PyObject) void {
         ref_ptr.* = ref;
         if (ref == 0) {
             const ob_type: *Python.PyTypeObject = op.ob_type orelse unreachable;
-
-            std.log.info("DECREF: {} - {}", .{@intFromPtr(ob_type), @intFromPtr(op)});
-            std.log.info("Dealloc: {}", .{@intFromPtr(ob_type.tp_dealloc)});
-            std.log.info("-" ** 40, .{});
-
             ob_type.tp_dealloc.?(op);
         }
     }else{

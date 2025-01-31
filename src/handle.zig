@@ -143,7 +143,7 @@ pub inline fn fast_new_handle(contextvars: PyObject, loop_data: *Loop) !*PythonH
     return instance;
 }
 
-fn handle_dealloc(self: ?*PythonHandleObject) void {
+fn handle_dealloc(self: ?*PythonHandleObject) callconv(.C) void {
     const instance = self.?;
     python_c.py_xdecref(instance.contextvars);
 

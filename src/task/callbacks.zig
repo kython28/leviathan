@@ -482,7 +482,7 @@ fn wakeup_task(
 
 fn py_wake_up(
     self: ?*Task.PythonTaskObject, fut: ?PyObject
-) ?PyObject {
+) callconv(.C) ?PyObject {
     _ = fut.?;
     const ret: CallbackManager.ExecuteCallbacksReturn = @call(.always_inline, wakeup_task, .{self, .Continue});
     return switch (ret) {

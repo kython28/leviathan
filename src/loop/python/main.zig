@@ -2,6 +2,8 @@ const std = @import("std");
 
 const Loop = @import("../main.zig");
 
+const utils = @import("../../utils/main.zig");
+
 const python_c = @import("python_c");
 const PyObject = *python_c.PyObject;
 
@@ -188,15 +190,8 @@ const loop_spec = python_c.PyType_Spec{
 pub var LoopType: *python_c.PyTypeObject = undefined;
 
 pub fn create_loop_type() !void {
-    const asyncio: PyObject = python_c.PyImport_ImportModule("asyncio\x00")
+    const type_obj = python_c.PyType_FromSpecWithBases(@constCast(&loop_spec), utils.PythonImports.base_event_loop)
         orelse return error.PythonError;
-    defer python_c.py_decref(asyncio);
-    
-    const base: PyObject = python_c.PyObject_GetAttrString(asyncio, "AbstractEventLoop\x00")
-        orelse return error.PythonError;
-    defer python_c.py_decref(base);
-
-    const type_obj = python_c.PyType_FromSpecWithBases(@constCast(&loop_spec), base) orelse return error.PythonError;
     LoopType = @ptrCast(type_obj);
 }
 

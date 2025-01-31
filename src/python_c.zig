@@ -99,7 +99,7 @@ inline fn _Py_IsImmortal(refcnt: Python.Py_ssize_t) bool {
     return @as(i32, @bitCast(@as(c_int, @truncate(refcnt)))) < @as(c_int, 0);
 }
 
-pub inline fn py_decref(op: *Python.PyObject) void {
+pub fn py_decref(op: *Python.PyObject) void {
     if (builtin.single_threaded) {
         const ref_ptr = get_refcnt_ptr(op);
         var ref = ref_ptr.*;
@@ -111,6 +111,11 @@ pub inline fn py_decref(op: *Python.PyObject) void {
         ref_ptr.* = ref;
         if (ref == 0) {
             const ob_type: *Python.PyTypeObject = op.ob_type orelse unreachable;
+
+            std.log.info("DECREF: {} - {}", .{@intFromPtr(ob_type), @intFromPtr(op)});
+            std.log.info("Dealloc: {}", .{@intFromPtr(ob_type.tp_dealloc)});
+            std.log.info("-" ** 40, .{});
+
             ob_type.tp_dealloc.?(op);
         }
     }else{

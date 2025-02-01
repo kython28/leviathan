@@ -158,11 +158,6 @@ inline fn handle_legacy_future_object(
         ) orelse return .Exception;
         defer python_c.py_decref(add_done_callback_func);
         
-        // const wrapper: PyObject = python_c.PyCFunction_New(
-        //     @constCast(&LeviathanPyTaskWakeupMethod), @ptrCast(task)
-        // ) orelse return .Exception;
-        // defer python_c.py_decref(wrapper);
-
         const ret: PyObject = python_c.PyObject_CallOneArg(add_done_callback_func, task.wake_up_task_callback)
             orelse return .Exception;
         python_c.py_decref(ret);

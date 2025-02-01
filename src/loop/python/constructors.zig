@@ -10,10 +10,7 @@ const LoopObject = Loop.Python.LoopObject;
 
 const std = @import("std");
 
-inline fn z_loop_new(
-    @"type": *python_c.PyTypeObject, _: ?PyObject,
-    _: ?PyObject
-) !*LoopObject {
+inline fn z_loop_new(@"type": *python_c.PyTypeObject) !*LoopObject {
     const instance: *LoopObject = @ptrCast(@"type".tp_alloc.?(@"type", 0) orelse return error.PythonError);
     errdefer @"type".tp_free.?(instance);
 
@@ -45,11 +42,11 @@ inline fn z_loop_new(
 }
 
 pub fn loop_new(
-    @"type": ?*python_c.PyTypeObject, args: ?PyObject,
-    kwargs: ?PyObject
+    @"type": ?*python_c.PyTypeObject, _: ?PyObject,
+    _: ?PyObject
 ) callconv(.C) ?PyObject {
     const self = utils.execute_zig_function(
-        z_loop_new, .{@"type".?, args, kwargs}
+        z_loop_new, .{@"type".?}
     );
     return @ptrCast(self);
 }
@@ -100,7 +97,7 @@ pub fn loop_dealloc(self: ?*LoopObject) callconv(.C) void {
 inline fn z_loop_init(
     self: *LoopObject, args: ?PyObject, kwargs: ?PyObject
 ) !c_int {
-    var kwlist: [4][*c]u8 = undefined;
+    var kwlist: [3][*c]u8 = undefined;
     kwlist[0] = @constCast("ready_tasks_queue_min_bytes_capacity\x00");
     kwlist[1] = @constCast("exception_handler\x00");
     kwlist[2] = null;

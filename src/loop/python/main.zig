@@ -189,12 +189,9 @@ const loop_spec = python_c.PyType_Spec{
 
 pub var LoopType: *python_c.PyTypeObject = undefined;
 
-pub fn create_loop_type() !void {
+pub fn create_type() !void {
     const type_obj = python_c.PyType_FromSpecWithBases(@constCast(&loop_spec), utils.PythonImports.base_event_loop)
         orelse return error.PythonError;
     LoopType = @ptrCast(type_obj);
 }
 
-pub fn destroy_loop_type() void {
-    python_c.py_decref_and_set_null(@ptrCast(LoopType));
-}

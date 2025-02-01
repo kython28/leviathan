@@ -116,6 +116,7 @@ pub const PythonTaskObject = extern struct {
     coro: ?PyObject,
     coro_throw: ?PyObject,
 
+    wake_up_task_callback: ?PyObject,
     fut_waiter: ?PyObject,
 
     weakref_list: ?PyObject,

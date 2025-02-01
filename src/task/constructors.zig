@@ -8,6 +8,8 @@ const Future = @import("../future/main.zig");
 const Loop = @import("../loop/main.zig");
 const Task = @import("main.zig");
 
+const callbacks = @import("callbacks.zig");
+
 const LoopObject = Loop.Python.LoopObject;
 const PythonTaskObject = Task.PythonTaskObject;
 
@@ -20,6 +22,7 @@ inline fn task_set_initial_values(self: *PythonTaskObject) void {
     self.coro = null;
     self.name = null;
 
+    self.wake_up_task_callback = null;
     self.fut_waiter = null;
 
     self.weakref_list = null;
@@ -34,17 +37,23 @@ inline fn task_init_configuration(
 ) !void {
     Future.Python.Constructors.future_init_configuration(&self.fut, loop);
     if (python_c.PyCoro_CheckExact(coro) == 0) {
-        const await_attr: ?PyObject = python_c.PyObject_GetAttrString(coro, "__await__\x00");
-        if (await_attr) |v| {
-            python_c.py_decref(v);
-        }else{
-            python_c.raise_python_type_error("Coro argument must be a coroutine\x00");
-            return error.PythonError;
+        switch (python_c.PyObject_HasAttrStringWithError(coro, "__await__\x00")) {
+            1 => {},
+            0 => {
+                python_c.raise_python_type_error("Coro argument must be a coroutine\x00");
+                return error.PythonError;
+            },
+            else => return error.PythonError
         }
     }
 
     const coro_throw: PyObject = python_c.PyObject_GetAttrString(coro, "throw\x00") orelse return error.PythonError;
     errdefer python_c.py_decref(coro_throw);
+
+    const wrapper = python_c.PyCFunction_New(
+        @constCast(&callbacks.LeviathanPyTaskWakeupMethod), @ptrCast(self)
+    ) orelse return error.PythonError;
+    errdefer python_c.py_decref(wrapper);
 
     self.name = name;
 
@@ -52,6 +61,8 @@ inline fn task_init_configuration(
     self.coro_throw = coro_throw;
 
     self.py_context = context;
+
+    self.wake_up_task_callback = wrapper;
 }
 
 inline fn task_schedule_coro(self: *PythonTaskObject, loop: *LoopObject) !void {
@@ -132,6 +143,7 @@ pub fn task_clear(self: ?*PythonTaskObject) callconv(.C) c_int {
     python_c.py_decref_and_set_null(&py_task.coro);
     python_c.py_decref_and_set_null(&py_task.coro_throw);
 
+    python_c.py_decref_and_set_null(&py_task.wake_up_task_callback);
     python_c.py_decref_and_set_null(&py_task.fut_waiter);
 
     if (py_task.weakref_list != null) {
@@ -154,7 +166,10 @@ pub fn task_traverse(self: ?*PythonTaskObject, visit: python_c.visitproc, arg: ?
             instance.py_context,
             instance.name,
             instance.coro,
-            instance.coro_throw
+            instance.coro_throw,
+
+            instance.fut_waiter,
+            instance.wake_up_task_callback
         }, visit, arg
     );
 }

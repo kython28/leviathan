@@ -17,7 +17,7 @@ pub const Data = struct {
 };
 
 
-const LeviathanPyTaskWakeupMethod = python_c.PyMethodDef{
+pub const LeviathanPyTaskWakeupMethod = python_c.PyMethodDef{
     .ml_name = "wake_up_task\x00",
     .ml_meth = @ptrCast(&py_wake_up),
     .ml_doc = "Wakeup the task.\x00",
@@ -158,14 +158,13 @@ inline fn handle_legacy_future_object(
         ) orelse return .Exception;
         defer python_c.py_decref(add_done_callback_func);
         
-        const wrapper: PyObject = python_c.PyCFunction_New(
-            @constCast(&LeviathanPyTaskWakeupMethod), @ptrCast(task)
-        ) orelse return .Exception;
-        defer python_c.py_decref(wrapper);
+        // const wrapper: PyObject = python_c.PyCFunction_New(
+        //     @constCast(&LeviathanPyTaskWakeupMethod), @ptrCast(task)
+        // ) orelse return .Exception;
+        // defer python_c.py_decref(wrapper);
 
-        const ret: PyObject = python_c.PyObject_CallOneArg(add_done_callback_func, wrapper) orelse {
-            return .Exception;
-        };
+        const ret: PyObject = python_c.PyObject_CallOneArg(add_done_callback_func, task.wake_up_task_callback)
+            orelse return .Exception;
         python_c.py_decref(ret);
         python_c.py_incref(@ptrCast(task));
 

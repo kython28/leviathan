@@ -3,6 +3,9 @@ const std = @import("std");
 const python_c = @import("python_c");
 const PyObject = *python_c.PyObject;
 
+const Stream = @import("../main.zig");
+const utils = @import("../../../utils/main.zig");
+
 const Constructors = @import("constructors.zig");
 
 const PythonStreamMethods: []const python_c.PyMethodDef = &[_]python_c.PyMethodDef{
@@ -11,26 +14,42 @@ const PythonStreamMethods: []const python_c.PyMethodDef = &[_]python_c.PyMethodD
     }
 };
 
-pub const StreamTransport = extern struct {
+pub const StreamTransportObject = extern struct {
     ob_base: python_c.PyObject,
+
+    data: [@sizeOf(Stream)]u8
 };
 
-const PythonStreamMembers: []const python_c.PyMemberDef = &[_]python_c.PyMemberDef{
-    python_c.PyMemberDef{
-        .name = null, .flags = 0, .offset = 0, .doc = null
-    }
+// const PythonStreamMembers: []const python_c.PyMemberDef = &[_]python_c.PyMemberDef{
+//     python_c.PyMemberDef{
+//         .name = null, .flags = 0, .offset = 0, .doc = null
+//     }
+// };
+
+const stream_slots = [_]python_c.PyType_Slot{
+    .{ .slot = python_c.Py_tp_doc, .pfunc = @constCast("Leviathan's Stream Transport\x00") },
+    .{ .slot = python_c.Py_tp_new, .pfunc = @constCast(&Constructors.stream_new) },
+    .{ .slot = python_c.Py_tp_traverse, .pfunc = @constCast(&Constructors.stream_traverse) },
+    .{ .slot = python_c.Py_tp_clear, .pfunc = @constCast(&Constructors.stream_clear) },
+    .{ .slot = python_c.Py_tp_init, .pfunc = @constCast(&Constructors.stream_init) },
+    .{ .slot = python_c.Py_tp_dealloc, .pfunc = @constCast(&Constructors.stream_dealloc) },
+    .{ .slot = python_c.Py_tp_methods, .pfunc = @constCast(PythonStreamMethods.ptr) },
+    // .{ .slot = python_c.Py_tp_members, .pfunc = @constCast(LoopMembers.ptr) },
+    .{ .slot = 0, .pfunc = null },
 };
 
-pub var StreamType = python_c.PyTypeObject{
-    .tp_name = "leviathan.Stream\x00",
-    .tp_doc = "Leviathan's Stream Transport\x00",
-    .tp_basicsize = @sizeOf(StreamTransport),
-    .tp_itemsize = 0,
-    .tp_flags = python_c.Py_TPFLAGS_DEFAULT | python_c.Py_TPFLAGS_BASETYPE,
-    .tp_new = &Constructors.stream_new,
-    .tp_init = @ptrCast(&Constructors.stream_init),
-    .tp_clear = @ptrCast(&Constructors.stream_clear),
-    .tp_dealloc = @ptrCast(&Constructors.stream_dealloc),
-    .tp_methods = @constCast(PythonStreamMethods.ptr),
-    .tp_members = @constCast(PythonStreamMembers.ptr),
+const stream_spec = python_c.PyType_Spec{
+    .name = "leviathan.StreamTransport\x00",
+    .basicsize = @sizeOf(StreamTransportObject),
+    .itemsize = 0,
+    .flags = python_c.Py_TPFLAGS_DEFAULT | python_c.Py_TPFLAGS_BASETYPE | python_c.Py_TPFLAGS_HAVE_GC,
+    .slots = @constCast(&stream_slots),
 };
+
+pub var StreamType: *python_c.PyTypeObject = undefined;
+
+pub fn create_type() !void {
+    const type_stream_transport = python_c.PyType_FromSpecWithBases(@constCast(&stream_spec), utils.PythonImports.base_event_loop)
+        orelse return error.PythonError;
+    StreamType = @ptrCast(type_stream_transport);
+}

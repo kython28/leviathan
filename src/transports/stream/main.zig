@@ -64,10 +64,12 @@ pub fn deinit(self: *Stream) void {
 
     allocator.destroy(self.busy_buffers);
     allocator.destroy(self.busy_py_objects);
+
+    self.initialized = false;
 }
 
 
-const BufferManagement = @import("buffer.zig");
-const Python = @import("python/main.zig");
+pub const Python = @import("python/main.zig");
+const CallbacksManagement = @import("callbacks.zig");
 
 const Stream = @This();

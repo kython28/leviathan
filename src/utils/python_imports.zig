@@ -10,6 +10,11 @@ pub var weakref_module: PyObject = undefined;
 
 pub var base_event_loop: PyObject = undefined;
 
+pub var asyncio_protocol: PyObject = undefined;
+pub var asyncio_buffered_protocol: PyObject = undefined;
+pub var asyncio_datagram_protocol: PyObject = undefined;
+pub var asyncio_subprocess_protocol: PyObject = undefined;
+
 pub var invalid_state_exc: PyObject = undefined;
 pub var cancelled_error_exc: PyObject = undefined;
 
@@ -32,6 +37,15 @@ pub fn initialize_python_imports() !void {
     invalid_state_exc = python_c.PyObject_GetAttrString(asyncio_module, "InvalidStateError\x00")
         orelse return error.PythonError;
     cancelled_error_exc = python_c.PyObject_GetAttrString(asyncio_module, "CancelledError\x00")
+        orelse return error.PythonError;
+
+    asyncio_protocol = python_c.PyObject_GetAttrString(asyncio_module, "Protocol\x00")
+        orelse return error.PythonError;
+    asyncio_buffered_protocol = python_c.PyObject_GetAttrString(asyncio_module, "BufferedProtocol\x00")
+        orelse return error.PythonError;
+    asyncio_datagram_protocol = python_c.PyObject_GetAttrString(asyncio_module, "DatagramProtocol\x00")
+        orelse return error.PythonError;
+    asyncio_subprocess_protocol = python_c.PyObject_GetAttrString(asyncio_module, "SubprocessProtocol\x00")
         orelse return error.PythonError;
 
     set_running_loop = python_c.PyObject_GetAttrString(asyncio_module, "_set_running_loop\x00")

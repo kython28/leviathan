@@ -10,6 +10,7 @@ const task = leviathan.Task;
 const loop = leviathan.Loop;
 const handle = leviathan.Handle;
 const timer_handle = leviathan.TimerHandle;
+const transports = leviathan.Transports;
 
 
 const static_leviathan_types = .{
@@ -27,15 +28,18 @@ const static_leviathan_modules_name = .{
 };
 
 const dynamic_leviathan_modules_init_fns = .{
-    loop.Python.create_loop_type,
+    loop.Python.create_type,
+    transports.Stream.Python.create_type
 };
 
 const dynamic_leviathan_types_ptrs = .{
-    &loop.Python.LoopType
+    &loop.Python.LoopType,
+    &transports.Stream.Python.StreamType
 };
 
 const dynamic_leviathan_modules_names = .{
     "Loop\x00",
+    "StreamTransport\x00"
 };
 
 fn module_cleanup(module: *python_c.PyObject) callconv(.C) void {

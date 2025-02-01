@@ -5,6 +5,8 @@ const PyObject = *python_c.PyObject;
 
 const utils = @import("../../../utils/main.zig");
 
+const Loop = @import("../../../loop/main.zig");
+
 const Stream = @import("../main.zig");
 const StreamTransportObject = Stream.Python.StreamTransportObject;
 
@@ -38,11 +40,11 @@ pub fn stream_clear(self: ?*StreamTransportObject) callconv(.C) c_int {
     return 0;
 }
 
-pub fn stream_dealloc(self: ?PyObject) callconv(.C) void {
+pub fn stream_dealloc(self: ?*StreamTransportObject) callconv(.C) void {
     const instance = self.?;
 
     python_c.PyObject_GC_UnTrack(instance);
-    _ = stream_clear();
+    _ = stream_clear(instance);
 
     const @"type" = python_c.get_type(@ptrCast(instance));
     @"type".tp_free.?(@ptrCast(instance));
@@ -50,16 +52,37 @@ pub fn stream_dealloc(self: ?PyObject) callconv(.C) void {
     python_c.py_decref(@ptrCast(instance));
 }
 
+inline fn check_protocol_compatibility(protocol: PyObject) bool {
+    const compatible_protocols = .{"asyncio_protocol", "asyncio_buffered_protocol"};
+    inline for (compatible_protocols) |protocol_name| {
+        switch (python_c.PyObject_IsInstance(protocol, @field(utils.PythonImports, protocol_name))) {
+            1 => return false,
+            0 => {},
+            else => return true
+        }
+    }
+
+    python_c.raise_python_type_error("Invalid protocol\x00");
+    return true;
+}
+
 inline fn z_stream_init(self: *StreamTransportObject, args: ?PyObject, kwargs: ?PyObject) !c_int {
-    var kwlist: [3][*c]u8 = undefined;
+    var kwlist: [4][*c]u8 = undefined;
     kwlist[0] = @constCast("fd\x00");
     kwlist[1] = @constCast("protocol\x00");
-    kwlist[2] = null;
+    kwlist[2] = @constCast("loop\x00");
+    kwlist[3] = null;
 
-    var fd: isize = -1;
+    var fd: i64 = -1;
     var py_protocol: ?PyObject = null;
+    var loop: ?PyObject = null;
 
-    if (python_c.PyArg_ParseTupleAndKeywords(args, kwargs, "LO\x00", @ptrCast(&kwlist), &fd, &py_protocol) < 0) {
+    if (python_c.PyArg_ParseTupleAndKeywords(args, kwargs, "LOO\x00", @ptrCast(&kwlist), &fd, &py_protocol, &loop) < 0) {
+        return error.PythonError;
+    }
+
+    if (!python_c.is_type(loop.?, Loop.Python.LoopType)) {
+        python_c.raise_python_type_error("Invalid event loop. Only Leviathan's loops are allow\x00");
         return error.PythonError;
     }
 
@@ -68,18 +91,12 @@ inline fn z_stream_init(self: *StreamTransportObject, args: ?PyObject, kwargs: ?
         return error.PythonError;
     }
 
-    const compatible_protocols = .{"asyncio_protocol", "asyncio_buffered_protocol"};
-    const _py_protocol = py_protocol.?;
-    inline for (compatible_protocols) |protocol_name| {
-        switch (python_c.PyObject_IsInstance(_py_protocol, @field(utils.PythonImports, protocol_name))) {
-            1 => {},
-            0 => {
-                python_c.raise_python_value_error("Invalid protocol\x00");
-                return error.PythonError;
-            },
-            else => return error.PythonError
-        }
+    if (check_protocol_compatibility(py_protocol.?)) {
+        return error.PythonError;
     }
+
+    const transport_data = utils.get_data_ptr(Stream, self);
+    transport_data.init(@ptrCast(loop.?), @intCast(fd), py_protocol.?);
 
     return 0;
 }

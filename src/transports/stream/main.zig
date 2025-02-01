@@ -16,6 +16,8 @@ free_py_objects: *StreamPyObjectsArrayList,
 busy_buffers: *StreamBuffersArrayList,
 busy_py_objects: *StreamPyObjectsArrayList,
 
+protocol: PyObject,
+
 fd: std.posix.fd_t,
 
 is_reading: bool = true,
@@ -24,7 +26,7 @@ ready_to_queue_write_op: bool = true,
 initialized: bool = false,
 
 
-pub fn init(self: *Stream, loop: *Loop, fd: std.posix.fd_t) void {
+pub fn init(self: *Stream, loop: *Loop, fd: std.posix.fd_t, protocol: PyObject) void {
     const allocator = loop.allocator;
 
     const free_buffers = try allocator.create(StreamBuffersArrayList);
@@ -47,6 +49,8 @@ pub fn init(self: *Stream, loop: *Loop, fd: std.posix.fd_t) void {
 
         .busy_buffers = busy_buffers,
         .busy_py_objects = busy_py_objects,
+
+        .protocol = protocol,
 
         .fd = fd,
         .initialized = true

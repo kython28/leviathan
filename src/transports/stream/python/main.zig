@@ -29,7 +29,7 @@ pub const StreamTransportObject = extern struct {
 const stream_slots = [_]python_c.PyType_Slot{
     .{ .slot = python_c.Py_tp_doc, .pfunc = @constCast("Leviathan's Stream Transport\x00") },
     .{ .slot = python_c.Py_tp_new, .pfunc = @constCast(&Constructors.stream_new) },
-    .{ .slot = python_c.Py_tp_traverse, .pfunc = @constCast(&Constructors.stream_traverse) },
+    // .{ .slot = python_c.Py_tp_traverse, .pfunc = @constCast(&Constructors.stream_traverse) },
     .{ .slot = python_c.Py_tp_clear, .pfunc = @constCast(&Constructors.stream_clear) },
     .{ .slot = python_c.Py_tp_init, .pfunc = @constCast(&Constructors.stream_init) },
     .{ .slot = python_c.Py_tp_dealloc, .pfunc = @constCast(&Constructors.stream_dealloc) },
@@ -49,7 +49,8 @@ const stream_spec = python_c.PyType_Spec{
 pub var StreamType: *python_c.PyTypeObject = undefined;
 
 pub fn create_type() !void {
-    const type_stream_transport = python_c.PyType_FromSpecWithBases(@constCast(&stream_spec), utils.PythonImports.base_event_loop)
-        orelse return error.PythonError;
+    const type_stream_transport = python_c.PyType_FromSpecWithBases(
+        @constCast(&stream_spec), utils.PythonImports.asyncio_transport
+    ) orelse return error.PythonError;
     StreamType = @ptrCast(type_stream_transport);
 }

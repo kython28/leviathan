@@ -11,8 +11,7 @@ const std = @import("std");
 pub fn loop_time(self: ?*Loop.Python.LoopObject, _: ?PyObject) callconv(.C) ?PyObject {
     _ = self.?;
 
-    var time: std.posix.timespec = undefined;
-    std.posix.clock_gettime(.MONOTONIC, &time) catch |err| {
+    const time = std.posix.clock_gettime(.MONOTONIC) catch |err| {
         return utils.handle_zig_function_error(err, null);
     };
 

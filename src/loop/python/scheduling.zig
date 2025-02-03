@@ -176,9 +176,7 @@ inline fn z_loop_delayed_call(
                 .nsec = @as(@FieldType(std.posix.timespec, "nsec"), @intFromFloat((ts - when_sec) * std.time.ns_per_s))
             };
         }else{
-            var _time: std.posix.timespec = undefined;
-            try std.posix.clock_gettime(.MONOTONIC, &_time);
-
+            var _time = try std.posix.clock_gettime(.MONOTONIC);
             const delay_sec = @trunc(ts);
 
             _time.sec += @intFromFloat(delay_sec);

@@ -29,12 +29,12 @@ const static_leviathan_modules_name = .{
 
 const dynamic_leviathan_modules_init_fns = .{
     loop.Python.create_type,
-    transports.Stream.Python.create_type
+    transports.Stream.create_type
 };
 
 const dynamic_leviathan_types_ptrs = .{
     &loop.Python.LoopType,
-    &transports.Stream.Python.StreamType
+    &transports.Stream.StreamType
 };
 
 const dynamic_leviathan_modules_names = .{

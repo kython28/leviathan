@@ -3,77 +3,57 @@ const std = @import("std");
 const python_c = @import("python_c");
 const PyObject = *python_c.PyObject;
 
-const Loop = @import("../../loop/main.zig");
+const WriteStream = @import("../write_transport.zig");
+const utils = @import("../../utils/main.zig");
 
-const StreamBuffersArrayList = std.ArrayList(std.posix.iovec_const);
-const StreamPyObjectsArrayList = std.ArrayList(PyObject);
+const Constructors = @import("constructors.zig");
 
-loop: *Loop,
-
-free_buffers: *StreamBuffersArrayList,
-free_py_objects: *StreamPyObjectsArrayList,
-
-busy_buffers: *StreamBuffersArrayList,
-busy_py_objects: *StreamPyObjectsArrayList,
-
-protocol: PyObject,
-
-fd: std.posix.fd_t,
-
-is_reading: bool = true,
-ready_to_queue_write_op: bool = true,
-
-initialized: bool = false,
-
-
-pub fn init(self: *Stream, loop: *Loop, fd: std.posix.fd_t, protocol: PyObject) void {
-    const allocator = loop.allocator;
-
-    const free_buffers = try allocator.create(StreamBuffersArrayList);
-    errdefer allocator.destroy(free_buffers);
-
-    const busy_buffers = try allocator.create(StreamBuffersArrayList);
-    errdefer allocator.destroy(busy_buffers);
-
-    const free_py_objects = try allocator.create(StreamPyObjectsArrayList);
-    errdefer allocator.destroy(free_py_objects);
-
-    const busy_py_objects = try allocator.create(StreamPyObjectsArrayList);
-    errdefer allocator.destroy(busy_py_objects);
-
-    self.* = Stream{
-        .loop = loop,
-
-        .free_buffers = free_buffers,
-        .free_py_objects = free_py_objects,
-
-        .busy_buffers = busy_buffers,
-        .busy_py_objects = busy_py_objects,
-
-        .protocol = protocol,
-
-        .fd = fd,
-        .initialized = true
-    };
-}
-
-pub fn deinit(self: *Stream) void {
-    if (!self.initialized) {
-        @panic("Stream transport is not initialized");
+const PythonStreamMethods: []const python_c.PyMethodDef = &[_]python_c.PyMethodDef{
+    python_c.PyMethodDef{
+        .ml_name = null, .ml_meth = null, .ml_doc = null, .ml_flags = 0
     }
+};
 
-    const allocator = self.loop.allocator;
-    allocator.destroy(self.free_buffers);
-    allocator.destroy(self.free_py_objects);
+pub const StreamTransportObject = extern struct {
+    ob_base: python_c.PyObject,
 
-    allocator.destroy(self.busy_buffers);
-    allocator.destroy(self.busy_py_objects);
+    write_data: [@sizeOf(WriteStream)]u8,
 
-    self.initialized = false;
+    protocol: ?PyObject,
+    fd: std.posix.fd_t
+};
+
+// const PythonStreamMembers: []const python_c.PyMemberDef = &[_]python_c.PyMemberDef{
+//     python_c.PyMemberDef{
+//         .name = null, .flags = 0, .offset = 0, .doc = null
+//     }
+// };
+
+const stream_slots = [_]python_c.PyType_Slot{
+    .{ .slot = python_c.Py_tp_doc, .pfunc = @constCast("Leviathan's Stream Transport\x00") },
+    .{ .slot = python_c.Py_tp_new, .pfunc = @constCast(&Constructors.stream_new) },
+    // .{ .slot = python_c.Py_tp_traverse, .pfunc = @constCast(&Constructors.stream_traverse) },
+    .{ .slot = python_c.Py_tp_clear, .pfunc = @constCast(&Constructors.stream_clear) },
+    .{ .slot = python_c.Py_tp_init, .pfunc = @constCast(&Constructors.stream_init) },
+    .{ .slot = python_c.Py_tp_dealloc, .pfunc = @constCast(&Constructors.stream_dealloc) },
+    .{ .slot = python_c.Py_tp_methods, .pfunc = @constCast(PythonStreamMethods.ptr) },
+    // .{ .slot = python_c.Py_tp_members, .pfunc = @constCast(LoopMembers.ptr) },
+    .{ .slot = 0, .pfunc = null },
+};
+
+const stream_spec = python_c.PyType_Spec{
+    .name = "leviathan.StreamTransport\x00",
+    .basicsize = @sizeOf(StreamTransportObject),
+    .itemsize = 0,
+    .flags = python_c.Py_TPFLAGS_DEFAULT | python_c.Py_TPFLAGS_BASETYPE | python_c.Py_TPFLAGS_HAVE_GC,
+    .slots = @constCast(&stream_slots),
+};
+
+pub var StreamType: *python_c.PyTypeObject = undefined;
+
+pub fn create_type() !void {
+    const type_stream_transport = python_c.PyType_FromSpecWithBases(
+        @constCast(&stream_spec), utils.PythonImports.asyncio_transport
+    ) orelse return error.PythonError;
+    StreamType = @ptrCast(type_stream_transport);
 }
-
-
-pub const Python = @import("python/main.zig");
-const CallbacksManagement = @import("callbacks.zig");
-
-const Stream = @This();

@@ -3,38 +3,53 @@ const std = @import("std");
 const python_c = @import("python_c");
 const PyObject = *python_c.PyObject;
 
-const utils = @import("../../../utils/main.zig");
+const utils = @import("../../utils/main.zig");
 
-const Loop = @import("../../../loop/main.zig");
+const Loop = @import("../../loop/main.zig");
 
-const Stream = @import("../main.zig");
-const StreamTransportObject = Stream.Python.StreamTransportObject;
+const Stream = @import("main.zig");
+const StreamTransportObject = Stream.StreamTransportObject;
 
-inline fn z_stream_new(@"type": *python_c.PyTypeObject) !PyObject {
+const WriteTransport = @import("../write_transport.zig");
+
+inline fn z_stream_new(@"type": *python_c.PyTypeObject) !*StreamTransportObject {
     const instance: *StreamTransportObject = @ptrCast(@"type".tp_alloc.?(@"type", 0) orelse return error.PythonError);
     errdefer @"type".tp_free.?(instance);
 
-    @memset(&instance.data, 0);
+    @memset(&instance.write_data, 0);
+
+    instance.fd = -1;
+    instance.protocol = null;
+
     return instance;
 }
 
 pub fn stream_new(
     @"type": ?*python_c.PyTypeObject, _: ?PyObject,
     _: ?PyObject
-) callconv(.C) ?PyObject {
-    return utils.execute_zig_function(z_stream_new, .{@"type"});
+) callconv(.C) ?*StreamTransportObject {
+    return utils.execute_zig_function(z_stream_new, .{@"type".?});
 }
  
-// pub fn stream_traverse(self: ?*StreamTransportObject, visit: python_c.visitproc, arg: ?*anyopaque) callconv(.C) c_int {
-//     _ = self; _ = visit; _ = arg;
-//     return 0;
-// }
+pub fn stream_traverse(self: ?*StreamTransportObject, visit: python_c.visitproc, arg: ?*anyopaque) callconv(.C) c_int {
+    const instance = self.?;
+    return python_c.py_visit(
+        &[_]?*python_c.PyObject{
+            instance.protocol,
+        }, visit, arg
+    );
+}
 
 pub fn stream_clear(self: ?*StreamTransportObject) callconv(.C) c_int {
     const py_transport = self.?;
-    const transport_data = utils.get_data_ptr(Stream, py_transport);
-    if (transport_data.initialized) {
-        transport_data.deinit();
+    const write_transport_data = utils.get_data_ptr2(WriteTransport, "write_data", py_transport);
+    if (write_transport_data.initialized) {
+        write_transport_data.deinit();
+    }
+
+    const fd = py_transport.fd;
+    if (fd >= 0) {
+        std.posix.close(fd);
     }
 
     return 0;
@@ -86,6 +101,8 @@ inline fn z_stream_init(self: *StreamTransportObject, args: ?PyObject, kwargs: ?
         return error.PythonError;
     }
 
+    const leviathan_loop: *Loop.Python.LoopObject = @ptrCast(loop.?);
+
     if (fd < 0) {
         python_c.raise_python_value_error("Invalid fd\x00");
         return error.PythonError;
@@ -95,8 +112,8 @@ inline fn z_stream_init(self: *StreamTransportObject, args: ?PyObject, kwargs: ?
         return error.PythonError;
     }
 
-    const transport_data = utils.get_data_ptr(Stream, self);
-    transport_data.init(@ptrCast(loop.?), @intCast(fd), py_protocol.?);
+    const write_transport_data = utils.get_data_ptr2(WriteTransport, "write_data", self);
+    try write_transport_data.init(@ptrCast(loop.?), @intCast(fd), @ptrCast(self), leviathan_loop.exception_handler.?);
 
     return 0;
 }

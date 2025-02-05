@@ -19,25 +19,6 @@ loop: *Loop,
 
 signalfd_info: std.os.linux.signalfd_siginfo = undefined,
 
-// ------------------------------------------------------------------------
-// Temporal functions waiting for merge: https://github.com/ziglang/zig/pull/22406
-const usize_bits = @sizeOf(usize) * 8;
-pub fn sigaddset(set: *std.posix.sigset_t, sig: u6) void {
-    const s = sig - 1;
-    // shift in musl: s&8*sizeof *set->__bits-1
-    const shift = @as(u5, @intCast(s & (usize_bits - 1)));
-    const val = @as(u32, @intCast(1)) << shift;
-    (set.*)[@as(usize, @intCast(s)) / usize_bits] |= val;
-}
-
-pub fn sigdelset(set: *std.posix.sigset_t, sig: u6) void {
-    const s = sig - 1;
-    // shift in musl: s&8*sizeof *set->__bits-1
-    const shift = @as(u5, @intCast(s & (usize_bits - 1)));
-    const val = @as(u32, @intCast(1)) << shift;
-    (set.*)[@as(usize, @intCast(s)) / usize_bits] ^= val;
-}
-// ------------------------------------------------------------------------
 fn dummy_signal_handler(_: c_int) callconv(.C) void {
     std.log.info("Dummy signal handler", .{});
 }
@@ -95,7 +76,7 @@ pub fn link(self: *UnixSignals, sig: u6, callback: CallbackManager.Callback) !vo
     }
 
     const mask = &self.mask;
-    sigaddset(mask, sig);
+    std.os.linux.sigaddset(mask, sig);
     std.posix.sigprocmask(std.os.linux.SIG.BLOCK, mask, null);
     self.fd = try std.posix.signalfd(self.fd, mask, 0);
     
@@ -129,10 +110,10 @@ pub fn unlink(self: *UnixSignals, sig: u6) !void {
         else => {
             var mask: std.posix.sigset_t = std.posix.empty_sigset;
 
-            sigaddset(&mask, sig);
+            std.os.linux.sigaddset(&mask, sig);
             std.posix.sigprocmask(std.os.linux.SIG.UNBLOCK, &mask, null);
 
-            sigdelset(&self.mask, sig);
+            std.os.linux.sigdelset(&self.mask, sig);
             self.fd = try std.posix.signalfd(self.fd, &self.mask, 0);
             _ = c.signal(@intCast(sig), c.SIG_DFL);
             _ = c.siginterrupt(@intCast(sig), 0);
@@ -195,7 +176,7 @@ pub fn deinit(self: *UnixSignals) !void {
     while (true) {
         var sig: u6 = undefined;
         var value = self.callbacks.pop(&sig) orelse break;
-        sigaddset(&mask, sig);
+        std.os.linux.sigaddset(&mask, sig);
 
         _ = c.signal(@intCast(sig), c.SIG_DFL);
         CallbackManager.cancel_callback(&value, true);

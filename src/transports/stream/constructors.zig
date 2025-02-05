@@ -11,6 +11,12 @@ const Stream = @import("main.zig");
 const StreamTransportObject = Stream.StreamTransportObject;
 
 const WriteTransport = @import("../write_transport.zig");
+const ReadTransport = @import("../read_transport.zig");
+
+fn read_operation_completed(transport: *ReadTransport, data_read: usize) !void {
+    _ = transport;
+    _ = data_read;
+}
 
 inline fn z_stream_new(@"type": *python_c.PyTypeObject) !*StreamTransportObject {
     const instance: *StreamTransportObject = @ptrCast(@"type".tp_alloc.?(@"type", 0) orelse return error.PythonError);
@@ -112,8 +118,18 @@ inline fn z_stream_init(self: *StreamTransportObject, args: ?PyObject, kwargs: ?
         return error.PythonError;
     }
 
+    const loop_data = utils.get_data_ptr(Loop, leviathan_loop);
+
     const write_transport_data = utils.get_data_ptr2(WriteTransport, "write_data", self);
-    try write_transport_data.init(@ptrCast(loop.?), @intCast(fd), @ptrCast(self), leviathan_loop.exception_handler.?);
+    try write_transport_data.init(loop_data, @intCast(fd), @ptrCast(self), leviathan_loop.exception_handler.?);
+    errdefer write_transport_data.deinit();
+
+    const read_transport_data = utils.get_data_ptr2(ReadTransport, "read_data", self);
+    try read_transport_data.init(
+        loop_data, @intCast(fd), &read_operation_completed, @ptrCast(self),
+        leviathan_loop.exception_handler.?
+    );
+    errdefer read_transport_data.deinit();
 
     return 0;
 }

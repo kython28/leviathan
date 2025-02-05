@@ -63,7 +63,7 @@ pub fn init(
 
 pub fn deinit(self: *WriteTransport) void {
     if (!self.initialized) {
-        @panic("WriteTransport transport is not initialized");
+        @panic("WriteTransport is not initialized");
     }
 
     const allocator = self.loop.allocator;
@@ -76,21 +76,24 @@ pub fn deinit(self: *WriteTransport) void {
     self.initialized = false;
 }
 
-fn write_operation_completed(data: ?*anyopaque, res: std.os.linux.E) CallbackManager.ExecuteCallbacksReturn {
+fn write_operation_completed(
+    data: ?*anyopaque, _: i32, io_uring_err: std.os.linux.E
+) CallbackManager.ExecuteCallbacksReturn {
     const self: *WriteTransport = @alignCast(@ptrCast(data.?));
 
-    if (res == .SUCCESS) {
+    if (io_uring_err == .SUCCESS) {
         self.queue_buffers_and_swap() catch |err| {
             return utils.handle_zig_function_error(err, CallbackManager.ExecuteCallbacksReturn.Exception);
         };
         return .Continue;
     }
+
     const exc_message: PyObject = python_c.PyUnicode_FromString("Exception ocurred trying to write\x00")
         orelse return .Exception;
     defer python_c.py_decref(exc_message);
 
     const exception: PyObject = python_c.PyObject_CallFunction(
-        python_c.PyExc_OSError, "LO\x00", @as(c_long, @intFromEnum(res)), exc_message
+        python_c.PyExc_OSError, "LO\x00", @as(c_long, @intFromEnum(io_uring_err)), exc_message
     ) orelse return .Exception;
     defer python_c.py_decref(exception);
 

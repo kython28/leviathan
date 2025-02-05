@@ -4,6 +4,7 @@ const python_c = @import("python_c");
 const PyObject = *python_c.PyObject;
 
 const WriteStream = @import("../write_transport.zig");
+const ReadStream = @import("../read_transport.zig");
 const utils = @import("../../utils/main.zig");
 
 const Constructors = @import("constructors.zig");
@@ -18,6 +19,7 @@ pub const StreamTransportObject = extern struct {
     ob_base: python_c.PyObject,
 
     write_data: [@sizeOf(WriteStream)]u8,
+    read_data: [@sizeOf(ReadStream)]u8,
 
     protocol: ?PyObject,
     fd: std.posix.fd_t

@@ -30,7 +30,8 @@ class ExceptionContext(TypedDict):
     future: NotRequired[asyncio.Future[Any]]
     task: NotRequired[asyncio.Task[Any]]
     handle: NotRequired[asyncio.Handle]
-    protocol: NotRequired[asyncio.Protocol]
+    protocol: NotRequired[asyncio.BaseProtocol]
+    transport: NotRequired[asyncio.BaseTransport]
     socket: NotRequired[socket.socket]
     asyncgen: NotRequired[AsyncGenerator[Any]]
 
@@ -57,7 +58,8 @@ class Loop(_Loop):
         future: asyncio.Future[Any] | None = None,
         task: asyncio.Task[Any] | None = None,
         handle: asyncio.Handle | None = None,
-        protocol: asyncio.Protocol | None = None,
+        protocol: asyncio.BaseProtocol | None = None,
+        transport: asyncio.BaseTransport | None = None,
         socket: socket.socket | None = None,
         asyncgenerator: AsyncGenerator[Any] | None = None,
     ) -> None:
@@ -74,6 +76,8 @@ class Loop(_Loop):
             context["handle"] = handle
         if protocol is not None:
             context["protocol"] = protocol
+        if transport is not None:
+            context["transport"] = transport
         if socket is not None:
             context["socket"] = socket
         if asyncgenerator is not None:

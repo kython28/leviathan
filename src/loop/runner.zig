@@ -143,7 +143,7 @@ inline fn fetch_completed_tasks(
         const nevents = try ring.copy_cqes(blocking_ready_tasks, 0);
         for (blocking_ready_tasks[0..nevents]) |cqe| {
             const user_data = cqe.user_data;
-            const result: std.os.linux.E = @call(.always_inline, std.os.linux.io_uring_cqe.err, .{cqe});
+            const err: std.os.linux.E = @call(.always_inline, std.os.linux.io_uring_cqe.err, .{cqe});
 
             const blocking_task_data_node: Loop.Scheduling.IO.BlockingTaskDataLinkedList.Node = @ptrFromInt(user_data);
 
@@ -154,11 +154,12 @@ inline fn fetch_completed_tasks(
 
             switch (callback) {
                 .ZigGenericIO => |*data| {
-                    check_io_uring_result(blocking_task_data.operation, &callback, result, false);
-                    data.io_uring_res = result;
+                    check_io_uring_result(blocking_task_data.operation, &callback, err, false);
+                    data.io_uring_res = cqe.res;
+                    data.io_uring_err = err;
                 },
                 else => {
-                    check_io_uring_result(blocking_task_data.operation, &callback, result, true);
+                    check_io_uring_result(blocking_task_data.operation, &callback, err, true);
                 }
             }
 

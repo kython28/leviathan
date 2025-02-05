@@ -28,13 +28,14 @@ pub const ZigGenericCallbackData = struct {
 };
 
 const ZigGenericIOCallback = *const fn (
-    ?*anyopaque, std.os.linux.E
+    ?*anyopaque, i32, std.os.linux.E
 ) ExecuteCallbacksReturn;
 pub const ZigGenericIOCallbackData = struct {
     callback: ZigGenericIOCallback,
     data: ?*anyopaque,
 
-    io_uring_res: std.os.linux.E = .SUCCESS,
+    io_uring_res: i32 = 0,
+    io_uring_err: std.os.linux.E = .SUCCESS,
 };
 
 pub const Callback = union(CallbackType) {
@@ -94,8 +95,8 @@ pub inline fn cancel_callback(callback: *Callback, can_release: ?bool) void {
                 }else{
                     @atomicStore(bool, data.cancelled, true, .monotonic);
                 }
-            }else if (@hasField(data_type, "io_uring_res")) {
-                data.io_uring_res = std.os.linux.E.CANCELED;
+            }else if (@hasField(data_type, "io_uring_err")) {
+                data.io_uring_err = std.os.linux.E.CANCELED;
             }
 
             if (@hasField(data_type, "can_release")) {
@@ -181,7 +182,7 @@ pub inline fn run_callback(
                     };
                 }
             },
-            .ZigGenericIO => |data| data.callback(data.data, data.io_uring_res),
+            .ZigGenericIO => |data| data.callback(data.data, data.io_uring_res, data.io_uring_err),
             .PythonGeneric => |data| Handle.callback_for_python_generic_callbacks(allocator, data),
             .PythonFutureCallbacksSet => |data| Future.Callback.run_python_future_set_callbacks(
                 allocator, data, status
@@ -192,7 +193,9 @@ pub inline fn run_callback(
         else => blk: {
             const ret: ExecuteCallbacksReturn = switch (callback) {
                 .ZigGeneric => |data| data.callback(data.data, .Stop),
-                .ZigGenericIO => |data| data.callback(data.data, std.os.linux.E.CANCELED),
+                .ZigGenericIO => |data| data.callback(
+                    data.data, -@as(i32, @intCast(@intFromEnum(std.os.linux.E.CANCELED))), std.os.linux.E.CANCELED
+                ),
                 .PythonGeneric => |data| {
                     Handle.release_python_generic_callback(allocator, data);
                     break :blk .Continue;

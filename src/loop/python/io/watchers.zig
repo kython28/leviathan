@@ -15,18 +15,18 @@ const Scheduling = @import("../scheduling.zig");
 
 
 fn loop_watchers_callback(
-    data: ?*anyopaque, io_uring_res: std.os.linux.E
+    data: ?*anyopaque, _: i32, io_uring_err: std.os.linux.E
 ) CallbackManager.ExecuteCallbacksReturn {
     const watcher: *Loop.FDWatcher = @alignCast(@ptrCast(data.?));
 
     const loop_data = watcher.loop_data;
     const allocator = loop_data.allocator;
     const new_status = CallbackManager.run_callback(
-        allocator, watcher.callback, if (io_uring_res == .SUCCESS) .Continue else .Stop
+        allocator, watcher.callback, if (io_uring_err == .SUCCESS) .Continue else .Stop
     );
 
     const fd = watcher.fd;
-    if (io_uring_res == .SUCCESS and new_status == .Continue and fd >= 0) {
+    if (io_uring_err == .SUCCESS and new_status == .Continue and fd >= 0) {
         const callback: CallbackManager.Callback = .{
             .ZigGenericIO = .{
                 .callback = &loop_watchers_callback,

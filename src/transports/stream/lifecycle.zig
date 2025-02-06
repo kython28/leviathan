@@ -25,6 +25,7 @@ pub fn transport_close(self: ?*StreamTransportObject) callconv(.C) ?PyObject {
     const write_data = utils.get_data_ptr2(WriteTransport, "write_data", instance);
 
     if (read_data.closed and write_data.closed) {
+        std.posix.close(instance.fd);
         instance.closed = true;
 
         python_c.raise_python_runtime_error("Transport already closed\x00");
@@ -53,7 +54,10 @@ pub fn transport_is_closing(self: ?*StreamTransportObject) callconv(.C) ?PyObjec
     const write_data = utils.get_data_ptr2(WriteTransport, "write_data", instance);
 
     const closed = read_data.closed and write_data.closed;
-    instance.closed = closed;
+    if (closed) {
+        std.posix.close(instance.fd);
+        instance.closed = closed;
+    }
 
     return python_c.PyBool_FromLong(@intCast(@intFromBool(closed)));
 }

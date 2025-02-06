@@ -8,8 +8,24 @@ const ReadStream = @import("../read_transport.zig");
 const utils = @import("../../utils/main.zig");
 
 const Constructors = @import("constructors.zig");
+const Lifecyle = @import("lifecycle.zig");
 
 const PythonStreamMethods: []const python_c.PyMethodDef = &[_]python_c.PyMethodDef{
+    // -------------------------- lifecycle --------------------------
+    python_c.PyMethodDef{
+        .ml_name = "close\x00",
+        .ml_meth = @ptrCast(&Lifecyle.transport_close),
+        .ml_doc = "Close the transport\x00",
+        .ml_flags = python_c.METH_NOARGS
+    },
+    python_c.PyMethodDef{
+        .ml_name = "is_closing\x00",
+        .ml_meth = @ptrCast(&Lifecyle.transport_close),
+        .ml_doc = "Return True if the transport is closing or is closed\x00",
+        .ml_flags = python_c.METH_NOARGS
+    },
+
+
     python_c.PyMethodDef{
         .ml_name = null, .ml_meth = null, .ml_doc = null, .ml_flags = 0
     }
@@ -22,7 +38,8 @@ pub const StreamTransportObject = extern struct {
     read_data: [@sizeOf(ReadStream)]u8,
 
     protocol: ?PyObject,
-    fd: std.posix.fd_t
+    fd: std.posix.fd_t,
+    closed: bool,
 };
 
 // const PythonStreamMembers: []const python_c.PyMemberDef = &[_]python_c.PyMemberDef{
@@ -34,7 +51,7 @@ pub const StreamTransportObject = extern struct {
 const stream_slots = [_]python_c.PyType_Slot{
     .{ .slot = python_c.Py_tp_doc, .pfunc = @constCast("Leviathan's Stream Transport\x00") },
     .{ .slot = python_c.Py_tp_new, .pfunc = @constCast(&Constructors.stream_new) },
-    // .{ .slot = python_c.Py_tp_traverse, .pfunc = @constCast(&Constructors.stream_traverse) },
+    .{ .slot = python_c.Py_tp_traverse, .pfunc = @constCast(&Constructors.stream_traverse) },
     .{ .slot = python_c.Py_tp_clear, .pfunc = @constCast(&Constructors.stream_clear) },
     .{ .slot = python_c.Py_tp_init, .pfunc = @constCast(&Constructors.stream_init) },
     .{ .slot = python_c.Py_tp_dealloc, .pfunc = @constCast(&Constructors.stream_dealloc) },

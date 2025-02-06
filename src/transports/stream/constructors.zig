@@ -13,9 +13,10 @@ const StreamTransportObject = Stream.StreamTransportObject;
 const WriteTransport = @import("../write_transport.zig");
 const ReadTransport = @import("../read_transport.zig");
 
-fn read_operation_completed(transport: *ReadTransport, data_read: usize) !void {
+fn read_operation_completed(transport: *ReadTransport, data_read: usize, err: std.os.linux.E) !void {
     _ = transport;
     _ = data_read;
+    _ = err;
 }
 
 inline fn z_stream_new(@"type": *python_c.PyTypeObject) !*StreamTransportObject {
@@ -40,7 +41,7 @@ pub fn stream_new(
 pub fn stream_traverse(self: ?*StreamTransportObject, visit: python_c.visitproc, arg: ?*anyopaque) callconv(.C) c_int {
     const instance = self.?;
     return python_c.py_visit(
-        &[_]?*python_c.PyObject{
+        &[_]?PyObject{
             instance.protocol,
         }, visit, arg
     );

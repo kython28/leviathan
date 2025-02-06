@@ -23,7 +23,11 @@ busy_py_objects: *PyObjectsArrayList,
 fd: std.posix.fd_t,
 
 ready_to_queue_write_op: bool = true,
+blocking_task_id: usize = 0,
 
+is_writing: bool = false,
+is_closing: bool = false,
+closed: bool = false,
 initialized: bool = false,
 
 
@@ -61,6 +65,23 @@ pub fn init(
     };
 }
 
+pub fn close(self: *WriteTransport) !void {
+    if (self.is_closing or self.closed) return;
+
+    const blocking_task_id = self.blocking_task_id;
+    if (blocking_task_id == 0) {
+        self.closed = true;
+        return;
+    }
+
+    _ = try Loop.Scheduling.IO.queue(
+        self.loop, .{
+            .Cancel = blocking_task_id
+        }
+    );
+    self.is_closing = true;
+}
+
 pub fn deinit(self: *WriteTransport) void {
     if (!self.initialized) {
         @panic("WriteTransport is not initialized");
@@ -80,13 +101,28 @@ fn write_operation_completed(
     data: ?*anyopaque, _: i32, io_uring_err: std.os.linux.E
 ) CallbackManager.ExecuteCallbacksReturn {
     const self: *WriteTransport = @alignCast(@ptrCast(data.?));
+    self.blocking_task_id = 0;
 
-    if (io_uring_err == .SUCCESS) {
-        self.queue_buffers_and_swap() catch |err| {
-            return utils.handle_zig_function_error(err, CallbackManager.ExecuteCallbacksReturn.Exception);
-        };
-        return .Continue;
+    switch (io_uring_err) {
+        .SUCCESS => {
+            if (self.is_closing) {
+                self.closed = true;
+            }else{
+                self.queue_buffers_and_swap() catch |err| {
+                    return utils.handle_zig_function_error(err, CallbackManager.ExecuteCallbacksReturn.Exception);
+                };
+            }
+
+            return .Continue;
+        },
+        .CANCELED => {
+            self.closed = true;
+            return .Continue;
+        },
+        else => {}
     }
+
+    self.closed = true;
 
     const exc_message: PyObject = python_c.PyUnicode_FromString("Exception ocurred trying to write\x00")
         orelse return .Exception;
@@ -118,7 +154,6 @@ fn write_operation_completed(
         orelse return .Exception;
     python_c.py_decref(exc_handler_ret);
 
-    std.posix.close(self.fd);
     return .Continue;
 }
 
@@ -134,7 +169,7 @@ pub fn queue_buffers_and_swap(self: *WriteTransport) !void {
     const current_busy_buffers = self.busy_buffers;
     const current_busy_py_objects = self.busy_py_objects;
 
-    try Loop.Scheduling.IO.queue(
+    self.blocking_task_id = try Loop.Scheduling.IO.queue(
         self.loop, .{
             .PerformWriteV = .{
                 .callback = .{
@@ -169,6 +204,10 @@ pub fn queue_buffers_and_swap(self: *WriteTransport) !void {
 }
 
 pub inline fn append_new_buffer_to_write(self: *WriteTransport, py_object: PyObject, buffer: []const u8) !void {
+    if (self.closed) {
+        return error.TransportClosed;
+    }
+
     try self.free_py_objects.append(py_object);
     errdefer _ = self.free_py_objects.pop();
 

@@ -7,7 +7,7 @@ const Loop = @import("../loop/main.zig");
 const CallbackManager = @import("../callback_manager.zig");
 const utils = @import("../utils/main.zig");
 
-pub const ReadCompletedCallback = *const fn (*ReadTransport, usize) anyerror!void;
+pub const ReadCompletedCallback = *const fn (*ReadTransport, usize, std.os.linux.E) anyerror!void;
 
 loop: *Loop,
 parent_transport: PyObject,
@@ -20,6 +20,10 @@ buffer_being_read: []u8,
 
 fd: std.posix.fd_t,
 
+blocking_task_id: usize = 0,
+
+closed: bool = false,
+is_closing: bool = false,
 initialized: bool = false,
 
 pub fn init(
@@ -45,6 +49,23 @@ pub fn init(
     };
 }
 
+pub fn close(self: *ReadTransport) !void {
+    if (self.is_closing or self.closed) return;
+
+    const blocking_task_id = self.blocking_task_id;
+    if (blocking_task_id == 0) {
+        self.closed = true;
+        return;
+    }
+
+    _ = try Loop.Scheduling.IO.queue(
+        self.loop, .{
+            .Cancel = blocking_task_id
+        }
+    );
+    self.is_closing = true;
+}
+
 pub fn deinit(self: *ReadTransport) void {
     if (!self.initialized) {
         @panic("ReadTransport is not initialized");
@@ -60,11 +81,23 @@ fn read_operation_completed(
     data: ?*anyopaque, io_uring_res: i32, io_uring_err: std.os.linux.E
 ) CallbackManager.ExecuteCallbacksReturn {
     const self: *ReadTransport = @alignCast(@ptrCast(data.?));
+    self.blocking_task_id = 0;
 
-    if (io_uring_err == .SUCCESS) {
-        self.read_completed_callback(self, io_uring_res) catch |err| {
-            return utils.handle_zig_function_error(err, CallbackManager.ExecuteCallbacksReturn.Exception);
-        };
+    const is_closing = self.is_closing;
+    if (is_closing) {
+        self.closed = true;
+    }
+
+    var bytes_read: usize = 0;
+    if (io_uring_err == .SUCCESS and !is_closing) {
+        bytes_read = @intCast(io_uring_res);
+    }
+
+    self.read_completed_callback(self, bytes_read, io_uring_err) catch |err| {
+        return utils.handle_zig_function_error(err, CallbackManager.ExecuteCallbacksReturn.Exception);
+    };
+
+    if (io_uring_err != .SUCCESS and io_uring_err != .CANCELED) {
         return .Continue;
     }
 
@@ -98,11 +131,14 @@ fn read_operation_completed(
         orelse return .Exception;
     python_c.py_decref(exc_handler_ret);
 
-    std.posix.close(self.fd);
     return .Continue;
 }
 
 pub inline fn perform(self: *ReadTransport, buffer: ?[]u8) !void {
+    if (self.closed) {
+        return error.TransportClosed;
+    }
+
     const buffer_being_read = buffer orelse self.buffer;
 
     try Loop.Scheduling.IO.queue(

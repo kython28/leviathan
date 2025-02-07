@@ -10,20 +10,18 @@ const Loop = @import("../../loop/main.zig");
 const Stream = @import("main.zig");
 const StreamTransportObject = Stream.StreamTransportObject;
 
+const Read = @import("read.zig");
+
 const WriteTransport = @import("../write_transport.zig");
 const ReadTransport = @import("../read_transport.zig");
 
-fn read_operation_completed(transport: *ReadTransport, data_read: usize, err: std.os.linux.E) !void {
-    _ = transport;
-    _ = data_read;
-    _ = err;
-}
 
 inline fn z_stream_new(@"type": *python_c.PyTypeObject) !*StreamTransportObject {
     const instance: *StreamTransportObject = @ptrCast(@"type".tp_alloc.?(@"type", 0) orelse return error.PythonError);
     errdefer @"type".tp_free.?(instance);
 
-    @memset(&instance.write_data, 0);
+    @memset(&instance.write_transport, 0);
+    @memset(&instance.read_transport, 0);
 
     instance.fd = -1;
     instance.protocol = null;
@@ -49,9 +47,14 @@ pub fn stream_traverse(self: ?*StreamTransportObject, visit: python_c.visitproc,
 
 pub fn stream_clear(self: ?*StreamTransportObject) callconv(.C) c_int {
     const py_transport = self.?;
-    const write_transport_data = utils.get_data_ptr2(WriteTransport, "write_data", py_transport);
+    const write_transport_data = utils.get_data_ptr2(WriteTransport, "write_transport", py_transport);
     if (write_transport_data.initialized) {
         write_transport_data.deinit();
+    }
+
+    const read_transport_data = utils.get_data_ptr2(WriteTransport, "read_transport", py_transport);
+    if (read_transport_data.initialized) {
+        read_transport_data.deinit();
     }
 
     const fd = py_transport.fd;
@@ -121,13 +124,13 @@ inline fn z_stream_init(self: *StreamTransportObject, args: ?PyObject, kwargs: ?
 
     const loop_data = utils.get_data_ptr(Loop, leviathan_loop);
 
-    const write_transport_data = utils.get_data_ptr2(WriteTransport, "write_data", self);
+    const write_transport_data = utils.get_data_ptr2(WriteTransport, "write_transport", self);
     try write_transport_data.init(loop_data, @intCast(fd), @ptrCast(self), leviathan_loop.exception_handler.?);
     errdefer write_transport_data.deinit();
 
-    const read_transport_data = utils.get_data_ptr2(ReadTransport, "read_data", self);
+    const read_transport_data = utils.get_data_ptr2(ReadTransport, "read_transport", self);
     try read_transport_data.init(
-        loop_data, @intCast(fd), &read_operation_completed, @ptrCast(self),
+        loop_data, @intCast(fd), &Read.read_operation_completed, @intFromPtr(self),
         leviathan_loop.exception_handler.?
     );
     errdefer read_transport_data.deinit();

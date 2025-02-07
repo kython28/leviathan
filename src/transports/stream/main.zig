@@ -31,14 +31,27 @@ const PythonStreamMethods: []const python_c.PyMethodDef = &[_]python_c.PyMethodD
     }
 };
 
+pub const ProtocolType = enum(c_int) {
+    Legacy, Buffered
+};
+
 pub const StreamTransportObject = extern struct {
     ob_base: python_c.PyObject,
 
-    write_data: [@sizeOf(WriteStream)]u8,
-    read_data: [@sizeOf(ReadStream)]u8,
+    write_transport: [@sizeOf(WriteStream)]u8,
+    read_transport: [@sizeOf(ReadStream)]u8,
 
     protocol: ?PyObject,
+    protocol_buffer: python_c.Py_buffer,
+    protocol_data_received: ?PyObject,
+
+    protocol_max_read_constant: ?PyObject,
+    protocol_get_buffer: ?PyObject,
+    protocol_buffer_updated: ?PyObject,
+
     fd: std.posix.fd_t,
+    protocol_type: ProtocolType,
+    is_reading: bool,
     closed: bool,
 };
 

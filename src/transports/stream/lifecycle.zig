@@ -21,10 +21,10 @@ pub fn transport_close(self: ?*StreamTransportObject) callconv(.C) ?PyObject {
         return null;
     }
 
-    const read_data = utils.get_data_ptr2(ReadTransport, "read_data", instance);
-    const write_data = utils.get_data_ptr2(WriteTransport, "write_data", instance);
+    const read_transport = utils.get_data_ptr2(ReadTransport, "read_transport", instance);
+    const write_transport = utils.get_data_ptr2(WriteTransport, "write_transport", instance);
 
-    if (read_data.closed and write_data.closed) {
+    if (read_transport.closed and write_transport.closed) {
         std.posix.close(instance.fd);
         instance.closed = true;
 
@@ -32,11 +32,11 @@ pub fn transport_close(self: ?*StreamTransportObject) callconv(.C) ?PyObject {
         return null;
     }
 
-    read_data.close() catch |err| {
+    read_transport.close() catch |err| {
         return utils.handle_zig_function_error(err, null);
     };
 
-    write_data.close() catch |err| {
+    write_transport.close() catch |err| {
         return utils.handle_zig_function_error(err, null);
     };
 
@@ -50,10 +50,10 @@ pub fn transport_is_closing(self: ?*StreamTransportObject) callconv(.C) ?PyObjec
         return python_c.get_py_true();
     }
 
-    const read_data = utils.get_data_ptr2(ReadTransport, "read_data", instance);
-    const write_data = utils.get_data_ptr2(WriteTransport, "write_data", instance);
+    const read_transport = utils.get_data_ptr2(ReadTransport, "read_transport", instance);
+    const write_transport = utils.get_data_ptr2(WriteTransport, "write_transport", instance);
 
-    const closed = read_data.closed and write_data.closed;
+    const closed = read_transport.closed and write_transport.closed;
     if (closed) {
         std.posix.close(instance.fd);
         instance.closed = closed;

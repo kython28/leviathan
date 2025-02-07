@@ -7,10 +7,12 @@ const Loop = @import("../loop/main.zig");
 const CallbackManager = @import("../callback_manager.zig");
 const utils = @import("../utils/main.zig");
 
-pub const ReadCompletedCallback = *const fn (*ReadTransport, usize, std.os.linux.E) anyerror!void;
+pub const ReadCompletedCallback = *const fn (*ReadTransport, []const u8, std.os.linux.E) anyerror!void;
+
+pub const MAX_READ = (1 << 16);
 
 loop: *Loop,
-parent_transport: PyObject,
+parent_transport: usize,
 exception_handler: PyObject,
 
 read_completed_callback: ReadCompletedCallback,
@@ -28,11 +30,11 @@ initialized: bool = false,
 
 pub fn init(
     self: *ReadTransport, loop: *Loop, fd: std.posix.fd_t, callback: ReadCompletedCallback,
-    parent_transport: PyObject, exception_handler: PyObject
+    parent_transport: usize, exception_handler: PyObject
 ) !void {
     const allocator = loop.allocator;
 
-    const buffer = try allocator.alloc(u8, (1 << 16));
+    const buffer = try allocator.alloc(u8, MAX_READ);
     errdefer allocator.free(buffer);
 
     self.* = .{
@@ -93,27 +95,45 @@ fn read_operation_completed(
         bytes_read = @intCast(io_uring_res);
     }
 
-    self.read_completed_callback(self, bytes_read, io_uring_err) catch |err| {
-        return utils.handle_zig_function_error(err, CallbackManager.ExecuteCallbacksReturn.Exception);
-    };
+    var exception: PyObject = undefined;
+    var exc_message: PyObject = undefined;
 
-    if (io_uring_err != .SUCCESS and io_uring_err != .CANCELED) {
-        return .Continue;
+    const ret = self.read_completed_callback(self, self.buffer_being_read[0..bytes_read], io_uring_err);
+    if (ret) |_| {
+        if (io_uring_err == .SUCCESS or io_uring_err == .CANCELED or is_closing) {
+            return .Continue;
+        }
+
+        self.closed = true;
+
+        exc_message = python_c.PyUnicode_FromString("Exception ocurred while reading\x00")
+            orelse return .Exception;
+
+        exception = python_c.PyObject_CallFunction(
+            python_c.PyExc_OSError, "LO\x00", @as(c_long, @intFromEnum(io_uring_err)), exc_message
+        ) orelse {
+            python_c.py_decref(exc_message);
+            return .Exception;
+        };
+    }else |err| {
+        utils.handle_zig_function_error(err, {});
+
+        exc_message = python_c.PyUnicode_FromString("Exception ocurred while handling the read data\x00")
+            orelse return .Exception;
+
+        exception = python_c.PyErr_GetRaisedException()
+            orelse {
+                python_c.py_decref(exc_message);
+                return .Exception;
+            };
     }
-
-    const exc_message: PyObject = python_c.PyUnicode_FromString("Exception ocurred trying to read\x00")
-        orelse return .Exception;
     defer python_c.py_decref(exc_message);
-
-    const exception: PyObject = python_c.PyObject_CallFunction(
-        python_c.PyExc_OSError, "LO\x00", @as(c_long, @intFromEnum(io_uring_err)), exc_message
-    ) orelse return .Exception;
     defer python_c.py_decref(exception);
 
     var args: [3]PyObject = undefined;
     args[0] = exception;
     args[1] = exc_message;
-    args[2] = self.parent_transport;
+    args[2] = @ptrFromInt(self.parent_transport);
 
     const message_kname: PyObject = python_c.PyUnicode_FromString("message\x00")
         orelse return .Exception;
@@ -135,13 +155,9 @@ fn read_operation_completed(
 }
 
 pub inline fn perform(self: *ReadTransport, buffer: ?[]u8) !void {
-    if (self.closed) {
-        return error.TransportClosed;
-    }
-
     const buffer_being_read = buffer orelse self.buffer;
 
-    try Loop.Scheduling.IO.queue(
+    self.blocking_task_id = try Loop.Scheduling.IO.queue(
         self.loop, .{
             .PerformRead = .{
                 .callback = .{

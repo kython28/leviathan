@@ -9,6 +9,7 @@ const utils = @import("../../utils/main.zig");
 
 const Constructors = @import("constructors.zig");
 const Lifecyle = @import("lifecycle.zig");
+const Read = @import("read.zig");
 
 const PythonStreamMethods: []const python_c.PyMethodDef = &[_]python_c.PyMethodDef{
     // -------------------------- lifecycle --------------------------
@@ -25,6 +26,25 @@ const PythonStreamMethods: []const python_c.PyMethodDef = &[_]python_c.PyMethodD
         .ml_flags = python_c.METH_NOARGS
     },
 
+    // -------------------------- read --------------------------
+    python_c.PyMethodDef{
+        .ml_name = "is_reading\x00",
+        .ml_meth = @ptrCast(&Read.transport_is_reading),
+        .ml_doc = "Return True if the transport is receiving new data.\x00",
+        .ml_flags = python_c.METH_NOARGS
+    },
+    python_c.PyMethodDef{
+        .ml_name = "pause_reading\x00",
+        .ml_meth = @ptrCast(&Read.transport_pause_reading),
+        .ml_doc = "Pause the receiving end of the transport.\x00",
+        .ml_flags = python_c.METH_NOARGS
+    },
+    python_c.PyMethodDef{
+        .ml_name = "resume_reading\x00",
+        .ml_meth = @ptrCast(&Read.transport_resume_reading),
+        .ml_doc = "Resume the receiving end of the transport.\x00",
+        .ml_flags = python_c.METH_NOARGS
+    },
 
     python_c.PyMethodDef{
         .ml_name = null, .ml_meth = null, .ml_doc = null, .ml_flags = 0
@@ -41,17 +61,20 @@ pub const StreamTransportObject = extern struct {
     write_transport: [@sizeOf(WriteStream)]u8,
     read_transport: [@sizeOf(ReadStream)]u8,
 
-    protocol: ?PyObject,
     protocol_buffer: python_c.Py_buffer,
+
+    protocol: ?PyObject,
+    protocol_max_read_constant: ?PyObject,
+
     protocol_data_received: ?PyObject,
 
-    protocol_max_read_constant: ?PyObject,
     protocol_get_buffer: ?PyObject,
     protocol_buffer_updated: ?PyObject,
 
+    protocol_connection_lost: ?PyObject,
+
     fd: std.posix.fd_t,
     protocol_type: ProtocolType,
-    is_reading: bool,
     closed: bool,
 };
 

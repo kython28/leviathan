@@ -77,11 +77,15 @@ pub fn stream_dealloc(self: ?*StreamTransportObject) callconv(.C) void {
     python_c.py_decref(@ptrCast(instance));
 }
 
-inline fn check_protocol_compatibility(protocol: PyObject) bool {
+inline fn check_protocol_compatibility(protocol: PyObject, protocol_type: *Stream.ProtocolType) bool {
     const compatible_protocols = .{"asyncio_protocol", "asyncio_buffered_protocol"};
-    inline for (compatible_protocols) |protocol_name| {
-        switch (python_c.PyObject_IsInstance(protocol, @field(utils.PythonImports, protocol_name))) {
-            1 => return false,
+    const protocol_types = .{Stream.ProtocolType.Legacy, Stream.ProtocolType.Buffered};
+    inline for (compatible_protocols, protocol_types) |name, @"type"| {
+        switch (python_c.PyObject_IsInstance(protocol, @field(utils.PythonImports, name))) {
+            1 => {
+                protocol_type.* = @"type";
+                return false;
+            },
             0 => {},
             else => return true
         }
@@ -118,8 +122,45 @@ inline fn z_stream_init(self: *StreamTransportObject, args: ?PyObject, kwargs: ?
         return error.PythonError;
     }
 
-    if (check_protocol_compatibility(py_protocol.?)) {
+    var protocol_type: Stream.ProtocolType = undefined;
+    if (check_protocol_compatibility(py_protocol.?, &protocol_type)) {
         return error.PythonError;
+    }
+
+    self.protocol_type = protocol_type;
+    errdefer self.protocol_type = undefined;
+
+    self.protocol = python_c.py_newref(py_protocol.?);
+    errdefer python_c.py_decref_and_set_null(&self.protocol);
+
+    self.protocol_max_read_constant = python_c.PyLong_FromUnsignedLongLong(ReadTransport.MAX_READ)
+        orelse return error.PythonError;
+    errdefer python_c.py_decref_and_set_null(&self.protocol_max_read_constant);
+
+    switch (protocol_type) {
+        .Buffered => {
+            const get_buffer_func = python_c.PyObject_GetAttrString(py_protocol.?, "get_buffer\x00")
+                orelse return error.PythonError;
+            errdefer python_c.py_decref(get_buffer_func);
+
+            const buffer_updated_func = python_c.PyObject_GetAttrString(py_protocol.?, "buffer_updated\x00")
+                orelse return error.PythonError;
+            errdefer python_c.py_decref(buffer_updated_func);
+
+            self.protocol_buffer_updated = buffer_updated_func;
+            self.protocol_get_buffer = get_buffer_func;
+        },
+        .Legacy => {
+            const data_received_func = python_c.PyObject_GetAttrString(py_protocol.?, "data_received\x00")
+                orelse return error.PythonError;
+
+            self.protocol_data_received = data_received_func;
+        }
+    }
+    errdefer {
+        python_c.py_decref_and_set_null(&self.protocol_get_buffer);
+        python_c.py_decref_and_set_null(&self.protocol_buffer_updated);
+        python_c.py_decref_and_set_null(&self.protocol_data_received);
     }
 
     const loop_data = utils.get_data_ptr(Loop, leviathan_loop);
@@ -134,6 +175,11 @@ inline fn z_stream_init(self: *StreamTransportObject, args: ?PyObject, kwargs: ?
         leviathan_loop.exception_handler.?
     );
     errdefer read_transport_data.deinit();
+
+    try Read.queue_read_operation(self, read_transport_data, protocol_type);
+
+    self.closed = false;
+    self.fd = @intCast(fd);
 
     return 0;
 }

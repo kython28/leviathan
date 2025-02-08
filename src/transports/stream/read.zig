@@ -15,6 +15,42 @@ const Lifecyle = @import("lifecycle.zig");
 const WriteTransport = @import("../write_transport.zig");
 const ReadTransport = @import("../read_transport.zig");
 
+pub inline fn queue_read_operation(
+    transport: *StreamTransportObject,
+    read_transport: *ReadTransport,
+    protocol_type: Stream.ProtocolType
+) !void {
+    switch (protocol_type) {
+        .Buffered => {
+            const new_buffer = python_c.PyObject_CallOneArg(
+                transport.protocol_get_buffer.?, transport.protocol_max_read_constant.?
+            ) orelse return error.PythonError;
+            defer python_c.py_decref(new_buffer);
+
+            if (python_c.PyObject_CheckBuffer(new_buffer) == 0) {
+                python_c.raise_python_value_error(
+                    "Invalid buffer obtained from protocol. Must be Buffer Protocol compatible\x00"
+                );
+                return error.PythonError;
+            }
+
+            var py_buffer: python_c.Py_buffer = comptime std.mem.zeroes(python_c.Py_buffer);
+            if (python_c.PyObject_GetBuffer(new_buffer, &py_buffer, python_c.PyBUF_WRITABLE) < 0) {
+                return error.PythonError;
+            }
+            errdefer python_c.PyBuffer_Release(&py_buffer);
+
+            const buffer_to_read: [*]u8 = @ptrCast(py_buffer.buf.?);
+            try read_transport.perform(buffer_to_read[0..@intCast(py_buffer.len)]);
+
+            transport.protocol_buffer = py_buffer;
+        },
+        .Legacy => {
+            try read_transport.perform(null);
+        }
+    }
+}
+
 pub fn read_operation_completed(read_transport: *ReadTransport, data: []const u8, err: std.os.linux.E) !void {
     const transport: *StreamTransportObject = @ptrFromInt(read_transport.parent_transport);
 
@@ -41,28 +77,7 @@ pub fn read_operation_completed(read_transport: *ReadTransport, data: []const u8
                 orelse return error.PythonError;
             python_c.py_decref(ret);
 
-            const new_buffer = python_c.PyObject_CallOneArg(
-                transport.protocol_get_buffer.?, transport.protocol_max_read_constant.?
-            ) orelse return error.PythonError;
-            defer python_c.py_decref(new_buffer);
-
-            if (python_c.PyObject_CheckBuffer(new_buffer) == 0) {
-                python_c.raise_python_value_error(
-                    "Invalid buffer obtained from protocol. Must be Buffer Protocol compatible\x00"
-                );
-                return error.PythonError;
-            }
-
-            var py_buffer: python_c.Py_buffer = comptime std.mem.zeroes(python_c.Py_buffer);
-            if (python_c.PyObject_GetBuffer(new_buffer, &py_buffer, python_c.PyBUF_WRITABLE) < 0) {
-                return error.PythonError;
-            }
-            errdefer python_c.PyBuffer_Release(&py_buffer);
-
-            const buffer_to_read: [*]u8 = @ptrCast(py_buffer.buf.?);
-            try read_transport.perform(buffer_to_read[0..@intCast(py_buffer.len)]);
-
-            transport.protocol_buffer = py_buffer;
+            try queue_read_operation(transport, read_transport, .Buffered);
         },
         .Legacy => {
             const py_bytes = python_c.PyBytes_FromStringAndSize(data.ptr, @intCast(data.len))
@@ -73,11 +88,9 @@ pub fn read_operation_completed(read_transport: *ReadTransport, data: []const u8
                 orelse return error.PythonError;
             python_c.py_decref(ret);
 
-            try read_transport.perform(null);
+            try queue_read_operation(transport, read_transport, .Legacy);
         }
     }
-
-
 }
 
 pub fn transport_is_reading(self: ?*StreamTransportObject) callconv(.C) ?PyObject {
@@ -87,4 +100,30 @@ pub fn transport_is_reading(self: ?*StreamTransportObject) callconv(.C) ?PyObjec
 
     const is_reading = (read_transport.blocking_task_id != 0);
     return python_c.PyBool_FromLong(@intCast(@intFromBool(is_reading)));
+}
+
+pub fn transport_pause_reading(self: ?*StreamTransportObject) callconv(.C) ?PyObject {
+    const instance = self.?;
+
+    const read_transport = utils.get_data_ptr2(ReadTransport, "read_transport", instance);
+    read_transport.cancel() catch |err| {
+        return utils.handle_zig_function_error(err, null);
+    };
+
+    return python_c.get_py_none();
+}
+
+pub fn transport_resume_reading(self: ?*StreamTransportObject) callconv(.C) ?PyObject {
+    const instance = self.?;
+
+    const read_transport = utils.get_data_ptr2(ReadTransport, "read_transport", instance);
+    if (read_transport.blocking_task_id != 0) {
+        return python_c.get_py_none();
+    }
+
+    queue_read_operation(instance, read_transport, instance.protocol_type) catch |err| {
+        return utils.handle_zig_function_error(err, null);
+    };
+
+    return python_c.get_py_none();
 }

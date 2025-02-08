@@ -104,6 +104,7 @@ fn read_operation_completed(
             return .Continue;
         }
 
+        self.is_closing = true;
         self.closed = true;
 
         exc_message = python_c.PyUnicode_FromString("Exception ocurred while reading\x00")
@@ -118,12 +119,12 @@ fn read_operation_completed(
     }else |err| {
         utils.handle_zig_function_error(err, {});
 
-        exc_message = python_c.PyUnicode_FromString("Exception ocurred while handling the read data\x00")
+        exception = python_c.PyErr_GetRaisedException()
             orelse return .Exception;
 
-        exception = python_c.PyErr_GetRaisedException()
+        exc_message = python_c.PyUnicode_FromString("Exception ocurred while handling the read data\x00")
             orelse {
-                python_c.py_decref(exc_message);
+                python_c.py_decref(exception);
                 return .Exception;
             };
     }
@@ -176,6 +177,18 @@ pub inline fn perform(self: *ReadTransport, buffer: ?[]u8) !void {
     );
 
     self.buffer_being_read = buffer_being_read;
+}
+
+pub inline fn cancel(self: *ReadTransport) !void {
+    if (self.blocking_task_id == 0) {
+        return;
+    }
+
+    _ = try Loop.Scheduling.IO.queue(
+        self.loop, .{
+            .Cancel = self.blocking_task_id
+        }
+    );
 }
 
 const ReadTransport = @This();

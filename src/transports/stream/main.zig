@@ -75,6 +75,7 @@ pub const StreamTransportObject = extern struct {
 
     fd: std.posix.fd_t,
     protocol_type: ProtocolType,
+    is_reading: bool,
     closed: bool,
 };
 

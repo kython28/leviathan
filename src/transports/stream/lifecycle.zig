@@ -22,7 +22,7 @@ pub fn connection_lost_callback(transport_ptr: usize, exception: PyObject) !void
     try close_transports(transport, read_transport, write_transport, exception);
 } 
 
-fn close_transports(
+pub fn close_transports(
     transport: *StreamTransportObject,
     read_transport: *ReadTransport,
     write_transport: *WriteTransport,
@@ -48,7 +48,6 @@ pub fn transport_close(self: ?*StreamTransportObject) callconv(.C) ?PyObject {
     const write_transport = utils.get_data_ptr2(WriteTransport, "write_transport", instance);
 
     if (read_transport.closed and write_transport.closed) {
-        std.posix.close(instance.fd);
         instance.closed = true;
 
         python_c.raise_python_runtime_error("Transport already closed\x00");
@@ -60,6 +59,7 @@ pub fn transport_close(self: ?*StreamTransportObject) callconv(.C) ?PyObject {
         python_c.py_decref(arg);
         return utils.handle_zig_function_error(err, null);
     };
+    std.posix.close(instance.fd);
 
     return arg;
 }

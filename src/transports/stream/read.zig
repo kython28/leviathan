@@ -17,6 +17,10 @@ pub inline fn queue_read_operation(
     read_transport: *ReadTransport,
     protocol_type: Stream.ProtocolType
 ) !void {
+    if (!transport.is_reading) {
+        return;
+    }
+
     switch (protocol_type) {
         .Buffered => {
             const new_buffer = python_c.PyObject_CallOneArg(
@@ -102,16 +106,27 @@ pub fn transport_is_reading(self: ?*StreamTransportObject) callconv(.C) ?PyObjec
 pub fn transport_pause_reading(self: ?*StreamTransportObject) callconv(.C) ?PyObject {
     const instance = self.?;
 
+    if (instance.closed) {
+        python_c.raise_python_runtime_error("Transport is closed\x00");
+        return null;
+    }
+
     const read_transport = utils.get_data_ptr2(ReadTransport, "read_transport", instance);
     read_transport.cancel() catch |err| {
         return utils.handle_zig_function_error(err, null);
     };
 
+    instance.is_reading = false;
     return python_c.get_py_none();
 }
 
 pub fn transport_resume_reading(self: ?*StreamTransportObject) callconv(.C) ?PyObject {
     const instance = self.?;
+
+    if (instance.closed) {
+        python_c.raise_python_runtime_error("Transport is closed\x00");
+        return null;
+    }
 
     const read_transport = utils.get_data_ptr2(ReadTransport, "read_transport", instance);
     if (read_transport.blocking_task_id != 0) {
@@ -122,5 +137,6 @@ pub fn transport_resume_reading(self: ?*StreamTransportObject) callconv(.C) ?PyO
         return utils.handle_zig_function_error(err, null);
     };
 
+    instance.is_reading = true;
     return python_c.get_py_none();
 }

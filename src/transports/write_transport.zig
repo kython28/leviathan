@@ -29,6 +29,7 @@ fd: std.posix.fd_t,
 ready_to_queue_write_op: bool = true,
 blocking_task_id: usize = 0,
 
+must_write_eof: bool = false,
 is_writing: bool = false,
 is_closing: bool = false,
 closed: bool = false,
@@ -144,6 +145,11 @@ fn write_operation_completed(
             return .Continue;
         },
         else => {
+            if (self.is_closing) {
+                self.closed = true;
+                return .Continue;
+            }
+
             exc_message = python_c.PyUnicode_FromString("Exception ocurred trying to write\x00")
                 orelse return .Exception;
 
@@ -190,6 +196,22 @@ fn write_operation_completed(
 }
 
 pub fn queue_buffers_and_swap(self: *WriteTransport) !void {
+    if (self.must_write_eof) {
+        defer self.must_write_eof = false;
+
+        self.blocking_task_id = try Loop.Scheduling.IO.queue(
+            self.loop, .{
+                .PerformWrite = .{
+                    .callback = &write_operation_completed,
+                    .data = self
+                },
+                .fd = self.fd,
+            }
+        );
+
+        return;
+    }
+
     const current_free_buffers = self.free_buffers;
     if (current_free_buffers.items.len == 0) {
         self.ready_to_queue_write_op = true;
@@ -251,6 +273,10 @@ pub inline fn append_new_buffer_to_write(self: *WriteTransport, py_object: PyObj
     if (self.ready_to_queue_write_op) {
         try queue_buffers_and_swap(self);
     }
+}
+
+pub inline fn queue_eof(self: *WriteTransport) void {
+    self.must_write_eof = true;
 }
 
 const WriteTransport = @This();

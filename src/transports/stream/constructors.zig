@@ -182,6 +182,7 @@ inline fn z_stream_init(self: *StreamTransportObject, args: ?PyObject, kwargs: ?
 
     try Read.queue_read_operation(self, read_transport_data, protocol_type);
 
+    self.is_reading = true;
     self.closed = false;
     self.fd = @intCast(fd);
 

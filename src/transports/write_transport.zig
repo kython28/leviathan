@@ -10,9 +10,13 @@ const utils = @import("../utils/main.zig");
 const BuffersArrayList = std.ArrayList(std.posix.iovec_const);
 const PyObjectsArrayList = std.ArrayList(PyObject);
 
+const ConnectionLostCallback = *const fn (usize, PyObject) anyerror!void;
+
 loop: *Loop,
-parent_transport: PyObject,
+parent_transport: usize,
 exception_handler: PyObject,
+
+connection_lost_callback: ?ConnectionLostCallback,
 
 free_buffers: *BuffersArrayList,
 free_py_objects: *PyObjectsArrayList,
@@ -33,7 +37,8 @@ initialized: bool = false,
 
 pub fn init(
     self: *WriteTransport, loop: *Loop, fd: std.posix.fd_t,
-    parent_transport: PyObject, exception_handler: PyObject
+    parent_transport: usize, exception_handler: PyObject,
+    connection_lost_callback: ConnectionLostCallback
 ) !void {
     const allocator = loop.allocator;
 
@@ -53,6 +58,8 @@ pub fn init(
         .loop = loop,
         .parent_transport = parent_transport,
         .exception_handler = exception_handler,
+
+        .connection_lost_callback = connection_lost_callback,
 
         .free_buffers = free_buffers,
         .free_py_objects = free_py_objects,
@@ -79,7 +86,9 @@ pub fn close(self: *WriteTransport) !void {
             .Cancel = blocking_task_id
         }
     );
+
     self.is_closing = true;
+    self.connection_lost_callback = null;
 }
 
 pub fn deinit(self: *WriteTransport) void {
@@ -103,40 +112,63 @@ fn write_operation_completed(
     const self: *WriteTransport = @alignCast(@ptrCast(data.?));
     self.blocking_task_id = 0;
 
+    var exception: PyObject = undefined;
+    var exc_message: PyObject = undefined;
+
     switch (io_uring_err) {
-        .SUCCESS => {
+        .SUCCESS => blk: {
             if (self.is_closing) {
                 self.closed = true;
             }else{
                 self.queue_buffers_and_swap() catch |err| {
-                    return utils.handle_zig_function_error(err, CallbackManager.ExecuteCallbacksReturn.Exception);
+                    // TODO: Optimize this
+                    utils.handle_zig_function_error(err, {});
+
+                    exception = python_c.PyErr_GetRaisedException()
+                        orelse return .Exception;
+
+                    exc_message = python_c.PyUnicode_FromString("Exception ocurred while queueing up data\x00")
+                        orelse {
+                            python_c.py_decref(exception);
+                            return .Exception;
+                        };
+                    break :blk;
                 };
             }
 
             return .Continue;
         },
         .CANCELED => {
+            self.is_closing = true;
             self.closed = true;
             return .Continue;
         },
-        else => {}
-    }
+        else => {
+            exc_message = python_c.PyUnicode_FromString("Exception ocurred trying to write\x00")
+                orelse return .Exception;
 
+            exception = python_c.PyObject_CallFunction(
+                python_c.PyExc_OSError, "LO\x00", @as(c_long, @intFromEnum(io_uring_err)), exc_message
+            ) orelse return .Exception;
+        }
+    }
+    defer python_c.py_decref(exc_message);
+    defer python_c.py_decref(exception);
+
+    self.is_closing = true;
     self.closed = true;
 
-    const exc_message: PyObject = python_c.PyUnicode_FromString("Exception ocurred trying to write\x00")
-        orelse return .Exception;
-    defer python_c.py_decref(exc_message);
-
-    const exception: PyObject = python_c.PyObject_CallFunction(
-        python_c.PyExc_OSError, "LO\x00", @as(c_long, @intFromEnum(io_uring_err)), exc_message
-    ) orelse return .Exception;
-    defer python_c.py_decref(exception);
+    const parent_transport = self.parent_transport;
+    if (self.connection_lost_callback) |callback| {
+        callback(parent_transport, exception) catch |err| {
+            return utils.handle_zig_function_error(err, CallbackManager.ExecuteCallbacksReturn.Exception);
+        };
+    }
 
     var args: [3]PyObject = undefined;
     args[0] = exception;
     args[1] = exc_message;
-    args[2] = self.parent_transport;
+    args[2] = @ptrFromInt(parent_transport);
 
     const message_kname: PyObject = python_c.PyUnicode_FromString("message\x00")
         orelse return .Exception;

@@ -10,9 +10,6 @@ const Loop = @import("../../loop/main.zig");
 const Stream = @import("main.zig");
 const StreamTransportObject = Stream.StreamTransportObject;
 
-const Lifecyle = @import("lifecycle.zig");
-
-const WriteTransport = @import("../write_transport.zig");
 const ReadTransport = @import("../read_transport.zig");
 
 pub inline fn queue_read_operation(

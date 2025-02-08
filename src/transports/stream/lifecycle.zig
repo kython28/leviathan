@@ -13,6 +13,29 @@ const StreamTransportObject = Stream.StreamTransportObject;
 const WriteTransport = @import("../write_transport.zig");
 const ReadTransport = @import("../read_transport.zig");
 
+pub fn connection_lost_callback(transport_ptr: usize, exception: PyObject) !void {
+    const transport: *StreamTransportObject = @ptrFromInt(transport_ptr);
+
+    const read_transport = utils.get_data_ptr2(ReadTransport, "read_transport", transport);
+    const write_transport = utils.get_data_ptr2(WriteTransport, "write_transport", transport);
+
+    try close_transports(transport, read_transport, write_transport, exception);
+} 
+
+fn close_transports(
+    transport: *StreamTransportObject,
+    read_transport: *ReadTransport,
+    write_transport: *WriteTransport,
+    exception: PyObject
+) !void {
+    try read_transport.close();
+    try write_transport.close();
+
+    const ret = python_c.PyObject_CallOneArg(transport.protocol_connection_lost.?, exception)
+        orelse return error.PythonError;
+    python_c.py_decref(ret);
+}
+
 pub fn transport_close(self: ?*StreamTransportObject) callconv(.C) ?PyObject {
     const instance = self.?;
 
@@ -32,15 +55,13 @@ pub fn transport_close(self: ?*StreamTransportObject) callconv(.C) ?PyObject {
         return null;
     }
 
-    read_transport.close() catch |err| {
+    const arg = python_c.get_py_none();
+    close_transports(instance, read_transport, write_transport, arg) catch |err| {
+        python_c.py_decref(arg);
         return utils.handle_zig_function_error(err, null);
     };
 
-    write_transport.close() catch |err| {
-        return utils.handle_zig_function_error(err, null);
-    };
-
-    return python_c.get_py_none();
+    return arg;
 }
 
 pub fn transport_is_closing(self: ?*StreamTransportObject) callconv(.C) ?PyObject {

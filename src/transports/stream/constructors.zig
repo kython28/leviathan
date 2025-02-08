@@ -11,6 +11,7 @@ const Stream = @import("main.zig");
 const StreamTransportObject = Stream.StreamTransportObject;
 
 const Read = @import("read.zig");
+const Lifecyle = @import("lifecycle.zig");
 
 const WriteTransport = @import("../write_transport.zig");
 const ReadTransport = @import("../read_transport.zig");
@@ -166,13 +167,16 @@ inline fn z_stream_init(self: *StreamTransportObject, args: ?PyObject, kwargs: ?
     const loop_data = utils.get_data_ptr(Loop, leviathan_loop);
 
     const write_transport_data = utils.get_data_ptr2(WriteTransport, "write_transport", self);
-    try write_transport_data.init(loop_data, @intCast(fd), @ptrCast(self), leviathan_loop.exception_handler.?);
+    try write_transport_data.init(
+        loop_data, @intCast(fd), @intFromPtr(self), leviathan_loop.exception_handler.?,
+        &Lifecyle.connection_lost_callback
+    );
     errdefer write_transport_data.deinit();
 
     const read_transport_data = utils.get_data_ptr2(ReadTransport, "read_transport", self);
     try read_transport_data.init(
         loop_data, @intCast(fd), &Read.read_operation_completed, @intFromPtr(self),
-        leviathan_loop.exception_handler.?
+        leviathan_loop.exception_handler.?, &Lifecyle.connection_lost_callback
     );
     errdefer read_transport_data.deinit();
 

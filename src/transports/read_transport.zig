@@ -10,10 +10,13 @@ const utils = @import("../utils/main.zig");
 pub const ReadCompletedCallback = *const fn (*ReadTransport, []const u8, std.os.linux.E) anyerror!void;
 
 pub const MAX_READ = (1 << 16);
+const ConnectionLostCallback = *const fn (usize, PyObject) anyerror!void;
 
 loop: *Loop,
 parent_transport: usize,
 exception_handler: PyObject,
+
+connection_lost_callback: ?ConnectionLostCallback,
 
 read_completed_callback: ReadCompletedCallback,
 buffer: []u8,
@@ -30,7 +33,8 @@ initialized: bool = false,
 
 pub fn init(
     self: *ReadTransport, loop: *Loop, fd: std.posix.fd_t, callback: ReadCompletedCallback,
-    parent_transport: usize, exception_handler: PyObject
+    parent_transport: usize, exception_handler: PyObject,
+    connection_lost_callback: ConnectionLostCallback
 ) !void {
     const allocator = loop.allocator;
 
@@ -41,6 +45,8 @@ pub fn init(
         .loop = loop,
         .parent_transport = parent_transport,
         .exception_handler = exception_handler,
+
+        .connection_lost_callback = connection_lost_callback,
 
         .read_completed_callback = callback,
         .buffer = buffer,
@@ -66,6 +72,7 @@ pub fn close(self: *ReadTransport) !void {
         }
     );
     self.is_closing = true;
+    self.connection_lost_callback = null;
 }
 
 pub fn deinit(self: *ReadTransport) void {
@@ -117,6 +124,7 @@ fn read_operation_completed(
             return .Exception;
         };
     }else |err| {
+        // TODO: Optimize this
         utils.handle_zig_function_error(err, {});
 
         exception = python_c.PyErr_GetRaisedException()
@@ -131,10 +139,17 @@ fn read_operation_completed(
     defer python_c.py_decref(exc_message);
     defer python_c.py_decref(exception);
 
+    const parent_transport = self.parent_transport;
+    if (self.connection_lost_callback) |callback| {
+        callback(parent_transport, exception) catch |err| {
+            return utils.handle_zig_function_error(err, CallbackManager.ExecuteCallbacksReturn.Exception);
+        };
+    }
+
     var args: [3]PyObject = undefined;
     args[0] = exception;
     args[1] = exc_message;
-    args[2] = @ptrFromInt(self.parent_transport);
+    args[2] = @ptrFromInt(parent_transport);
 
     const message_kname: PyObject = python_c.PyUnicode_FromString("message\x00")
         orelse return .Exception;

@@ -10,6 +10,7 @@ const utils = @import("../../utils/main.zig");
 const Constructors = @import("constructors.zig");
 const Lifecyle = @import("lifecycle.zig");
 const Read = @import("read.zig");
+const Write = @import("write.zig");
 
 const PythonStreamMethods: []const python_c.PyMethodDef = &[_]python_c.PyMethodDef{
     // -------------------------- lifecycle --------------------------
@@ -46,6 +47,44 @@ const PythonStreamMethods: []const python_c.PyMethodDef = &[_]python_c.PyMethodD
         .ml_flags = python_c.METH_NOARGS
     },
 
+    // -------------------------- write --------------------------
+    python_c.PyMethodDef{
+        .ml_name = "abort\x00",
+        .ml_meth = @ptrCast(&Lifecyle.transport_close),
+        .ml_doc = "Close the transport immediately.\x00",
+        .ml_flags = python_c.METH_NOARGS
+    },
+    python_c.PyMethodDef{
+        .ml_name = "can_write_eof\x00",
+        .ml_meth = @ptrCast(&Write.transport_can_write_eof),
+        .ml_doc = "Return True if the transport supports write_eof(), False if not.\x00",
+        .ml_flags = python_c.METH_NOARGS
+    },
+    python_c.PyMethodDef{
+        .ml_name = "get_write_buffer_size\x00",
+        .ml_meth = @ptrCast(&Write.transport_get_write_buffer_size),
+        .ml_doc = "Return the current size of the output buffer used by the transport.\x00",
+        .ml_flags = python_c.METH_NOARGS
+    },
+    python_c.PyMethodDef{
+        .ml_name = "write\x00",
+        .ml_meth = @ptrCast(&Write.transport_write),
+        .ml_doc = "Write some data bytes to the transport.\x00",
+        .ml_flags = python_c.METH_O
+    },
+    python_c.PyMethodDef{
+        .ml_name = "writelines\x00",
+        .ml_meth = @ptrCast(&Write.transport_write_lines),
+        .ml_doc = "Write a list (or any iterable) of data bytes to the transport.\x00",
+        .ml_flags = python_c.METH_O
+    },
+    python_c.PyMethodDef{
+        .ml_name = "write_eof\x00",
+        .ml_meth = @ptrCast(&Write.transport_write_eof),
+        .ml_doc = "Close the write end of the transport after flushing all buffered data.\x00",
+        .ml_flags = python_c.METH_NOARGS
+    },
+
     python_c.PyMethodDef{
         .ml_name = null, .ml_meth = null, .ml_doc = null, .ml_flags = 0
     }
@@ -72,10 +111,16 @@ pub const StreamTransportObject = extern struct {
     protocol_buffer_updated: ?PyObject,
 
     protocol_connection_lost: ?PyObject,
+    protocol_pause_writing: ?PyObject,
+    protocol_resume_writing: ?PyObject,
+
+    writing_high_water_mark: usize,
+    writing_low_water_mark: usize,
 
     fd: std.posix.fd_t,
     protocol_type: ProtocolType,
     is_reading: bool,
+    is_writing: bool,
     closed: bool,
 };
 

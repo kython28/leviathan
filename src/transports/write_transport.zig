@@ -10,6 +10,7 @@ const utils = @import("../utils/main.zig");
 const BuffersArrayList = std.ArrayList(std.posix.iovec_const);
 const PyObjectsArrayList = std.ArrayList(PyObject);
 
+pub const WriteCompletedCallback = *const fn (*WriteTransport, usize, usize, std.os.linux.E) anyerror!void;
 const ConnectionLostCallback = *const fn (usize, PyObject) anyerror!void;
 
 loop: *Loop,
@@ -18,11 +19,15 @@ exception_handler: PyObject,
 
 connection_lost_callback: ?ConnectionLostCallback,
 
+write_completed_callback: WriteCompletedCallback,
+
 free_buffers: *BuffersArrayList,
 free_py_objects: *PyObjectsArrayList,
 
 busy_buffers: *BuffersArrayList,
 busy_py_objects: *PyObjectsArrayList,
+
+buffer_size: usize = 0,
 
 fd: std.posix.fd_t,
 
@@ -38,8 +43,8 @@ initialized: bool = false,
 
 pub fn init(
     self: *WriteTransport, loop: *Loop, fd: std.posix.fd_t,
-    parent_transport: usize, exception_handler: PyObject,
-    connection_lost_callback: ConnectionLostCallback
+    callback: WriteCompletedCallback, parent_transport: usize,
+    exception_handler: PyObject, connection_lost_callback: ConnectionLostCallback
 ) !void {
     const allocator = loop.allocator;
 
@@ -55,12 +60,20 @@ pub fn init(
     const busy_py_objects = try allocator.create(PyObjectsArrayList);
     errdefer allocator.destroy(busy_py_objects);
 
+    free_buffers.* = BuffersArrayList.init(allocator);
+    busy_buffers.* = BuffersArrayList.init(allocator);
+
+    free_py_objects.* = PyObjectsArrayList.init(allocator);
+    busy_py_objects.* = PyObjectsArrayList.init(allocator);
+
     self.* = WriteTransport{
         .loop = loop,
         .parent_transport = parent_transport,
         .exception_handler = exception_handler,
 
         .connection_lost_callback = connection_lost_callback,
+
+        .write_completed_callback = callback,
 
         .free_buffers = free_buffers,
         .free_py_objects = free_py_objects,
@@ -98,6 +111,21 @@ pub fn deinit(self: *WriteTransport) void {
     }
 
     const allocator = self.loop.allocator;
+
+    for (self.free_py_objects.items) |v| {
+        python_c.py_decref(v);
+    }
+
+    for (self.busy_py_objects.items) |v| {
+        python_c.py_decref(v);
+    }
+
+    self.free_buffers.deinit();
+    self.free_py_objects.deinit();
+
+    self.busy_buffers.deinit();
+    self.busy_py_objects.deinit();
+
     allocator.destroy(self.free_buffers);
     allocator.destroy(self.free_py_objects);
 
@@ -108,13 +136,27 @@ pub fn deinit(self: *WriteTransport) void {
 }
 
 fn write_operation_completed(
-    data: ?*anyopaque, _: i32, io_uring_err: std.os.linux.E
+    data: ?*anyopaque, io_uring_res: i32, io_uring_err: std.os.linux.E
 ) CallbackManager.ExecuteCallbacksReturn {
     const self: *WriteTransport = @alignCast(@ptrCast(data.?));
     self.blocking_task_id = 0;
 
     var exception: PyObject = undefined;
     var exc_message: PyObject = undefined;
+
+    var data_written: usize = 0;
+    var remaining_data = self.buffer_size;
+    if (io_uring_res > 0) {
+        for (self.busy_buffers.items) |iovec| {
+            data_written += iovec.len;
+        }
+        remaining_data -= data_written;
+        self.buffer_size = remaining_data;
+    }
+
+    self.write_completed_callback(self, data_written, remaining_data, io_uring_err) catch |err| {
+        return utils.handle_zig_function_error(err, CallbackManager.ExecuteCallbacksReturn.Exception);
+    };
 
     switch (io_uring_err) {
         .SUCCESS => blk: {
@@ -196,25 +238,29 @@ fn write_operation_completed(
 }
 
 pub fn queue_buffers_and_swap(self: *WriteTransport) !void {
-    if (self.must_write_eof) {
-        defer self.must_write_eof = false;
-
-        self.blocking_task_id = try Loop.Scheduling.IO.queue(
-            self.loop, .{
-                .PerformWrite = .{
-                    .callback = &write_operation_completed,
-                    .data = self
-                },
-                .fd = self.fd,
-            }
-        );
-
-        return;
-    }
-
     const current_free_buffers = self.free_buffers;
     if (current_free_buffers.items.len == 0) {
-        self.ready_to_queue_write_op = true;
+        if (self.must_write_eof) {
+            defer self.must_write_eof = false;
+
+            self.blocking_task_id = try Loop.Scheduling.IO.queue(
+                self.loop, .{
+                    .PerformWriteEOF = .{
+                        .callback = .{
+                            .ZigGenericIO = .{
+                                .callback = &write_operation_completed,
+                                .data = self
+                            }
+                        },
+                        .fd = self.fd,
+                    },
+                }
+            );
+
+            self.is_closing = true;
+        }else{
+            self.ready_to_queue_write_op = true;
+        }
         return;
     }
 
@@ -239,10 +285,8 @@ pub fn queue_buffers_and_swap(self: *WriteTransport) !void {
     );
 
     const old_py_objects = current_busy_py_objects.items;
-    if (old_py_objects.len > 0) {
-        for (old_py_objects) |v| {
-            python_c.py_decref(v);
-        }
+    for (old_py_objects) |v| {
+        python_c.py_decref(v);
     }
 
     current_busy_py_objects.clearRetainingCapacity();
@@ -257,26 +301,37 @@ pub fn queue_buffers_and_swap(self: *WriteTransport) !void {
     self.ready_to_queue_write_op = false;
 }
 
-pub inline fn append_new_buffer_to_write(self: *WriteTransport, py_object: PyObject, buffer: []const u8) !void {
+pub inline fn append_new_buffer_to_write(self: *WriteTransport, py_object: PyObject, buffer: []const u8) !usize {
     if (self.closed) {
         return error.TransportClosed;
     }
 
-    try self.free_py_objects.append(py_object);
-    errdefer _ = self.free_py_objects.pop();
+    {
+        try self.free_py_objects.append(py_object);
+        errdefer _ = self.free_py_objects.pop();
 
-    try self.free_buffers.append(.{
-        .base = buffer.ptr,
-        .len = buffer.len
-    });
+        try self.free_buffers.append(.{
+            .base = buffer.ptr,
+            .len = buffer.len
+        });
+
+    }
+    const new_buffer_size = self.buffer_size + buffer.len;
+    self.buffer_size = new_buffer_size;
 
     if (self.ready_to_queue_write_op) {
         try queue_buffers_and_swap(self);
     }
+
+    return new_buffer_size;
 }
 
-pub inline fn queue_eof(self: *WriteTransport) void {
+pub inline fn queue_eof(self: *WriteTransport) !void {
     self.must_write_eof = true;
+
+    if (self.ready_to_queue_write_op) {
+        try queue_buffers_and_swap(self);
+    }
 }
 
 const WriteTransport = @This();

@@ -17,7 +17,7 @@ pub inline fn queue_read_operation(
     read_transport: *ReadTransport,
     protocol_type: Stream.ProtocolType
 ) !void {
-    if (!transport.is_reading) {
+    if (!transport.is_reading or read_transport.is_closing) {
         return;
     }
 
@@ -64,7 +64,15 @@ pub fn read_operation_completed(read_transport: *ReadTransport, data: []const u8
     }
 
     // When `read_transport` is closing, data length will be always 0
-    if (err != .SUCCESS or data.len == 0) {
+    if (err != .SUCCESS) {
+        return;
+    }
+
+    if (data.len == 0) {
+        const ret = python_c.PyObject_CallNoArgs(transport.protocol_eof_received.?)
+            orelse return error.PythonError;
+        python_c.py_decref(ret);
+
         return;
     }
 

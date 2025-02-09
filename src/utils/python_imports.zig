@@ -7,7 +7,9 @@ const std = @import("std");
 pub var asyncio_module: PyObject = undefined;
 pub var sys_module: PyObject = undefined;
 pub var weakref_module: PyObject = undefined;
+pub var socket_module: PyObject = undefined;
 
+pub var socket_class: PyObject = undefined;
 pub var base_event_loop: PyObject = undefined;
 
 pub var asyncio_protocol: PyObject = undefined;
@@ -32,8 +34,11 @@ pub fn initialize_python_imports() !void {
     asyncio_module = python_c.PyImport_ImportModule("asyncio\x00") orelse return error.PythonError;
     sys_module = python_c.PyImport_ImportModule("sys\x00") orelse return error.PythonError;
     weakref_module = python_c.PyImport_ImportModule("weakref\x00") orelse return error.PythonError;
+    socket_module = python_c.PyImport_ImportModule("socket\x00") orelse return error.PythonError;
 
     base_event_loop = python_c.PyObject_GetAttrString(asyncio_module, "AbstractEventLoop\x00")
+        orelse return error.PythonError;
+    socket_class = python_c.PyObject_GetAttrString(asyncio_module, "socket\x00")
         orelse return error.PythonError;
 
     invalid_state_exc = python_c.PyObject_GetAttrString(asyncio_module, "InvalidStateError\x00")

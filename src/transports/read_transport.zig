@@ -98,7 +98,7 @@ fn read_operation_completed(
     }
 
     var bytes_read: usize = 0;
-    if (io_uring_err == .SUCCESS and !is_closing) {
+    if (io_uring_err == .SUCCESS) {
         bytes_read = @intCast(io_uring_res);
     }
 

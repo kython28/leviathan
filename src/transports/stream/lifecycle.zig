@@ -10,6 +10,8 @@ const Loop = @import("../../loop/main.zig");
 const Stream = @import("main.zig");
 const StreamTransportObject = Stream.StreamTransportObject;
 
+const Constructors = @import("constructors.zig");
+
 const WriteTransport = @import("../write_transport.zig");
 const ReadTransport = @import("../read_transport.zig");
 
@@ -60,6 +62,7 @@ pub fn transport_close(self: ?*StreamTransportObject) callconv(.C) ?PyObject {
         return utils.handle_zig_function_error(err, null);
     };
     std.posix.close(instance.fd);
+    instance.fd = -1;
 
     return arg;
 }
@@ -81,4 +84,16 @@ pub fn transport_is_closing(self: ?*StreamTransportObject) callconv(.C) ?PyObjec
     }
 
     return python_c.PyBool_FromLong(@intCast(@intFromBool(closed)));
+}
+
+pub fn transport_get_protocol(self: ?*StreamTransportObject) callconv(.C) ?PyObject {
+    return python_c.py_newref(self.?.protocol.?);
+}
+
+pub fn transport_set_protocol(self: ?*StreamTransportObject, new_protocol: ?PyObject) callconv(.C) ?PyObject {
+    _ = Constructors.set_protocol(self.?, new_protocol.?) catch |err| {
+        return utils.handle_zig_function_error(err, null);
+    };
+
+    return python_c.get_py_none();
 }

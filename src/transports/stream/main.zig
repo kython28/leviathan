@@ -9,6 +9,7 @@ const utils = @import("../../utils/main.zig");
 
 const Constructors = @import("constructors.zig");
 const Lifecyle = @import("lifecycle.zig");
+const ExtraInfo = @import("extra_info.zig");
 const Read = @import("read.zig");
 const Write = @import("write.zig");
 
@@ -67,6 +68,18 @@ const PythonStreamMethods: []const python_c.PyMethodDef = &[_]python_c.PyMethodD
         .ml_flags = python_c.METH_NOARGS
     },
     python_c.PyMethodDef{
+        .ml_name = "get_write_buffer_limits\x00",
+        .ml_meth = @ptrCast(&Write.transport_get_write_buffer_limits),
+        .ml_doc = "Return the current size of the output buffer used by the transport.\x00",
+        .ml_flags = python_c.METH_NOARGS
+    },
+    python_c.PyMethodDef{
+        .ml_name = "set_write_buffer_limits\x00",
+        .ml_meth = @ptrCast(&Write.transport_set_write_buffer_limits),
+        .ml_doc = "Set the high and low watermarks for write flow control.\x00",
+        .ml_flags = python_c.METH_NOARGS
+    },
+    python_c.PyMethodDef{
         .ml_name = "write\x00",
         .ml_meth = @ptrCast(&Write.transport_write),
         .ml_doc = "Write some data bytes to the transport.\x00",
@@ -85,6 +98,14 @@ const PythonStreamMethods: []const python_c.PyMethodDef = &[_]python_c.PyMethodD
         .ml_flags = python_c.METH_NOARGS
     },
 
+    // -------------------------- extra_info --------------------------
+    python_c.PyMethodDef{
+        .ml_name = "get_extra_info\x00",
+        .ml_meth = @ptrCast(&ExtraInfo.transport_get_extra_info),
+        .ml_doc = "Return information about the transport or underlying resources it uses.\x00",
+        .ml_flags = python_c.METH_NOARGS
+    },
+
     python_c.PyMethodDef{
         .ml_name = null, .ml_meth = null, .ml_doc = null, .ml_flags = 0
     }
@@ -100,11 +121,17 @@ pub const StreamTransportObject = extern struct {
     write_transport: [@sizeOf(WriteStream)]u8,
     read_transport: [@sizeOf(ReadStream)]u8,
 
+
     protocol_buffer: python_c.Py_buffer,
+
+    socket: ?PyObject,
+    peername: ?PyObject,
+    sockname: ?PyObject,
 
     protocol: ?PyObject,
     protocol_max_read_constant: ?PyObject,
 
+    protocol_eof_received: ?PyObject,
     protocol_data_received: ?PyObject,
 
     protocol_get_buffer: ?PyObject,

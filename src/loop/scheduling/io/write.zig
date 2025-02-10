@@ -27,7 +27,8 @@ pub fn wait_ready(set: *IO.BlockingTasksSet, data: IO.WaitData) !usize {
     errdefer set.pop(data_ptr) catch unreachable;
 
     const ring: *std.os.linux.IoUring = &set.ring;
-    _ = try ring.poll_add(@intCast(@intFromPtr(data_ptr)), data.fd, std.c.POLL.OUT);
+    const sqe = try ring.poll_add(@intCast(@intFromPtr(data_ptr)), data.fd, std.c.POLL.OUT);
+    sqe.flags |= std.os.linux.IOSQE_ASYNC;
     const ret = try ring.submit();
     if (ret != 1) {
         @panic("Unexpected number of submitted sqes");
@@ -43,6 +44,7 @@ pub fn eof(set: *IO.BlockingTasksSet, data: PerformEOFData) !usize {
     const sqe = try ring.get_sqe();
     sqe.prep_rw(.WRITE, data.fd, 0, 0, 0);
     sqe.user_data = @intCast(@intFromPtr(data_ptr));
+    sqe.flags |= std.os.linux.IOSQE_ASYNC;
     const ret = try ring.submit();
     if (ret != 1) {
         @panic("Unexpected number of submitted sqes");
@@ -55,7 +57,8 @@ pub fn perform(set: *IO.BlockingTasksSet, data: PerformData) !usize {
     errdefer set.pop(data_ptr) catch unreachable;
 
     const ring = &set.ring;
-    _ = try ring.write(@intCast(@intFromPtr(data_ptr)), data.fd, data.data, data.offset);
+    const sqe = try ring.write(@intCast(@intFromPtr(data_ptr)), data.fd, data.data, data.offset);
+    sqe.flags |= std.os.linux.IOSQE_ASYNC;
     const ret = try ring.submit();
     if (ret != 1) {
         @panic("Unexpected number of submitted sqes");
@@ -68,7 +71,8 @@ pub fn perform_with_iovecs(set: *IO.BlockingTasksSet, data: PerformVData) !usize
     errdefer set.pop(data_ptr) catch unreachable;
 
     const ring = &set.ring;
-    _ = try ring.writev(@intCast(@intFromPtr(data_ptr)), data.fd, data.data, data.offset);
+    const sqe = try ring.writev(@intCast(@intFromPtr(data_ptr)), data.fd, data.data, data.offset);
+    sqe.flags |= std.os.linux.IOSQE_ASYNC;
     const ret = try ring.submit();
     if (ret != 1) {
         @panic("Unexpected number of submitted sqes");

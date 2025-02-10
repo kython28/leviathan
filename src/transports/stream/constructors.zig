@@ -162,7 +162,7 @@ pub fn stream_clear(self: ?*StreamTransportObject) callconv(.C) c_int {
         write_transport_data.deinit();
     }
 
-    const read_transport_data = utils.get_data_ptr2(WriteTransport, "read_transport", py_transport);
+    const read_transport_data = utils.get_data_ptr2(ReadTransport, "read_transport", py_transport);
     if (read_transport_data.initialized) {
         read_transport_data.deinit();
     }
@@ -172,12 +172,6 @@ pub fn stream_clear(self: ?*StreamTransportObject) callconv(.C) c_int {
     }
 
     python_c.deinitialize_object_fields(py_transport, &.{"protocol_buffer"});
-
-    const fd = py_transport.fd;
-    if (fd >= 0) {
-        std.posix.close(fd);
-    }
-
     py_transport.protocol_type = undefined;
 
     return 0;
@@ -211,7 +205,7 @@ inline fn z_stream_init(self: *StreamTransportObject, args: ?PyObject, kwargs: ?
         return error.PythonError;
     }
 
-    if (!python_c.is_type(loop.?, Loop.Python.LoopType)) {
+    if (!python_c.type_check(loop.?, Loop.Python.LoopType)) {
         python_c.raise_python_type_error("Invalid event loop. Only Leviathan's loops are allow\x00");
         return error.PythonError;
     }
@@ -231,14 +225,14 @@ inline fn z_stream_init(self: *StreamTransportObject, args: ?PyObject, kwargs: ?
 
     const write_transport_data = utils.get_data_ptr2(WriteTransport, "write_transport", self);
     try write_transport_data.init(
-        loop_data, @intCast(fd), &Write.write_operation_completed, @intFromPtr(self),
+        loop_data, @intCast(fd), &Write.write_operation_completed, @ptrCast(self),
         leviathan_loop.exception_handler.?, &Lifecyle.connection_lost_callback
     );
     errdefer write_transport_data.deinit();
 
     const read_transport_data = utils.get_data_ptr2(ReadTransport, "read_transport", self);
     try read_transport_data.init(
-        loop_data, @intCast(fd), &Read.read_operation_completed, @intFromPtr(self),
+        loop_data, @intCast(fd), &Read.read_operation_completed, @ptrCast(self),
         leviathan_loop.exception_handler.?, &Lifecyle.connection_lost_callback
     );
     errdefer read_transport_data.deinit();
@@ -255,8 +249,6 @@ inline fn z_stream_init(self: *StreamTransportObject, args: ?PyObject, kwargs: ?
         python_c.py_decref_and_set_null(&self.protocol_resume_writing);
     }
 
-    try Read.queue_read_operation(self, read_transport_data, protocol_type);
-
     const watermark = (comptime std.math.maxInt(usize))/2;
 
     self.writing_low_water_mark = watermark;
@@ -266,6 +258,11 @@ inline fn z_stream_init(self: *StreamTransportObject, args: ?PyObject, kwargs: ?
     self.is_reading = true;
     self.closed = false;
     self.fd = @intCast(fd);
+
+    try Read.queue_read_operation(self, read_transport_data, protocol_type);
+
+    python_c.py_incref(@ptrCast(self)); // Write
+    python_c.py_incref(@ptrCast(self)); // Read
 
     return 0;
 }

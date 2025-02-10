@@ -110,13 +110,17 @@ inline fn check_io_uring_result(
                     }
                 },
                 .BADF, .FBIG, .INTR, .IO, .NOSPC, .INVAL, .CONNRESET,  // Expected errors
-                .PIPE, .NOBUFS, .NXIO, .ACCES, .NETDOWN, .NETUNREACH => {
+                .PIPE, .NOBUFS, .NXIO, .ACCES, .NETDOWN, .NETUNREACH,
+                .SPIPE => {
                     if (can_cancel) {
                         CallbackManager.cancel_callback(callback, null);
                     }
                 },
                 .AGAIN => unreachable, // This should not happen. Filtered by debugging porpuse
-                else => unreachable
+                else => |code| {
+                    std.log.err("Unexpected errno: {}", .{code});
+                    unreachable;
+                }
             }
         },
         else => {
@@ -189,14 +193,10 @@ fn poll_blocking_events(
                 loop.epoll_locked = false;
             }
 
-            if (builtin.single_threaded) {
-                const py_thread_state = PyEval_SaveThread();
-                defer PyEval_RestoreThread(py_thread_state);
+            const py_thread_state = PyEval_SaveThread();
+            defer PyEval_RestoreThread(py_thread_state);
 
-                break :blk std.posix.epoll_wait(epoll_fd, blocking_ready_epoll_events, -1);
-            }else{
-                break :blk std.posix.epoll_wait(epoll_fd, blocking_ready_epoll_events, -1);
-            }
+            break :blk std.posix.epoll_wait(epoll_fd, blocking_ready_epoll_events, -1);
         }else{
             break :blk std.posix.epoll_wait(epoll_fd, blocking_ready_epoll_events, 0);
         }

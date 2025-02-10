@@ -45,7 +45,7 @@ def test_add_and_remove_writer() -> None:
         loop.add_writer(w, writer_callback)
 
         # Run the loop
-        loop.call_soon(loop.stop)
+        loop.call_later(0.1, loop.stop)
         loop.run_forever()
 
         assert callback_called, "Writer callback was not called"
@@ -145,7 +145,7 @@ def test_rewrite_writer() -> None:
         loop.add_writer(w, writer_callback2)
 
         # Run the loop
-        loop.call_soon(loop.stop)
+        loop.call_later(0.1, loop.stop)
         loop.run_forever()
 
         assert callback_count == 10, "Second writer callback was not called"
@@ -203,7 +203,7 @@ def test_remove_writer_then_add() -> None:
         loop.add_writer(w, writer_callback)
 
         # Run the loop
-        loop.call_soon(loop.stop)
+        loop.call_later(0.1, loop.stop)
         loop.run_forever()
 
         assert callback_called, "Writer callback was not called after re-adding"

@@ -14,8 +14,10 @@ const std = @import("std");
 
 pub inline fn future_set_initial_values(self: *PythonFutureObject) void {
     python_c.initialize_object_fields(
-        self, &.{"ob_base", "log_destroy_pending"}
+        self, &.{"ob_base", "log_destroy_pending", "cancel_msg_py_object"}
     );
+
+    self.cancel_msg_py_object = python_c.get_py_none();
 
     const future_data = utils.get_data_ptr(Future, self);
     future_data.released = true;

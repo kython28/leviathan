@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 
 const python_c = @import("python_c");
 const PyObject = *python_c.PyObject;
@@ -9,11 +10,15 @@ const utils = @import("../utils/main.zig");
 
 pub const ReadCompletedCallback = *const fn (*ReadTransport, []const u8, std.os.linux.E) anyerror!void;
 
-pub const MAX_READ = (1 << 16);
-const ConnectionLostCallback = *const fn (usize, PyObject) anyerror!void;
+pub const MAX_READ = switch (builtin.mode) {
+    .Debug => (1 << 16),
+    else => (2 * 1000 * 1000)
+};
+
+const ConnectionLostCallback = *const fn (PyObject, PyObject) anyerror!void;
 
 loop: *Loop,
-parent_transport: usize,
+parent_transport: PyObject,
 exception_handler: PyObject,
 
 connection_lost_callback: ?ConnectionLostCallback,
@@ -33,7 +38,7 @@ initialized: bool = false,
 
 pub fn init(
     self: *ReadTransport, loop: *Loop, fd: std.posix.fd_t, callback: ReadCompletedCallback,
-    parent_transport: usize, exception_handler: PyObject,
+    parent_transport: PyObject, exception_handler: PyObject,
     connection_lost_callback: ConnectionLostCallback
 ) !void {
     const allocator = loop.allocator;
@@ -63,6 +68,9 @@ pub fn close(self: *ReadTransport) !void {
     const blocking_task_id = self.blocking_task_id;
     if (blocking_task_id == 0) {
         self.closed = true;
+        self.is_closing = true;
+
+        python_c.py_decref(self.parent_transport);
         return;
     }
 
@@ -108,11 +116,12 @@ fn read_operation_completed(
     const ret = self.read_completed_callback(self, self.buffer_being_read[0..bytes_read], io_uring_err);
     if (ret) |_| {
         if (io_uring_err == .SUCCESS or io_uring_err == .CANCELED or is_closing) {
+            if (is_closing) {
+                python_c.py_decref(self.parent_transport);
+            }
+
             return .Continue;
         }
-
-        self.is_closing = true;
-        self.closed = true;
 
         exc_message = python_c.PyUnicode_FromString("Exception ocurred while reading\x00")
             orelse return .Exception;
@@ -139,7 +148,14 @@ fn read_operation_completed(
     defer python_c.py_decref(exc_message);
     defer python_c.py_decref(exception);
 
+    defer {
+        self.is_closing = true;
+        self.closed = true;
+    }
+
     const parent_transport = self.parent_transport;
+    defer python_c.py_decref(parent_transport);
+
     if (self.connection_lost_callback) |callback| {
         callback(parent_transport, exception) catch |err| {
             return utils.handle_zig_function_error(err, CallbackManager.ExecuteCallbacksReturn.Exception);
@@ -149,7 +165,7 @@ fn read_operation_completed(
     var args: [3]PyObject = undefined;
     args[0] = exception;
     args[1] = exc_message;
-    args[2] = @ptrFromInt(parent_transport);
+    args[2] = parent_transport;
 
     const message_kname: PyObject = python_c.PyUnicode_FromString("message\x00")
         orelse return .Exception;

@@ -15,8 +15,8 @@ const Constructors = @import("constructors.zig");
 const WriteTransport = @import("../write_transport.zig");
 const ReadTransport = @import("../read_transport.zig");
 
-pub fn connection_lost_callback(transport_ptr: usize, exception: PyObject) !void {
-    const transport: *StreamTransportObject = @ptrFromInt(transport_ptr);
+pub fn connection_lost_callback(transport_obj: PyObject, exception: PyObject) !void {
+    const transport: *StreamTransportObject = @ptrCast(transport_obj);
 
     const read_transport = utils.get_data_ptr2(ReadTransport, "read_transport", transport);
     const write_transport = utils.get_data_ptr2(WriteTransport, "write_transport", transport);
@@ -30,20 +30,23 @@ pub fn close_transports(
     write_transport: *WriteTransport,
     exception: PyObject
 ) !void {
+    const closed_already = read_transport.closed or write_transport.closed;
+
     try read_transport.close();
     try write_transport.close();
 
-    const ret = python_c.PyObject_CallOneArg(transport.protocol_connection_lost.?, exception)
-        orelse return error.PythonError;
-    python_c.py_decref(ret);
+    if (!closed_already) {
+        const ret = python_c.PyObject_CallOneArg(transport.protocol_connection_lost.?, exception)
+            orelse return error.PythonError;
+        python_c.py_decref(ret);
+    }
 }
 
 pub fn transport_close(self: ?*StreamTransportObject) callconv(.C) ?PyObject {
     const instance = self.?;
 
     if (instance.closed) {
-        python_c.raise_python_runtime_error("Transport already closed\x00");
-        return null;
+        return python_c.get_py_none();
     }
 
     const read_transport = utils.get_data_ptr2(ReadTransport, "read_transport", instance);
@@ -52,8 +55,7 @@ pub fn transport_close(self: ?*StreamTransportObject) callconv(.C) ?PyObject {
     if (read_transport.closed and write_transport.closed) {
         instance.closed = true;
 
-        python_c.raise_python_runtime_error("Transport already closed\x00");
-        return null;
+        return python_c.get_py_none();
     }
 
     const arg = python_c.get_py_none();
@@ -61,8 +63,12 @@ pub fn transport_close(self: ?*StreamTransportObject) callconv(.C) ?PyObject {
         python_c.py_decref(arg);
         return utils.handle_zig_function_error(err, null);
     };
-    std.posix.close(instance.fd);
-    instance.fd = -1;
+
+    const fd = instance.fd;
+    if (fd >= 0) {
+        std.posix.close(fd);
+        instance.fd = -1;
+    }
 
     return arg;
 }
@@ -79,7 +85,6 @@ pub fn transport_is_closing(self: ?*StreamTransportObject) callconv(.C) ?PyObjec
 
     const closed = read_transport.closed and write_transport.closed;
     if (closed) {
-        std.posix.close(instance.fd);
         instance.closed = closed;
     }
 

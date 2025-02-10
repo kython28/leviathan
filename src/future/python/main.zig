@@ -101,6 +101,12 @@ const PythonFutureMembers: []const python_c.PyMemberDef = &[_]python_c.PyMemberD
         .offset = @offsetOf(FutureObject, "log_destroy_pending"),
         .doc = null,
     },
+    python_c.PyMemberDef{ // Just for be supported by asyncio.gather
+        .name = "_cancel_message\x00",
+        .type = python_c.Py_T_OBJECT_EX,
+        .offset = @offsetOf(FutureObject, "cancel_msg_py_object"),
+        .doc = null,
+    },
     python_c.PyMemberDef{
         .name = null, .flags = 0, .offset = 0, .doc = null
     }

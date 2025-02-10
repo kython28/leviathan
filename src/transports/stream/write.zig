@@ -24,7 +24,7 @@ pub fn write_operation_completed(
         return;
     }
 
-    const instance: *StreamTransportObject = @ptrFromInt(write_transport.parent_transport);
+    const instance: *StreamTransportObject = @ptrCast(write_transport.parent_transport);
 
     if (!instance.is_writing) {
         if (remaining_data <= instance.writing_low_water_mark) {

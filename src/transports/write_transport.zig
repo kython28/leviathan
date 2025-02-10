@@ -11,10 +11,10 @@ const BuffersArrayList = std.ArrayList(std.posix.iovec_const);
 const PyObjectsArrayList = std.ArrayList(PyObject);
 
 pub const WriteCompletedCallback = *const fn (*WriteTransport, usize, usize, std.os.linux.E) anyerror!void;
-const ConnectionLostCallback = *const fn (usize, PyObject) anyerror!void;
+const ConnectionLostCallback = *const fn (PyObject, PyObject) anyerror!void;
 
 loop: *Loop,
-parent_transport: usize,
+parent_transport: PyObject,
 exception_handler: PyObject,
 
 connection_lost_callback: ?ConnectionLostCallback,
@@ -23,9 +23,13 @@ write_completed_callback: WriteCompletedCallback,
 
 free_buffers: *BuffersArrayList,
 free_py_objects: *PyObjectsArrayList,
+free_buffers_size: usize = 0,
 
 busy_buffers: *BuffersArrayList,
 busy_py_objects: *PyObjectsArrayList,
+busy_buffers_size: usize = 0,
+busy_buffers_data_written: usize = 0,
+current_iovec_index: usize = 0,
 
 buffer_size: usize = 0,
 
@@ -43,7 +47,7 @@ initialized: bool = false,
 
 pub fn init(
     self: *WriteTransport, loop: *Loop, fd: std.posix.fd_t,
-    callback: WriteCompletedCallback, parent_transport: usize,
+    callback: WriteCompletedCallback, parent_transport: PyObject,
     exception_handler: PyObject, connection_lost_callback: ConnectionLostCallback
 ) !void {
     const allocator = loop.allocator;
@@ -92,6 +96,9 @@ pub fn close(self: *WriteTransport) !void {
     const blocking_task_id = self.blocking_task_id;
     if (blocking_task_id == 0) {
         self.closed = true;
+        self.is_closing = true;
+
+        python_c.py_decref(self.parent_transport);
         return;
     }
 
@@ -135,6 +142,38 @@ pub fn deinit(self: *WriteTransport) void {
     self.initialized = false;
 }
 
+inline fn queue_remaining_data(self: *WriteTransport, data_written: usize) !void {
+    var current_ioves_index = self.current_iovec_index;
+    var remaining: usize = data_written;
+    for (self.busy_buffers.items) |*iovec| {
+        const len = iovec.len;
+        if (remaining > len) {
+            remaining -= len;
+            current_ioves_index += 1;
+        }else{
+            iovec.base += remaining;
+            iovec.len -= remaining;
+            break;
+        }
+    }
+    self.current_iovec_index = current_ioves_index;
+
+    self.blocking_task_id = try Loop.Scheduling.IO.queue(
+        self.loop, .{
+            .PerformWriteV = .{
+                .callback = .{
+                    .ZigGenericIO = .{
+                        .callback = &write_operation_completed,
+                        .data = self
+                    }
+                },
+                .fd = self.fd,
+                .data = self.busy_buffers.items[current_ioves_index..],
+            }
+        }
+    );
+}
+
 fn write_operation_completed(
     data: ?*anyopaque, io_uring_res: i32, io_uring_err: std.os.linux.E
 ) CallbackManager.ExecuteCallbacksReturn {
@@ -147,11 +186,17 @@ fn write_operation_completed(
     var data_written: usize = 0;
     var remaining_data = self.buffer_size;
     if (io_uring_res > 0) {
-        for (self.busy_buffers.items) |iovec| {
-            data_written += iovec.len;
-        }
-        remaining_data -= data_written;
+        data_written = self.busy_buffers_data_written + @as(usize, @intCast(io_uring_res));
+        remaining_data -= @intCast(io_uring_res);
         self.buffer_size = remaining_data;
+        self.busy_buffers_data_written = data_written;
+
+        if (data_written < self.busy_buffers_size) {
+            queue_remaining_data(self, @intCast(io_uring_res)) catch |err| {
+                return utils.handle_zig_function_error(err, CallbackManager.ExecuteCallbacksReturn.Exception);
+            };
+            return .Continue;
+        }
     }
 
     self.write_completed_callback(self, data_written, remaining_data, io_uring_err) catch |err| {
@@ -162,6 +207,7 @@ fn write_operation_completed(
         .SUCCESS => blk: {
             if (self.is_closing) {
                 self.closed = true;
+                python_c.py_decref(self.parent_transport);
             }else{
                 self.queue_buffers_and_swap() catch |err| {
                     // TODO: Optimize this
@@ -184,11 +230,13 @@ fn write_operation_completed(
         .CANCELED => {
             self.is_closing = true;
             self.closed = true;
+            python_c.py_decref(self.parent_transport);
             return .Continue;
         },
         else => {
             if (self.is_closing) {
                 self.closed = true;
+                python_c.py_decref(self.parent_transport);
                 return .Continue;
             }
 
@@ -203,10 +251,14 @@ fn write_operation_completed(
     defer python_c.py_decref(exc_message);
     defer python_c.py_decref(exception);
 
-    self.is_closing = true;
-    self.closed = true;
+    defer {
+        self.is_closing = true;
+        self.closed = true;
+    }
 
     const parent_transport = self.parent_transport;
+    defer python_c.py_decref(parent_transport);
+
     if (self.connection_lost_callback) |callback| {
         callback(parent_transport, exception) catch |err| {
             return utils.handle_zig_function_error(err, CallbackManager.ExecuteCallbacksReturn.Exception);
@@ -216,7 +268,7 @@ fn write_operation_completed(
     var args: [3]PyObject = undefined;
     args[0] = exception;
     args[1] = exc_message;
-    args[2] = @ptrFromInt(parent_transport);
+    args[2] = parent_transport;
 
     const message_kname: PyObject = python_c.PyUnicode_FromString("message\x00")
         orelse return .Exception;
@@ -297,6 +349,9 @@ pub fn queue_buffers_and_swap(self: *WriteTransport) !void {
 
     self.busy_buffers = current_free_buffers;
     self.busy_py_objects = current_free_py_objects;
+    self.busy_buffers_data_written = 0;
+    self.busy_buffers_size = self.buffer_size;
+    self.current_iovec_index = 0;
 
     self.ready_to_queue_write_op = false;
 }

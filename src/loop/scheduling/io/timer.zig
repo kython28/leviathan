@@ -26,22 +26,24 @@ pub fn wait(set: *IO.BlockingTasksSet, data: WaitData) !usize {
         timespec_sec_info.bits == kernel_timespec_sec_info.bits and
         timespec_sec_info.signedness == kernel_timespec_sec_info.signedness
     ) {
-        _ = try ring.timeout(
+        const sqe = try ring.timeout(
             @intCast(@intFromPtr(data_ptr)),
             @ptrCast(&data.duration), 0,
             @intFromEnum(data.delay_type)
         );
+        sqe.flags |= std.os.linux.IOSQE_ASYNC;
     }else{
         const k_duration: std.os.linux.kernel_timespec = .{
             .sec = data.duration.tv_sec,
             .nsec = data.duration.tv_nsec
         };
 
-        _ = try ring.timeout(
+        const sqe = try ring.timeout(
             @intCast(@intFromPtr(data_ptr)),
             &k_duration, 0,
             @intFromEnum(data.delay_type)
         );
+        sqe.flags |= std.os.linux.IOSQE_ASYNC;
     }
 
     const ret = try ring.submit();

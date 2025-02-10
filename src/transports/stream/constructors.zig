@@ -130,28 +130,15 @@ inline fn z_stream_new(@"type": *python_c.PyTypeObject) !*StreamTransportObject 
     const instance: *StreamTransportObject = @ptrCast(@"type".tp_alloc.?(@"type", 0) orelse return error.PythonError);
     errdefer @"type".tp_free.?(instance);
 
-    @memset(&instance.write_transport, 0);
-    @memset(&instance.read_transport, 0);
-
-    instance.socket = null;
-    instance.peername = null;
-
-    instance.protocol = null;
-    instance.protocol_max_read_constant = null;
-    instance.protocol_data_received = null;
-    
-    instance.protocol_get_buffer = null;
-    instance.protocol_buffer_updated = null;
-
-    instance.protocol_connection_lost = null;
-    instance.protocol_pause_writing = null;
-    instance.protocol_resume_writing = null;
+    python_c.initialize_object_fields(
+        instance, &.{
+            "ob_base", "write_transport", "read_transport", "fd",
+            "protocol_type", "closed"
+        }
+    );
 
     instance.fd = -1;
     instance.protocol_type = undefined;
-
-    instance.is_reading = false;
-    instance.is_writing = false;
     instance.closed = true;
 
     return instance;
@@ -165,22 +152,7 @@ pub fn stream_new(
 }
  
 pub fn stream_traverse(self: ?*StreamTransportObject, visit: python_c.visitproc, arg: ?*anyopaque) callconv(.C) c_int {
-    const instance = self.?;
-    return python_c.py_visit(
-        &[_]?PyObject{
-            instance.protocol_buffer.obj,
-            instance.socket,
-            instance.peername,
-            instance.protocol,
-            instance.protocol_max_read_constant,
-            instance.protocol_data_received,
-            instance.protocol_buffer_updated,
-            instance.protocol_get_buffer,
-            instance.protocol_connection_lost,
-            instance.protocol_pause_writing,
-            instance.protocol_resume_writing,
-        }, visit, arg
-    );
+    return python_c.py_visit(self.?, visit, arg);
 }
 
 pub fn stream_clear(self: ?*StreamTransportObject) callconv(.C) c_int {
@@ -199,20 +171,22 @@ pub fn stream_clear(self: ?*StreamTransportObject) callconv(.C) c_int {
         python_c.PyBuffer_Release(&py_transport.protocol_buffer);
     }
 
-    python_c.py_decref_and_set_null(&py_transport.socket);
-    python_c.py_decref_and_set_null(&py_transport.peername);
+    python_c.deinitialize_object_fields(py_transport, &.{"protocol_buffer"});
 
-    python_c.py_decref_and_set_null(&py_transport.protocol);
-    python_c.py_decref_and_set_null(&py_transport.protocol_max_read_constant);
+    // python_c.py_decref_and_set_null(&py_transport.socket);
+    // python_c.py_decref_and_set_null(&py_transport.peername);
 
-    python_c.py_decref_and_set_null(&py_transport.protocol_data_received);
+    // python_c.py_decref_and_set_null(&py_transport.protocol);
+    // python_c.py_decref_and_set_null(&py_transport.protocol_max_read_constant);
 
-    python_c.py_decref_and_set_null(&py_transport.protocol_get_buffer);
-    python_c.py_decref_and_set_null(&py_transport.protocol_buffer_updated);
+    // python_c.py_decref_and_set_null(&py_transport.protocol_data_received);
 
-    python_c.py_decref_and_set_null(&py_transport.protocol_connection_lost);
-    python_c.py_decref_and_set_null(&py_transport.protocol_pause_writing);
-    python_c.py_decref_and_set_null(&py_transport.protocol_resume_writing);
+    // python_c.py_decref_and_set_null(&py_transport.protocol_get_buffer);
+    // python_c.py_decref_and_set_null(&py_transport.protocol_buffer_updated);
+
+    // python_c.py_decref_and_set_null(&py_transport.protocol_connection_lost);
+    // python_c.py_decref_and_set_null(&py_transport.protocol_pause_writing);
+    // python_c.py_decref_and_set_null(&py_transport.protocol_resume_writing);
 
     const fd = py_transport.fd;
     if (fd >= 0) {

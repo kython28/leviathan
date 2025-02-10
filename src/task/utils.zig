@@ -30,7 +30,7 @@ pub fn task_get_name(self: ?*Task.PythonTaskObject) callconv(.C) ?PyObject {
         return python_c.py_newref(name);
     }
 
-    const loop = instance.fut.py_loop.?;
+    const loop: *Loop.Python.LoopObject = @ptrCast(instance.fut.py_loop.?);
     const loop_data = utils.get_data_ptr(Loop, loop);
     const allocator = loop_data.allocator;
     

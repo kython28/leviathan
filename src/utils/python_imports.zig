@@ -38,7 +38,7 @@ pub fn initialize_python_imports() !void {
 
     base_event_loop = python_c.PyObject_GetAttrString(asyncio_module, "AbstractEventLoop\x00")
         orelse return error.PythonError;
-    socket_class = python_c.PyObject_GetAttrString(asyncio_module, "socket\x00")
+    socket_class = python_c.PyObject_GetAttrString(socket_module, "socket\x00")
         orelse return error.PythonError;
 
     invalid_state_exc = python_c.PyObject_GetAttrString(asyncio_module, "InvalidStateError\x00")

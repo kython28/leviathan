@@ -14,7 +14,13 @@ inline fn z_loop_new(@"type": *python_c.PyTypeObject) !*LoopObject {
     const instance: *LoopObject = @ptrCast(@"type".tp_alloc.?(@"type", 0) orelse return error.PythonError);
     errdefer @"type".tp_free.?(instance);
 
-    @memset(&instance.data, 0);
+    python_c.initialize_object_fields(
+        instance, &.{
+            "ob_base", "asyncgens_set",
+            "asyncgens_set_add", "asyncgens_set_discard",
+            "old_asyncgen_hooks"
+        }
+    );
 
     const weakref_set_class = python_c.PyObject_GetAttrString(python_imports.weakref_module, "WeakSet\x00")
         orelse return error.PythonError;
@@ -58,28 +64,19 @@ pub fn loop_clear(self: ?*LoopObject) callconv(.C) c_int {
         loop_data.release();
     }
 
+    python_c.deinitialize_object_fields(py_loop, &.{});
+    // python_c.py_decref_and_set_null(&py_loop.asyncgens_set);
+    // python_c.py_decref_and_set_null(&py_loop.asyncgens_set_add);
+    // python_c.py_decref_and_set_null(&py_loop.asyncgens_set_discard);
+    // python_c.py_decref_and_set_null(&py_loop.old_asyncgen_hooks);
 
-    python_c.py_decref_and_set_null(&py_loop.asyncgens_set);
-    python_c.py_decref_and_set_null(&py_loop.asyncgens_set_add);
-    python_c.py_decref_and_set_null(&py_loop.asyncgens_set_discard);
-    python_c.py_decref_and_set_null(&py_loop.old_asyncgen_hooks);
-
-    python_c.py_decref_and_set_null(&py_loop.exception_handler);
+    // python_c.py_decref_and_set_null(&py_loop.exception_handler);
 
     return 0;
 }
 
 pub fn loop_traverse(self: ?*LoopObject, visit: python_c.visitproc, arg: ?*anyopaque) callconv(.C) c_int {
-    const instance = self.?;
-    return python_c.py_visit(
-        &[_]?*python_c.PyObject{
-            instance.asyncgens_set,
-            instance.asyncgens_set_add,
-            instance.asyncgens_set_discard,
-            instance.old_asyncgen_hooks,
-            instance.exception_handler
-        }, visit, arg
-    );
+    return python_c.py_visit(self.?, visit, arg);
 }
 
 pub fn loop_dealloc(self: ?*LoopObject) callconv(.C) void {

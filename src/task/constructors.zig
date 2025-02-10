@@ -18,17 +18,7 @@ const builtin = @import("builtin");
 
 inline fn task_set_initial_values(self: *PythonTaskObject) void {
     Future.Python.Constructors.future_set_initial_values(&self.fut);
-    self.py_context = null;
-    self.coro = null;
-    self.name = null;
-
-    self.wake_up_task_callback = null;
-    self.fut_waiter = null;
-
-    self.weakref_list = null;
-
-    self.cancel_requests = 0;
-    self.must_cancel = false;
+    python_c.initialize_object_fields(self, &.{"fut"});
 }
 
 inline fn task_init_configuration(
@@ -132,19 +122,21 @@ pub fn task_clear(self: ?*PythonTaskObject) callconv(.C) c_int {
         future_data.release();
     }
 
-    python_c.py_decref_and_set_null(@ptrCast(&fut.py_loop));
-    python_c.py_decref_and_set_null(&fut.exception);
-    python_c.py_decref_and_set_null(&fut.exception_tb);
-    python_c.py_decref_and_set_null(&fut.cancel_msg_py_object);
+    python_c.deinitialize_object_fields(py_task, &.{"weakref_list"});
 
-    python_c.py_decref_and_set_null(&py_task.py_context);
-    python_c.py_decref_and_set_null(&py_task.name);
+    // python_c.py_decref_and_set_null(@ptrCast(&fut.py_loop));
+    // python_c.py_decref_and_set_null(&fut.exception);
+    // python_c.py_decref_and_set_null(&fut.exception_tb);
+    // python_c.py_decref_and_set_null(&fut.cancel_msg_py_object);
 
-    python_c.py_decref_and_set_null(&py_task.coro);
-    python_c.py_decref_and_set_null(&py_task.coro_throw);
+    // python_c.py_decref_and_set_null(&py_task.py_context);
+    // python_c.py_decref_and_set_null(&py_task.name);
 
-    python_c.py_decref_and_set_null(&py_task.wake_up_task_callback);
-    python_c.py_decref_and_set_null(&py_task.fut_waiter);
+    // python_c.py_decref_and_set_null(&py_task.coro);
+    // python_c.py_decref_and_set_null(&py_task.coro_throw);
+
+    // python_c.py_decref_and_set_null(&py_task.wake_up_task_callback);
+    // python_c.py_decref_and_set_null(&py_task.fut_waiter);
 
     if (py_task.weakref_list != null) {
         python_c.PyObject_ClearWeakRefs(@ptrCast(py_task));
@@ -155,23 +147,7 @@ pub fn task_clear(self: ?*PythonTaskObject) callconv(.C) c_int {
 }
 
 pub fn task_traverse(self: ?*PythonTaskObject, visit: python_c.visitproc, arg: ?*anyopaque) callconv(.C) c_int {
-    const instance = self.?;
-    return python_c.py_visit(
-        &[_]?*python_c.PyObject{
-            @ptrCast(instance.fut.py_loop),
-            instance.fut.exception,
-            instance.fut.exception_tb,
-            instance.fut.cancel_msg_py_object,
-
-            instance.py_context,
-            instance.name,
-            instance.coro,
-            instance.coro_throw,
-
-            instance.fut_waiter,
-            instance.wake_up_task_callback
-        }, visit, arg
-    );
+    return python_c.py_visit(self.?, visit, arg);
 }
 
 pub fn task_dealloc(self: ?*PythonTaskObject) callconv(.C) void {

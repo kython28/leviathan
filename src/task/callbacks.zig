@@ -135,8 +135,9 @@ inline fn cancel_future_object(
 
 inline fn handle_legacy_future_object(
     task: *Task.PythonTaskObject, future: PyObject
-) CallbackManager.ExecuteCallbacksReturn {
-    const loop_data = utils.get_data_ptr(Loop, task.fut.py_loop.?);
+) CallbackManager.ExecuteCallbacksReturn { 
+    const py_loop: *Loop.Python.LoopObject = @ptrCast(task.fut.py_loop.?);
+    const loop_data = utils.get_data_ptr(Loop, py_loop);
     const allocator = loop_data.allocator;
 
     const asyncio_future_blocking: PyObject = python_c.PyObject_GetAttrString(
@@ -192,7 +193,8 @@ inline fn handle_leviathan_future_object(
 
     const future_data = utils.get_data_ptr(Future, future);
 
-    if (loop_data != utils.get_data_ptr(Loop, future.py_loop.?)) {
+    const py_loop: *Loop.Python.LoopObject = @ptrCast(future.py_loop.?);
+    if (loop_data != utils.get_data_ptr(Loop, py_loop)) {
         return execute_zig_function(
             create_new_py_exception_and_add_event, .{
                 loop_data, allocator, "Task {s} and Future {s} are not in the same loop\x00",
@@ -347,7 +349,7 @@ pub fn step_run_and_handle_result(
     defer release_python_task_callback(task, exception_value);
 
     const py_fut = &task.fut;
-    const py_loop = py_fut.py_loop.?;
+    const py_loop: *Loop.Python.LoopObject = @ptrCast(py_fut.py_loop.?);
 
     const loop_data = utils.get_data_ptr(Loop, py_loop);
     const future_data = utils.get_data_ptr(Future, py_fut);

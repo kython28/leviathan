@@ -13,14 +13,13 @@ const PythonFutureObject = Future.Python.FutureObject;
 const std = @import("std");
 
 pub inline fn future_set_initial_values(self: *PythonFutureObject) void {
+    python_c.initialize_object_fields(
+        self, &.{"ob_base", "log_destroy_pending"}
+    );
+
     const future_data = utils.get_data_ptr(Future, self);
     future_data.released = true;
 
-    self.exception_tb = null;
-    self.exception = null;
-
-    self.cancel_msg_py_object = null;
-    self.blocking = 0;
     self.log_destroy_pending = 1;
 }
 
@@ -28,7 +27,7 @@ pub inline fn future_init_configuration(self: *PythonFutureObject, leviathan_loo
     const loop_data = utils.get_data_ptr(Loop, leviathan_loop);
     const future_data = utils.get_data_ptr(Future, self);
     future_data.init(loop_data);
-    self.py_loop = python_c.py_newref(leviathan_loop);
+    self.py_loop = @ptrCast(python_c.py_newref(leviathan_loop));
 }
 
 pub inline fn fast_new_future(leviathan_loop: *LoopObject) !*PythonFutureObject {
@@ -71,24 +70,18 @@ pub fn future_clear(self: ?*PythonFutureObject) callconv(.C) c_int {
         future_data.release();
     }
 
-    python_c.py_decref_and_set_null(@ptrCast(&py_future.py_loop));
-    python_c.py_decref_and_set_null(&py_future.exception);
-    python_c.py_decref_and_set_null(&py_future.exception_tb);
-    python_c.py_decref_and_set_null(&py_future.cancel_msg_py_object);
+    python_c.deinitialize_object_fields(py_future, &.{});
+
+    // python_c.py_decref_and_set_null(@ptrCast(&py_future.py_loop));
+    // python_c.py_decref_and_set_null(&py_future.exception);
+    // python_c.py_decref_and_set_null(&py_future.exception_tb);
+    // python_c.py_decref_and_set_null(&py_future.cancel_msg_py_object);
 
     return 0;
 }
 
 pub fn future_traverse(self: ?*PythonFutureObject, visit: python_c.visitproc, arg: ?*anyopaque) callconv(.C) c_int {
-    const instance = self.?;
-    return python_c.py_visit(
-        &[_]?*python_c.PyObject{
-            @ptrCast(instance.py_loop),
-            instance.exception,
-            instance.exception_tb,
-            instance.cancel_msg_py_object,
-        }, visit, arg
-    );
+    return python_c.py_visit(self.?, visit, arg);
 }
 
 pub fn future_dealloc(self: ?*PythonFutureObject) callconv(.C) void {
@@ -130,7 +123,7 @@ pub fn future_init(
     return utils.execute_zig_function(z_future_init, .{self.?, args, kwargs});
 }
 
-pub fn future_get_loop(self: ?*PythonFutureObject) callconv(.C) ?*LoopObject {
+pub fn future_get_loop(self: ?*PythonFutureObject) callconv(.C) ?PyObject {
     return python_c.py_newref(self.?.py_loop);
 }
 

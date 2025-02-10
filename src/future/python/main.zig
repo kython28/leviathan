@@ -79,7 +79,7 @@ pub const FutureObject = extern struct {
     ob_base: python_c.PyObject,
     data: [@sizeOf(Future)]u8,
 
-    py_loop: ?*Loop.Python.LoopObject,
+    py_loop: ?PyObject,
     exception: ?PyObject,
     exception_tb: ?PyObject,
 

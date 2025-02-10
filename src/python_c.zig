@@ -149,10 +149,42 @@ pub inline fn py_newref(op: anytype) @TypeOf(op) {
     return op;
 }
 
-pub inline fn py_visit(objects: []const ?*Python.PyObject, visit: Python.visitproc, arg: ?*anyopaque) c_int {
-    for (objects) |obj| {
-        if (obj) |_obj| {
-            const vret = visit.?(_obj, arg);
+pub fn py_visit(object: anytype, visit: Python.visitproc, arg: ?*anyopaque) c_int {
+    const visit_ptr = visit.?;
+    const fields = comptime std.meta.fields(@typeInfo(@TypeOf(object)).pointer.child);
+    loop: inline for (fields) |field| {
+        const field_name = field.name;
+        const value: ?*Python.PyObject = switch (@typeInfo(field.type)) {
+            .optional => |data| blk: {
+                switch (@typeInfo(data.child)) {
+                    .pointer => |data2| {
+                        if (data2.child != Python.PyObject) {
+                            continue :loop;
+                        }
+                        break :blk @field(object, field_name);
+                    },
+                    else => continue :loop
+                }
+            },
+            .pointer => |data| blk: {
+                if (data.child != Python.PyObject) {
+                    continue :loop;
+                }
+                break :blk @field(object, field_name);
+            },
+            .@"struct" => {
+                const vret = py_visit(&@field(object, field_name), visit, arg);
+                if (vret != 0) {
+                    return vret;
+                }
+
+                continue :loop;
+            },
+            else => continue :loop
+        };
+
+        if (value) |v| {
+            const vret = visit_ptr(v, arg);
             if (vret != 0) {
                 return vret;
             }
@@ -223,6 +255,61 @@ pub inline fn raise_python_type_error(message: ?[:0]const u8) void {
 
 pub inline fn raise_python_runtime_error(message: ?[:0]const u8) void {
     raise_python_error(Python.PyExc_RuntimeError.?, message);
+}
+
+pub inline fn initialize_object_fields(
+    object: anytype, comptime exclude_fields: []const []const u8
+) void {
+    const fields = comptime std.meta.fields(@typeInfo(@TypeOf(object)).pointer.child);
+    loop: inline for (fields) |field| {
+        const field_name = field.name;
+
+        inline for (exclude_fields) |exclude_field| {
+            if (comptime std.mem.eql(u8, field_name, exclude_field)) {
+                continue :loop;
+            }
+        }
+
+        @field(object, field_name) = comptime std.mem.zeroes(field.type);
+    }
+}
+
+pub fn deinitialize_object_fields(
+    object: anytype, comptime exclude_fields: []const []const u8
+) void {
+    const fields = comptime std.meta.fields(@typeInfo(@TypeOf(object)).pointer.child);
+    loop: inline for (fields) |field| {
+        const field_name = field.name;
+
+        inline for (exclude_fields) |exclude_field| {
+            if (comptime std.mem.eql(u8, field_name, exclude_field)) {
+                continue :loop;
+            }
+        }
+
+        switch (@typeInfo(field.type)) {
+            .optional => |data| {
+                switch (@typeInfo(data.child)) {
+                    .pointer => |data2| {
+                        if (data2.child == Python.PyObject) {
+                            py_decref_and_set_null(&@field(object, field_name));
+                        }
+                    },
+                    else => {}
+                }
+            },
+            .pointer => |data| {
+                if (data.child == Python.PyObject) {
+                    py_decref(@field(object, field_name));
+                    @field(object, field_name) = undefined;
+                }
+            },
+            .@"struct" => {
+                deinitialize_object_fields(&@field(object, field_name), exclude_fields);
+            },
+            else => {}
+        }
+    }
 }
 
 const Python = @This();

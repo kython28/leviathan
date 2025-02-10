@@ -27,7 +27,7 @@ inline fn z_future_add_done_callback(
         &.{&context},
     );
 
-    const py_loop = self.py_loop.?;
+    const py_loop: *Loop.Python.LoopObject = @ptrCast(self.py_loop.?);
     if (context) |py_ctx| {
         if (python_c.is_none(py_ctx)) {
             context = python_c.PyContext_CopyCurrent()

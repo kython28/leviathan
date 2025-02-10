@@ -173,21 +173,6 @@ pub fn stream_clear(self: ?*StreamTransportObject) callconv(.C) c_int {
 
     python_c.deinitialize_object_fields(py_transport, &.{"protocol_buffer"});
 
-    // python_c.py_decref_and_set_null(&py_transport.socket);
-    // python_c.py_decref_and_set_null(&py_transport.peername);
-
-    // python_c.py_decref_and_set_null(&py_transport.protocol);
-    // python_c.py_decref_and_set_null(&py_transport.protocol_max_read_constant);
-
-    // python_c.py_decref_and_set_null(&py_transport.protocol_data_received);
-
-    // python_c.py_decref_and_set_null(&py_transport.protocol_get_buffer);
-    // python_c.py_decref_and_set_null(&py_transport.protocol_buffer_updated);
-
-    // python_c.py_decref_and_set_null(&py_transport.protocol_connection_lost);
-    // python_c.py_decref_and_set_null(&py_transport.protocol_pause_writing);
-    // python_c.py_decref_and_set_null(&py_transport.protocol_resume_writing);
-
     const fd = py_transport.fd;
     if (fd >= 0) {
         std.posix.close(fd);

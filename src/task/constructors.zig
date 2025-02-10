@@ -124,20 +124,6 @@ pub fn task_clear(self: ?*PythonTaskObject) callconv(.C) c_int {
 
     python_c.deinitialize_object_fields(py_task, &.{"weakref_list"});
 
-    // python_c.py_decref_and_set_null(@ptrCast(&fut.py_loop));
-    // python_c.py_decref_and_set_null(&fut.exception);
-    // python_c.py_decref_and_set_null(&fut.exception_tb);
-    // python_c.py_decref_and_set_null(&fut.cancel_msg_py_object);
-
-    // python_c.py_decref_and_set_null(&py_task.py_context);
-    // python_c.py_decref_and_set_null(&py_task.name);
-
-    // python_c.py_decref_and_set_null(&py_task.coro);
-    // python_c.py_decref_and_set_null(&py_task.coro_throw);
-
-    // python_c.py_decref_and_set_null(&py_task.wake_up_task_callback);
-    // python_c.py_decref_and_set_null(&py_task.fut_waiter);
-
     if (py_task.weakref_list != null) {
         python_c.PyObject_ClearWeakRefs(@ptrCast(py_task));
         py_task.weakref_list = null;

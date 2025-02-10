@@ -72,11 +72,6 @@ pub fn future_clear(self: ?*PythonFutureObject) callconv(.C) c_int {
 
     python_c.deinitialize_object_fields(py_future, &.{});
 
-    // python_c.py_decref_and_set_null(@ptrCast(&py_future.py_loop));
-    // python_c.py_decref_and_set_null(&py_future.exception);
-    // python_c.py_decref_and_set_null(&py_future.exception_tb);
-    // python_c.py_decref_and_set_null(&py_future.cancel_msg_py_object);
-
     return 0;
 }
 

@@ -65,13 +65,6 @@ pub fn loop_clear(self: ?*LoopObject) callconv(.C) c_int {
     }
 
     python_c.deinitialize_object_fields(py_loop, &.{});
-    // python_c.py_decref_and_set_null(&py_loop.asyncgens_set);
-    // python_c.py_decref_and_set_null(&py_loop.asyncgens_set_add);
-    // python_c.py_decref_and_set_null(&py_loop.asyncgens_set_discard);
-    // python_c.py_decref_and_set_null(&py_loop.old_asyncgen_hooks);
-
-    // python_c.py_decref_and_set_null(&py_loop.exception_handler);
-
     return 0;
 }
 

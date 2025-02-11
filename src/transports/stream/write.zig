@@ -166,9 +166,8 @@ pub fn transport_write(self: ?*StreamTransportObject, py_buffer: ?PyObject) call
 
 
     const write_transport = utils.get_data_ptr2(WriteTransport, "write_transport", instance);
-    if (write_transport.is_closing or write_transport.must_write_eof) {
-        python_c.raise_python_runtime_error("Transport is closed\x00");
-        return null;
+    if (write_transport.is_closing) {
+        return python_c.get_py_none();
     }
 
     const _py_buffer = py_buffer.?;
@@ -179,11 +178,7 @@ pub fn transport_write(self: ?*StreamTransportObject, py_buffer: ?PyObject) call
         return null;
     }
 
-    if (buffer_size == 0) {
-        write_transport.queue_eof() catch |err| {
-            return utils.handle_zig_function_error(err, null);
-        };
-    }else{
+    if (buffer_size > 0) {
         const new_buffer_size = write_transport.append_new_buffer_to_write(_py_buffer, buffer[0..@intCast(buffer_size)]) catch |err| {
             return utils.handle_zig_function_error(err, null);
         };
@@ -209,22 +204,19 @@ pub fn transport_write_lines(self: ?*StreamTransportObject, py_buffers: ?PyObjec
         return null;
     }
 
-    const _py_buffers = py_buffers.?;
-    if (python_c.PyIter_Check(_py_buffers) == 0) {
-        python_c.raise_python_type_error("Invalid iterable object\x00");
-        return null;
-    }
-
     const write_transport = utils.get_data_ptr2(WriteTransport, "write_transport", instance);
-    if (write_transport.is_closing or write_transport.must_write_eof) {
-        python_c.raise_python_runtime_error("Transport is closed\x00");
-        return null;
+    if (write_transport.is_closing) {
+        return python_c.get_py_none();
     }
 
+    const _py_buffers = py_buffers.?;
     const iter: PyObject = python_c.PyObject_GetIter(_py_buffers) orelse return null;
+    defer python_c.py_decref(iter);
+
     var new_buffer_size: usize = 0;
     while (true) {
         const py_buffer: PyObject = python_c.PyIter_Next(iter) orelse break;
+        defer python_c.py_decref(py_buffer);
 
         var buffer: [*]u8 = undefined;
         var buffer_size: python_c.Py_ssize_t = undefined;
@@ -232,11 +224,7 @@ pub fn transport_write_lines(self: ?*StreamTransportObject, py_buffers: ?PyObjec
             return null;
         }
 
-        if (buffer_size == 0) {
-            write_transport.queue_eof() catch |err| {
-                return utils.handle_zig_function_error(err, null);
-            };
-        }else{
+        if (buffer_size > 0) {
             new_buffer_size = write_transport.append_new_buffer_to_write(py_buffer, buffer[0..@intCast(buffer_size)]) catch |err| {
                 return utils.handle_zig_function_error(err, null);
             };

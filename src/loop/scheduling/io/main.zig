@@ -12,6 +12,7 @@ pub const Read = @import("read.zig");
 pub const Write = @import("write.zig");
 pub const Timer = @import("timer.zig");
 pub const Cancel = @import("cancel.zig");
+pub const Socket = @import("socket.zig");
 
 pub const BlockingTaskData = struct {
     callback_data: ?CallbackManger.Callback,
@@ -164,9 +165,9 @@ pub const BlockingOperation = enum {
     PerformRead,
     PerformWrite,
     PerformWriteV,
-    PerformWriteEOF,
     WaitTimer,
-    Cancel
+    Cancel,
+    SocketShutdown
 };
 
 pub const WaitData = struct {
@@ -180,9 +181,9 @@ pub const BlockingOperationData = union(BlockingOperation) {
     PerformRead: Read.PerformData,
     PerformWrite: Write.PerformData,
     PerformWriteV: Write.PerformVData,
-    PerformWriteEOF: Write.PerformEOFData,
     WaitTimer: Timer.WaitData,
-    Cancel: usize
+    Cancel: usize,
+    SocketShutdown: Socket.ShutdownData,
 };
 
 inline fn get_blocking_tasks_set(
@@ -252,8 +253,8 @@ pub fn queue(self: *Loop, event: BlockingOperationData) !usize {
         .PerformRead => |data| try Read.perform(blocking_tasks_set, data),
         .PerformWrite => |data| try Write.perform(blocking_tasks_set, data),
         .PerformWriteV => |data| try Write.perform_with_iovecs(blocking_tasks_set, data),
-        .PerformWriteEOF => |data| try Write.eof(blocking_tasks_set, data),
         .WaitTimer => |data| try Timer.wait(blocking_tasks_set, data),
+        .SocketShutdown => |data| try Socket.shutdown(blocking_tasks_set, data),
         else => unreachable
     };
 }

@@ -100,8 +100,7 @@ fn read_operation_completed(
     const self: *ReadTransport = @alignCast(@ptrCast(data.?));
     self.blocking_task_id = 0;
 
-    const is_closing = self.is_closing;
-    if (is_closing) {
+    if (self.is_closing) {
         self.closed = true;
     }
 
@@ -115,6 +114,7 @@ fn read_operation_completed(
 
     const ret = self.read_completed_callback(self, self.buffer_being_read[0..bytes_read], io_uring_err);
     if (ret) |_| {
+        const is_closing = self.is_closing;
         if (io_uring_err == .SUCCESS or io_uring_err == .CANCELED or is_closing) {
             if (is_closing) {
                 python_c.py_decref(self.parent_transport);

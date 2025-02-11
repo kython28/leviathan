@@ -71,7 +71,11 @@ pub fn read_operation_completed(read_transport: *ReadTransport, data: []const u8
     if (data.len == 0) {
         const ret = python_c.PyObject_CallNoArgs(transport.protocol_eof_received.?)
             orelse return error.PythonError;
-        python_c.py_decref(ret);
+        defer python_c.py_decref(ret);
+
+        if (python_c.Py_IsTrue(ret) == 0) {
+            try read_transport.close();
+        } 
 
         return;
     }

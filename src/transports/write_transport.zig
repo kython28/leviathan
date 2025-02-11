@@ -38,7 +38,6 @@ fd: std.posix.fd_t,
 ready_to_queue_write_op: bool = true,
 blocking_task_id: usize = 0,
 
-must_write_eof: bool = false,
 is_writing: bool = false,
 is_closing: bool = false,
 closed: bool = false,
@@ -292,27 +291,7 @@ fn write_operation_completed(
 pub fn queue_buffers_and_swap(self: *WriteTransport) !void {
     const current_free_buffers = self.free_buffers;
     if (current_free_buffers.items.len == 0) {
-        if (self.must_write_eof) {
-            defer self.must_write_eof = false;
-
-            self.blocking_task_id = try Loop.Scheduling.IO.queue(
-                self.loop, .{
-                    .PerformWriteEOF = .{
-                        .callback = .{
-                            .ZigGenericIO = .{
-                                .callback = &write_operation_completed,
-                                .data = self
-                            }
-                        },
-                        .fd = self.fd,
-                    },
-                }
-            );
-
-            self.is_closing = true;
-        }else{
-            self.ready_to_queue_write_op = true;
-        }
+        self.ready_to_queue_write_op = true;
         return;
     }
 
@@ -381,12 +360,19 @@ pub inline fn append_new_buffer_to_write(self: *WriteTransport, py_object: PyObj
     return new_buffer_size;
 }
 
-pub inline fn queue_eof(self: *WriteTransport) !void {
-    self.must_write_eof = true;
+pub fn queue_eof(self: *WriteTransport) !void {
+    if (self.buffer_size > 0) return;
 
-    if (self.ready_to_queue_write_op) {
-        try queue_buffers_and_swap(self);
-    }
+    try self.close();
+
+    _ = try Loop.Scheduling.IO.queue(
+        self.loop, .{
+            .SocketShutdown = .{
+                .socket_fd = self.fd,
+                .how = std.os.linux.SHUT.WR
+            }
+        }
+    );
 }
 
 const WriteTransport = @This();

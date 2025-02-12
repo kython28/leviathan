@@ -69,8 +69,6 @@ pub fn close(self: *ReadTransport) !void {
     if (blocking_task_id == 0) {
         self.closed = true;
         self.is_closing = true;
-
-        python_c.py_decref(self.parent_transport);
         return;
     }
 
@@ -100,9 +98,8 @@ fn read_operation_completed(
     const self: *ReadTransport = @alignCast(@ptrCast(data.?));
     self.blocking_task_id = 0;
 
-    if (self.is_closing) {
-        self.closed = true;
-    }
+    const parent_transport = self.parent_transport;
+    defer python_c.py_decref(parent_transport);
 
     var bytes_read: usize = 0;
     if (io_uring_err == .SUCCESS) {
@@ -117,7 +114,7 @@ fn read_operation_completed(
         const is_closing = self.is_closing;
         if (io_uring_err == .SUCCESS or io_uring_err == .CANCELED or is_closing) {
             if (is_closing) {
-                python_c.py_decref(self.parent_transport);
+                self.closed = true;
             }
 
             return .Continue;
@@ -153,8 +150,6 @@ fn read_operation_completed(
         self.closed = true;
     }
 
-    const parent_transport = self.parent_transport;
-    defer python_c.py_decref(parent_transport);
 
     if (self.connection_lost_callback) |callback| {
         callback(parent_transport, exception) catch |err| {
@@ -208,6 +203,7 @@ pub inline fn perform(self: *ReadTransport, buffer: ?[]u8) !void {
     );
 
     self.buffer_being_read = buffer_being_read;
+    python_c.py_incref(self.parent_transport);
 }
 
 pub inline fn cancel(self: *ReadTransport) !void {

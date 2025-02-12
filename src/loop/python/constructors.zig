@@ -18,7 +18,6 @@ inline fn z_loop_new(@"type": *python_c.PyTypeObject) !*LoopObject {
         instance, &.{
             "ob_base", "asyncgens_set",
             "asyncgens_set_add", "asyncgens_set_discard",
-            "old_asyncgen_hooks"
         }
     );
 
@@ -42,8 +41,6 @@ inline fn z_loop_new(@"type": *python_c.PyTypeObject) !*LoopObject {
     instance.asyncgens_set_add = weakref_add;
     instance.asyncgens_set_discard = weakref_discard;
 
-    instance.old_asyncgen_hooks = null;
-
     return instance;
 }
 
@@ -64,7 +61,7 @@ pub fn loop_clear(self: ?*LoopObject) callconv(.C) c_int {
         loop_data.release();
     }
 
-    python_c.deinitialize_object_fields(py_loop, &.{});
+    python_c.deinitialize_object_fields(py_loop, &.{"ob_base"});
     return 0;
 }
 

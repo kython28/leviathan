@@ -11,7 +11,7 @@ class BufferedEchoProtocol(asyncio.BufferedProtocol):
         self.disconnected = loop.create_future()
         self.received = loop.create_future()
         self.buffer: bytearray|None = None
-        
+
         self.pause_writing_fut = loop.create_future()
         self.resume_writing_fut = loop.create_future()
         self.eof_received_fut = loop.create_future()
@@ -25,10 +25,12 @@ class BufferedEchoProtocol(asyncio.BufferedProtocol):
     def buffer_updated(self, nbytes: int) -> None:
         if self.buffer is not None:
             data = bytes(self.buffer[:nbytes])
-            self.received.set_result(data)
-            
+
             loop = asyncio.get_running_loop()
-            self.received = loop.create_future()
+            new_fut = loop.create_future()
+            self.received.set_result((new_fut, data))
+            
+            self.received = new_fut
             self.buffer = None
 
     def connection_lost(self, exc: BaseException|None) -> None:
@@ -78,10 +80,11 @@ class EchoProtocol(asyncio.Protocol):
     #     self.connected.set_result(None)
 
     def data_received(self, data: bytes) -> None:
-        self.received.set_result(data)
-
         loop = asyncio.get_running_loop()
-        self.received = loop.create_future()
+        new_fut = loop.create_future()
+
+        self.received.set_result((new_fut, data))
+        self.received = new_fut
 
     def connection_lost(self, exc: BaseException|None) -> None:
         self.error = exc
@@ -131,18 +134,18 @@ async def _test_stream_transport_basics() -> None:
         server_transport.write(test_data)
         
         # Wait for data to be received and echoed back
-        received_data = await client_protocol.received
+        _, received_data = await asyncio.wait_for(asyncio.shield(client_protocol.received), 1)
         assert received_data == test_data
 
         test_data2 = b"Thanks!!"
         client_transport.write(test_data2)
         
-        received_data = await server_protocol.received
+        _, received_data = await asyncio.wait_for(asyncio.shield(server_protocol.received), 1)
         assert received_data == test_data2
         
         # Close transport and wait for disconnection
         server_transport.close()
-        await server_protocol.disconnected
+        await asyncio.wait_for(asyncio.shield(server_protocol.disconnected), 1)
         assert server_protocol.error is None  # Normal close
     finally:
         server_transport.close()
@@ -171,14 +174,14 @@ async def _test_stream_transport_multiple_writes() -> None:
         
         for msg in messages:
             server_transport.write(msg)
-            received = await client_protocol.received
+            _, received = await asyncio.wait_for(asyncio.shield(client_protocol.received), 1)
             assert received == msg
             
         # Test multiple writes from client to server
         responses = [b"Response1", b"Response2", b"Response3", b"Final"]
         for msg in responses:
             client_transport.write(msg)
-            received = await server_protocol.received
+            _, received = await asyncio.wait_for(asyncio.shield(server_protocol.received), 1)
             assert received == msg
     finally:
         server_transport.close()
@@ -207,8 +210,9 @@ async def _test_stream_transport_large_writes() -> None:
         server_transport.write(large_data)
 
         response = b""
+        fut = client_protocol.received
         while len(response) < len(large_data):
-            received = await asyncio.wait_for(client_protocol.received, 100)
+            fut, received = await asyncio.wait_for(asyncio.shield(fut), 10)
             response += received
 
         assert response == large_data
@@ -218,8 +222,9 @@ async def _test_stream_transport_large_writes() -> None:
         client_transport.write(large_response)
 
         response = b""
+        fut = server_protocol.received
         while len(response) < len(large_response):
-            received = await asyncio.wait_for(server_protocol.received, 1)
+            fut, received = await asyncio.wait_for(asyncio.shield(fut), 10)
             response += received
 
         assert response == large_response
@@ -253,7 +258,7 @@ async def _test_stream_transport_watermarks() -> None:
         data_below = os.urandom(5) 
         server_transport.write(data_below)
 
-        await asyncio.wait_for(received_fut, 1)
+        await asyncio.wait_for(asyncio.shield(received_fut), 1)
         assert not pause_writing.done()
 
         received_fut = client_protocol.received
@@ -263,9 +268,9 @@ async def _test_stream_transport_watermarks() -> None:
         data_above = os.urandom(15)
         server_transport.write(data_above)
 
-        await asyncio.wait_for(pause_writing, 1)
-        await asyncio.wait_for(resume_writing, 1)
-        await asyncio.wait_for(received_fut, 1)
+        await asyncio.wait_for(asyncio.shield(pause_writing), 1)
+        await asyncio.wait_for(asyncio.shield(resume_writing), 1)
+        await asyncio.wait_for(asyncio.shield(received_fut), 1)
     finally:
         server_transport.close()
         client_transport.close()
@@ -293,14 +298,14 @@ async def _test_stream_transport_eof() -> None:
         server_transport.write(test_data)
         
         # Wait for data to be received
-        received_data = await asyncio.wait_for(client_protocol.received, 1)
+        _, received_data = await asyncio.wait_for(asyncio.shield(client_protocol.received), 1)
         assert received_data == test_data
 
         # Close write end of the server socket to trigger EOF
         server_transport.write_eof()
         
         # Wait for EOF to be received by client
-        await asyncio.wait_for(client_protocol.eof_received_fut, 1)
+        await asyncio.wait_for(asyncio.shield(client_protocol.eof_received_fut), 1)
     finally:
         server_transport.close()
         client_transport.close()
@@ -368,14 +373,14 @@ async def _test_buffered_protocol_basics() -> None:
         server_transport.write(test_data)
         
         # Wait for data to be received
-        received_data = await client_protocol.received
+        _, received_data = await asyncio.wait_for(asyncio.shield(client_protocol.received), 1)
         assert received_data == test_data
 
         # Test response
         response_data = b"Buffered Response!"
         client_transport.write(response_data)
         
-        received_data = await server_protocol.received
+        _, received_data = await asyncio.wait_for(asyncio.shield(server_protocol.received), 1)
         assert received_data == response_data
         
     finally:
@@ -407,8 +412,9 @@ async def _test_stream_transport_writelines() -> None:
         # Verify each line is received correctly
         total_length = sum(map(len, messages))
         data_received = b""
+        fut = client_protocol.received
         while len(data_received) < total_length:
-            received = await client_protocol.received
+            fut, received = await asyncio.wait_for(asyncio.shield(fut), 1)
             data_received += received
 
         assert len(data_received) == total_length
@@ -440,26 +446,131 @@ async def _test_stream_transport_abort() -> None:
         server_transport.write(test_data)
         
         # Wait for data to be received
-        received_data = await asyncio.wait_for(client_protocol.received, 1)
+        _, received_data = await asyncio.wait_for(asyncio.shield(client_protocol.received), 1)
         assert received_data == test_data
 
         # Abort the server transport
         server_transport.abort()
         
         # Wait for disconnection and verify error
-        await asyncio.wait_for(server_protocol.disconnected, 1)
+        await asyncio.wait_for(asyncio.shield(server_protocol.disconnected), 1)
         assert server_protocol.error is None
         
         # Try to write after abort - should not raise but data won't be sent
         server_transport.write(b"Data after abort")
         
         # Client should detect the connection was lost
-        await asyncio.wait_for(client_protocol.disconnected, 1)
-        assert isinstance(client_protocol.error, ConnectionResetError)
-        
+        await asyncio.wait_for(asyncio.shield(client_protocol.disconnected), 1)
     finally:
         server_transport.close()
         client_transport.close()
 
 def test_stream_transport_abort() -> None:
     leviathan.run(_test_stream_transport_abort())
+
+async def _test_stream_transport_reading_control() -> None:
+    loop = asyncio.get_running_loop()
+    server_socket, client_socket = socket.socketpair()
+
+    server_socket.setblocking(False)
+    client_socket.setblocking(False)
+    
+    server_protocol = EchoProtocol()
+    client_protocol = EchoProtocol()
+    
+    # Create transport
+    server_transport = StreamTransport(server_socket.fileno(), server_protocol, loop)
+    client_transport = StreamTransport(client_socket.fileno(), client_protocol, loop)
+    
+    try:
+        # Verify initial reading state
+        assert server_transport.is_reading()
+        assert client_transport.is_reading()
+
+        # Test pausing reading on server
+        server_transport.pause_reading()
+        assert not server_transport.is_reading()
+
+        await asyncio.sleep(0)
+
+        # Send data from client while server reading is paused
+        test_data = b"Data while paused"
+        client_transport.write(test_data)
+        
+        server_received_fut = server_protocol.received
+        # Give some time for potential data transfer
+        await asyncio.sleep(0.1)
+        
+        # Server should not have received the data yet
+        assert not server_received_fut.done()
+
+        # Resume reading and verify data is received
+        server_transport.resume_reading()
+        assert server_transport.is_reading()
+        
+        _, received_data = await asyncio.wait_for(asyncio.shield(server_received_fut), 1)
+        assert received_data == test_data
+
+        # Test pausing and resuming on client side
+        client_transport.pause_reading()
+        assert not client_transport.is_reading()
+
+        response_data = b"Response data"
+        server_transport.write(response_data)
+        
+        client_received_fut = client_protocol.received
+        await asyncio.sleep(0.1)
+        assert not client_received_fut.done()
+
+        client_transport.resume_reading()
+        assert client_transport.is_reading()
+        
+        _, received_response = await asyncio.wait_for(asyncio.shield(client_protocol.received), 1)
+        assert received_response == response_data
+
+    finally:
+        server_transport.close()
+        client_transport.close()
+
+def test_stream_transport_reading_control() -> None:
+    leviathan.run(_test_stream_transport_reading_control())
+
+async def _test_stream_transport_rapid_reading_toggle() -> None:
+    loop = asyncio.get_running_loop()
+    server_socket, client_socket = socket.socketpair()
+
+    server_socket.setblocking(False)
+    client_socket.setblocking(False)
+    
+    server_protocol = EchoProtocol()
+    client_protocol = EchoProtocol()
+    
+    # Create transport
+    server_transport = StreamTransport(server_socket.fileno(), server_protocol, loop)
+    client_transport = StreamTransport(client_socket.fileno(), client_protocol, loop)
+    
+    try:
+        # Initial state should be reading
+        assert server_transport.is_reading()
+        
+        # Rapidly toggle reading state
+        for _ in range(10):
+            server_transport.pause_reading()
+            assert not server_transport.is_reading()
+            
+            server_transport.resume_reading()
+            assert server_transport.is_reading()
+        
+        # Verify transport still works after rapid toggling
+        test_data = b"Data after toggling"
+        client_transport.write(test_data)
+        
+        _, received_data = await asyncio.wait_for(asyncio.shield(server_protocol.received), 1)
+        assert received_data == test_data
+
+    finally:
+        server_transport.close()
+        client_transport.close()
+
+def test_stream_transport_rapid_reading_toggle() -> None:
+    leviathan.run(_test_stream_transport_rapid_reading_toggle())

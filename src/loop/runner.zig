@@ -88,7 +88,7 @@ inline fn check_io_uring_result(
     result: std.os.linux.E, comptime can_cancel: bool
 ) void {
     switch (operation) {
-        .WaitTimer => {
+        .WaitTimer => |op| {
             switch (result) {
                 .TIME => {},
                 .CANCELED => {
@@ -97,19 +97,17 @@ inline fn check_io_uring_result(
                     }
                 },
                 .SUCCESS => unreachable, // Just to debug. This timeout isn't linked to any task
-                else => unreachable
+                else => |code| {
+                    std.log.err("Unexpected errno ({}) while checking result for operation {}", .{code, op});
+                    unreachable;
+                }
             }
         },
         .Cancel => unreachable, // Cancel operation doesn't have any callback
-        .PerformWriteV, .PerformWrite => {
+        .PerformWriteV, .PerformWrite => |op| {
             switch (result) {
                 .SUCCESS => {},
-                .CANCELED => {
-                    if (can_cancel) {
-                        CallbackManager.cancel_callback(callback, null);
-                    }
-                },
-                .BADF, .FBIG, .INTR, .IO, .NOSPC, .INVAL, .CONNRESET,  // Expected errors
+                .CANCELED, .BADF, .FBIG, .INTR, .IO, .NOSPC, .INVAL, .CONNRESET,  // Expected errors
                 .PIPE, .NOBUFS, .NXIO, .ACCES, .NETDOWN, .NETUNREACH,
                 .SPIPE => {
                     if (can_cancel) {
@@ -118,20 +116,55 @@ inline fn check_io_uring_result(
                 },
                 .AGAIN => unreachable, // This should not happen. Filtered by debugging porpuse
                 else => |code| {
-                    std.log.err("Unexpected errno: {}", .{code});
+                    std.log.err("Unexpected errno ({}) while checking result for operation {}", .{code, op});
                     unreachable;
                 }
             }
         },
-        else => {
+        .PerformRead => |op| {
             switch (result) {
                 .SUCCESS => {},
-                .CANCELED => {
+                .CANCELED, .BADF, .BADMSG, .INTR, .INVAL, .IO, .ISDIR,
+                .OVERFLOW, .SPIPE, .CONNRESET, .NOTCONN, .TIMEDOUT,
+                .NOBUFS, .NOMEM, .NXIO => {
                     if (can_cancel) {
                         CallbackManager.cancel_callback(callback, null);
                     }
                 },
-                else => unreachable
+                .AGAIN => unreachable, // This should not happen. Filtered by debugging porpuse
+                else => |code| {
+                    std.log.err("Unexpected errno ({}) while checking result for operation {}", .{code, op});
+                    unreachable;
+                }
+            }
+        },
+        .SocketShutdown => |op| {
+            switch (result) {
+                .SUCCESS => {},
+                .CANCELED, .INVAL, .NOTCONN, .NOTSOCK, .BADF, .NOBUFS => {
+                    if (can_cancel) {
+                        CallbackManager.cancel_callback(callback, null);
+                    }
+                },
+                .AGAIN => unreachable, // This should not happen. Filtered by debugging porpuse
+                else => |code| {
+                    std.log.err("Unexpected errno ({}) while checking result for operation {}", .{code, op});
+                    unreachable;
+                }
+            }
+        },
+        else => |op| {
+            switch (result) {
+                .SUCCESS => {},
+                .CANCELED, .BADF, .INTR => {
+                    if (can_cancel) {
+                        CallbackManager.cancel_callback(callback, null);
+                    }
+                },
+                else => |code| {
+                    std.log.err("Unexpected errno ({}) while checking result for operation {}", .{code, op});
+                    unreachable;
+                }
             }
         }
     }

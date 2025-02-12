@@ -15,7 +15,7 @@ pub inline fn future_fast_cancel(instance: *PythonFutureObject, cancel_msg_py_ob
             return false;
         }
 
-        python_c.py_xdecref(cancel_msg_py_object);
+        python_c.py_xdecref(instance.cancel_msg_py_object);
         instance.cancel_msg_py_object = python_c.py_newref(pyobj);
     }
 

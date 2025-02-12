@@ -159,38 +159,26 @@ pub fn transport_set_write_buffer_limits(
 pub fn transport_write(self: ?*StreamTransportObject, py_buffer: ?PyObject) callconv(.C) ?PyObject {
     const instance = self.?;
 
-    if (!instance.is_writing) {
-        python_c.raise_python_runtime_error("Writing operations are paused\x00");
-        return null;
-    }
-
-
     const write_transport = utils.get_data_ptr2(WriteTransport, "write_transport", instance);
     if (write_transport.is_closing) {
         return python_c.get_py_none();
     }
 
-    const _py_buffer = py_buffer.?;
-
-    var buffer: [*]u8 = undefined;
-    var buffer_size: python_c.Py_ssize_t = undefined;
-    if (python_c.PyBytes_AsStringAndSize(_py_buffer, @ptrCast(&buffer), &buffer_size) < 0) {
+    if (!instance.is_writing) {
+        python_c.raise_python_runtime_error("Writing operations are paused\x00");
         return null;
     }
 
-    if (buffer_size > 0) {
-        const new_buffer_size = write_transport.append_new_buffer_to_write(_py_buffer, buffer[0..@intCast(buffer_size)]) catch |err| {
-            return utils.handle_zig_function_error(err, null);
-        };
-        python_c.py_incref(_py_buffer);
+    const new_buffer_size = write_transport.append_new_buffer_to_write(py_buffer.?) catch |err| {
+        return utils.handle_zig_function_error(err, null);
+    };
 
-        if (new_buffer_size >= instance.writing_high_water_mark) {
-            instance.is_writing = false;
+    if (new_buffer_size >= instance.writing_high_water_mark) {
+        instance.is_writing = false;
 
-            const ret = python_c.PyObject_CallNoArgs(instance.protocol_pause_writing.?)
-                orelse return null;
-            python_c.py_decref(ret);
-        }
+        const ret = python_c.PyObject_CallNoArgs(instance.protocol_pause_writing.?)
+            orelse return null;
+        python_c.py_decref(ret);
     }
 
     return python_c.get_py_none();
@@ -199,18 +187,17 @@ pub fn transport_write(self: ?*StreamTransportObject, py_buffer: ?PyObject) call
 pub fn transport_write_lines(self: ?*StreamTransportObject, py_buffers: ?PyObject) callconv(.C) ?PyObject {
     const instance = self.?;
 
-    if (!instance.is_writing) {
-        python_c.raise_python_runtime_error("Writing operations are paused\x00");
-        return null;
-    }
-
     const write_transport = utils.get_data_ptr2(WriteTransport, "write_transport", instance);
     if (write_transport.is_closing) {
         return python_c.get_py_none();
     }
 
-    const _py_buffers = py_buffers.?;
-    const iter: PyObject = python_c.PyObject_GetIter(_py_buffers) orelse return null;
+    if (!instance.is_writing) {
+        python_c.raise_python_runtime_error("Writing operations are paused\x00");
+        return null;
+    }
+
+    const iter: PyObject = python_c.PyObject_GetIter(py_buffers.?) orelse return null;
     defer python_c.py_decref(iter);
 
     var new_buffer_size: usize = 0;
@@ -218,19 +205,9 @@ pub fn transport_write_lines(self: ?*StreamTransportObject, py_buffers: ?PyObjec
         const py_buffer: PyObject = python_c.PyIter_Next(iter) orelse break;
         defer python_c.py_decref(py_buffer);
 
-        var buffer: [*]u8 = undefined;
-        var buffer_size: python_c.Py_ssize_t = undefined;
-        if (python_c.PyBytes_AsStringAndSize(py_buffer, @ptrCast(&buffer), &buffer_size) < 0) {
-            return null;
-        }
-
-        if (buffer_size > 0) {
-            new_buffer_size = write_transport.append_new_buffer_to_write(py_buffer, buffer[0..@intCast(buffer_size)]) catch |err| {
-                return utils.handle_zig_function_error(err, null);
-            };
-            python_c.py_incref(py_buffer);
-
-        }
+        new_buffer_size = write_transport.append_new_buffer_to_write(py_buffer) catch |err| {
+            return utils.handle_zig_function_error(err, null);
+        };
     }
 
     if (new_buffer_size >= instance.writing_high_water_mark) {

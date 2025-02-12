@@ -36,7 +36,7 @@ pub inline fn get_result(self: *PythonFutureObject) ?PyObject {
                 python_c.PyErr_SetRaisedException(new_exc);
                 break :blk null;
             }
-            break :blk python_c.py_newref(@as(PyObject, @alignCast(@ptrCast(future_data.result.?))));
+            break :blk @as(PyObject, @alignCast(@ptrCast(future_data.result.?)));
         },
         .CANCELED => blk: {
             raise_cancel_exception(self);
@@ -45,9 +45,10 @@ pub inline fn get_result(self: *PythonFutureObject) ?PyObject {
     };
 }
 
-
 pub fn future_result(self: ?*PythonFutureObject, _: ?PyObject) callconv(.C) ?PyObject {
-    return get_result(self.?);
+    const res = get_result(self.?);
+    python_c.py_xincref(res);
+    return res;
 }
 
 pub fn future_exception(self: ?*PythonFutureObject, _: ?PyObject) callconv(.C) ?PyObject {

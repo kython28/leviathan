@@ -121,6 +121,7 @@ pub const StreamTransportObject = extern struct {
     write_transport: [@sizeOf(WriteStream)]u8,
     read_transport: [@sizeOf(ReadStream)]u8,
 
+    loop: ?PyObject,
 
     protocol_buffer: python_c.Py_buffer,
 

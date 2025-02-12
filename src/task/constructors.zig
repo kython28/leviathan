@@ -113,26 +113,36 @@ pub fn task_clear(self: ?*PythonTaskObject) callconv(.C) c_int {
     const py_task = self.?;
     const fut = &py_task.fut;
 
-    const future_data = utils.get_data_ptr(Future, fut);
-    if (!future_data.released) {
-        const _result = future_data.result;
-        if (_result) |res| {
-            python_c.py_decref(@alignCast(@ptrCast(res)));
-        }
-        future_data.release();
-    }
-
-    python_c.deinitialize_object_fields(py_task, &.{"weakref_list"});
-
     if (py_task.weakref_list != null) {
         python_c.PyObject_ClearWeakRefs(@ptrCast(py_task));
         py_task.weakref_list = null;
     }
 
+    const future_data = utils.get_data_ptr(Future, fut);
+    if (!future_data.released) {
+        const _result = future_data.result;
+        if (_result) |res| {
+            python_c.py_decref(@alignCast(@ptrCast(res)));
+            future_data.result = null;
+        }
+        future_data.release();
+    }
+
+    python_c.deinitialize_object_fields(py_task, &.{"weakref_list"});
     return 0;
 }
 
 pub fn task_traverse(self: ?*PythonTaskObject, visit: python_c.visitproc, arg: ?*anyopaque) callconv(.C) c_int {
+    const instance = self.?;
+
+    const future_data = utils.get_data_ptr(Future, &instance.fut);
+    if (future_data.result) |res| {
+        const vret = visit.?(@alignCast(@ptrCast(res)), arg);
+        if (vret != 0) {
+            return vret;
+        }
+    }
+
     return python_c.py_visit(self.?, visit, arg);
 }
 

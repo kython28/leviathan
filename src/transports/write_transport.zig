@@ -8,7 +8,7 @@ const CallbackManager = @import("../callback_manager.zig");
 const utils = @import("../utils/main.zig");
 
 const BuffersArrayList = std.ArrayList(std.posix.iovec_const);
-const PyObjectsArrayList = std.ArrayList(PyObject);
+const PyBuffersArrayList = std.ArrayList(python_c.Py_buffer);
 
 pub const WriteCompletedCallback = *const fn (*WriteTransport, usize, usize, std.os.linux.E) anyerror!void;
 const ConnectionLostCallback = *const fn (PyObject, PyObject) anyerror!void;
@@ -22,11 +22,11 @@ connection_lost_callback: ?ConnectionLostCallback,
 write_completed_callback: WriteCompletedCallback,
 
 free_buffers: *BuffersArrayList,
-free_py_objects: *PyObjectsArrayList,
+free_py_buffers: *PyBuffersArrayList,
 free_buffers_size: usize = 0,
 
 busy_buffers: *BuffersArrayList,
-busy_py_objects: *PyObjectsArrayList,
+busy_py_buffers: *PyBuffersArrayList,
 busy_buffers_size: usize = 0,
 busy_buffers_data_written: usize = 0,
 current_iovec_index: usize = 0,
@@ -57,17 +57,17 @@ pub fn init(
     const busy_buffers = try allocator.create(BuffersArrayList);
     errdefer allocator.destroy(busy_buffers);
 
-    const free_py_objects = try allocator.create(PyObjectsArrayList);
+    const free_py_objects = try allocator.create(PyBuffersArrayList);
     errdefer allocator.destroy(free_py_objects);
 
-    const busy_py_objects = try allocator.create(PyObjectsArrayList);
+    const busy_py_objects = try allocator.create(PyBuffersArrayList);
     errdefer allocator.destroy(busy_py_objects);
 
     free_buffers.* = BuffersArrayList.init(allocator);
     busy_buffers.* = BuffersArrayList.init(allocator);
 
-    free_py_objects.* = PyObjectsArrayList.init(allocator);
-    busy_py_objects.* = PyObjectsArrayList.init(allocator);
+    free_py_objects.* = PyBuffersArrayList.init(allocator);
+    busy_py_objects.* = PyBuffersArrayList.init(allocator);
 
     self.* = WriteTransport{
         .loop = loop,
@@ -79,10 +79,10 @@ pub fn init(
         .write_completed_callback = callback,
 
         .free_buffers = free_buffers,
-        .free_py_objects = free_py_objects,
+        .free_py_buffers = free_py_objects,
 
         .busy_buffers = busy_buffers,
-        .busy_py_objects = busy_py_objects,
+        .busy_py_buffers = busy_py_objects,
 
         .fd = fd,
         .initialized = true
@@ -96,8 +96,6 @@ pub fn close(self: *WriteTransport) !void {
     if (blocking_task_id == 0) {
         self.closed = true;
         self.is_closing = true;
-
-        python_c.py_decref(self.parent_transport);
         return;
     }
 
@@ -118,25 +116,25 @@ pub fn deinit(self: *WriteTransport) void {
 
     const allocator = self.loop.allocator;
 
-    for (self.free_py_objects.items) |v| {
-        python_c.py_decref(v);
+    for (self.free_py_buffers.items) |*v| {
+        python_c.PyBuffer_Release(v);
     }
 
-    for (self.busy_py_objects.items) |v| {
-        python_c.py_decref(v);
+    for (self.busy_py_buffers.items) |*v| {
+        python_c.PyBuffer_Release(v);
     }
 
     self.free_buffers.deinit();
-    self.free_py_objects.deinit();
+    self.free_py_buffers.deinit();
 
     self.busy_buffers.deinit();
-    self.busy_py_objects.deinit();
+    self.busy_py_buffers.deinit();
 
     allocator.destroy(self.free_buffers);
-    allocator.destroy(self.free_py_objects);
+    allocator.destroy(self.free_py_buffers);
 
     allocator.destroy(self.busy_buffers);
-    allocator.destroy(self.busy_py_objects);
+    allocator.destroy(self.busy_py_buffers);
 
     self.initialized = false;
 }
@@ -171,6 +169,8 @@ inline fn queue_remaining_data(self: *WriteTransport, data_written: usize) !void
             }
         }
     );
+
+    python_c.py_incref(self.parent_transport);
 }
 
 fn write_operation_completed(
@@ -178,6 +178,9 @@ fn write_operation_completed(
 ) CallbackManager.ExecuteCallbacksReturn {
     const self: *WriteTransport = @alignCast(@ptrCast(data.?));
     self.blocking_task_id = 0;
+
+    const parent_transport = self.parent_transport;
+    defer python_c.py_decref(parent_transport);
 
     var exception: PyObject = undefined;
     var exc_message: PyObject = undefined;
@@ -198,54 +201,67 @@ fn write_operation_completed(
         }
     }
 
-    self.write_completed_callback(self, data_written, remaining_data, io_uring_err) catch |err| {
-        return utils.handle_zig_function_error(err, CallbackManager.ExecuteCallbacksReturn.Exception);
-    };
+    for (self.busy_py_buffers.items) |*v| {
+        python_c.PyBuffer_Release(v);
+    }
+    self.busy_py_buffers.clearRetainingCapacity();
+    self.busy_buffers.clearRetainingCapacity();
 
-    switch (io_uring_err) {
-        .SUCCESS => blk: {
-            if (self.is_closing) {
-                self.closed = true;
-                python_c.py_decref(self.parent_transport);
-            }else{
-                self.queue_buffers_and_swap() catch |err| {
-                    // TODO: Optimize this
-                    utils.handle_zig_function_error(err, {});
+    const ret = self.write_completed_callback(self, data_written, remaining_data, io_uring_err);
+    if (ret) |_| {
+        switch (io_uring_err) {
+            .SUCCESS => blk: {
+                if (self.is_closing) {
+                    self.closed = true;
+                }else{
+                    self.queue_buffers_and_swap() catch |err| {
+                        // TODO: Optimize this
+                        utils.handle_zig_function_error(err, {});
 
-                    exception = python_c.PyErr_GetRaisedException()
-                        orelse return .Exception;
+                        exception = python_c.PyErr_GetRaisedException()
+                            orelse return .Exception;
 
-                    exc_message = python_c.PyUnicode_FromString("Exception ocurred while queueing up data\x00")
-                        orelse {
-                            python_c.py_decref(exception);
-                            return .Exception;
-                        };
-                    break :blk;
-                };
-            }
+                        exc_message = python_c.PyUnicode_FromString("Exception ocurred while queueing up data\x00")
+                            orelse {
+                                python_c.py_decref(exception);
+                                return .Exception;
+                            };
+                        break :blk;
+                    };
+                }
 
-            return .Continue;
-        },
-        .CANCELED => {
-            self.is_closing = true;
-            self.closed = true;
-            python_c.py_decref(self.parent_transport);
-            return .Continue;
-        },
-        else => {
-            if (self.is_closing) {
-                self.closed = true;
-                python_c.py_decref(self.parent_transport);
                 return .Continue;
+            },
+            .CANCELED => {
+                self.closed = true;
+                return .Continue;
+            },
+            else => {
+                if (self.is_closing) {
+                    self.closed = true;
+                    return .Continue;
+                }
+
+                exc_message = python_c.PyUnicode_FromString("Exception ocurred trying to write\x00")
+                    orelse return .Exception;
+
+                exception = python_c.PyObject_CallFunction(
+                    python_c.PyExc_OSError, "LO\x00", @as(c_long, @intFromEnum(io_uring_err)), exc_message
+                ) orelse return .Exception;
             }
-
-            exc_message = python_c.PyUnicode_FromString("Exception ocurred trying to write\x00")
-                orelse return .Exception;
-
-            exception = python_c.PyObject_CallFunction(
-                python_c.PyExc_OSError, "LO\x00", @as(c_long, @intFromEnum(io_uring_err)), exc_message
-            ) orelse return .Exception;
         }
+    }else |err| {
+        // TODO: Optimize this
+        utils.handle_zig_function_error(err, {});
+
+        exception = python_c.PyErr_GetRaisedException()
+            orelse return .Exception;
+
+        exc_message = python_c.PyUnicode_FromString("Exception ocurred while handling the written data\x00")
+            orelse {
+                python_c.py_decref(exception);
+                return .Exception;
+            };
     }
     defer python_c.py_decref(exc_message);
     defer python_c.py_decref(exception);
@@ -255,8 +271,6 @@ fn write_operation_completed(
         self.closed = true;
     }
 
-    const parent_transport = self.parent_transport;
-    defer python_c.py_decref(parent_transport);
 
     if (self.connection_lost_callback) |callback| {
         callback(parent_transport, exception) catch |err| {
@@ -295,10 +309,10 @@ pub fn queue_buffers_and_swap(self: *WriteTransport) !void {
         return;
     }
 
-    const current_free_py_objects = self.free_py_objects;
+    const current_free_py_buffers = self.free_py_buffers;
 
     const current_busy_buffers = self.busy_buffers;
-    const current_busy_py_objects = self.busy_py_objects;
+    const current_busy_py_buffers = self.busy_py_buffers;
 
     self.blocking_task_id = try Loop.Scheduling.IO.queue(
         self.loop, .{
@@ -315,42 +329,49 @@ pub fn queue_buffers_and_swap(self: *WriteTransport) !void {
         }
     );
 
-    const old_py_objects = current_busy_py_objects.items;
-    for (old_py_objects) |v| {
-        python_c.py_decref(v);
-    }
-
-    current_busy_py_objects.clearRetainingCapacity();
-    current_busy_buffers.clearRetainingCapacity();
-
     self.free_buffers = current_busy_buffers;
-    self.free_py_objects = current_busy_py_objects;
+    self.free_py_buffers = current_busy_py_buffers;
 
     self.busy_buffers = current_free_buffers;
-    self.busy_py_objects = current_free_py_objects;
+    self.busy_py_buffers = current_free_py_buffers;
     self.busy_buffers_data_written = 0;
     self.busy_buffers_size = self.buffer_size;
     self.current_iovec_index = 0;
 
     self.ready_to_queue_write_op = false;
+
+    python_c.py_incref(self.parent_transport);
 }
 
-pub inline fn append_new_buffer_to_write(self: *WriteTransport, py_object: PyObject, buffer: []const u8) !usize {
+pub fn append_new_buffer_to_write(self: *WriteTransport, py_object: PyObject) !usize {
     if (self.closed) {
         return error.TransportClosed;
     }
 
-    {
-        try self.free_py_objects.append(py_object);
-        errdefer _ = self.free_py_objects.pop();
+    const new_buffer_size: usize = blk: {
+        var pbuffer: python_c.Py_buffer = undefined;
+        if (python_c.PyObject_GetBuffer(py_object, &pbuffer, 0) < 0) {
+            return error.PythonError;
+        }
+        errdefer python_c.PyBuffer_Release(&pbuffer);
+
+        if (pbuffer.len <= 0) {
+            python_c.PyBuffer_Release(&pbuffer);
+            return self.buffer_size;
+        }
+
+        const buffer_len: usize = @intCast(pbuffer.len);
+
+        try self.free_py_buffers.append(pbuffer);
+        errdefer _ = self.free_py_buffers.pop();
 
         try self.free_buffers.append(.{
-            .base = buffer.ptr,
-            .len = buffer.len
+            .base = @ptrCast(pbuffer.buf.?),
+            .len = buffer_len
         });
 
-    }
-    const new_buffer_size = self.buffer_size + buffer.len;
+        break :blk self.buffer_size + buffer_len;
+    };
     self.buffer_size = new_buffer_size;
 
     if (self.ready_to_queue_write_op) {

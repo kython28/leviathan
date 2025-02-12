@@ -130,12 +130,7 @@ inline fn z_stream_new(@"type": *python_c.PyTypeObject) !*StreamTransportObject 
     const instance: *StreamTransportObject = @ptrCast(@"type".tp_alloc.?(@"type", 0) orelse return error.PythonError);
     errdefer @"type".tp_free.?(instance);
 
-    python_c.initialize_object_fields(
-        instance, &.{
-            "ob_base", "write_transport", "read_transport", "fd",
-            "protocol_type", "closed"
-        }
-    );
+    python_c.initialize_object_fields(instance, &.{"ob_base", "fd", "protocol_type", "closed"});
 
     instance.fd = -1;
     instance.protocol_type = undefined;
@@ -174,6 +169,12 @@ pub fn stream_clear(self: ?*StreamTransportObject) callconv(.C) c_int {
     python_c.deinitialize_object_fields(py_transport, &.{"protocol_buffer"});
     py_transport.protocol_type = undefined;
 
+    const fd = py_transport.fd;
+    if (fd >= 0) {
+        _ = std.os.linux.close(fd);
+        py_transport.fd = -1;
+    }
+
     return 0;
 }
 
@@ -211,6 +212,9 @@ inline fn z_stream_init(self: *StreamTransportObject, args: ?PyObject, kwargs: ?
     }
 
     const leviathan_loop: *Loop.Python.LoopObject = @ptrCast(loop.?);
+
+    self.loop = @ptrCast(python_c.py_newref(leviathan_loop));
+    errdefer python_c.py_decref_and_set_null(&self.loop);
 
     if (fd < 0) {
         python_c.raise_python_value_error("Invalid fd\x00");
@@ -260,9 +264,6 @@ inline fn z_stream_init(self: *StreamTransportObject, args: ?PyObject, kwargs: ?
     self.fd = @intCast(fd);
 
     try Read.queue_read_operation(self, read_transport_data, protocol_type);
-
-    python_c.py_incref(@ptrCast(self)); // Write
-    python_c.py_incref(@ptrCast(self)); // Read
 
     return 0;
 }

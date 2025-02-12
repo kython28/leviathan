@@ -35,6 +35,9 @@ pub fn close_transports(
     try read_transport.close();
     try write_transport.close();
 
+    transport.is_reading = false;
+    transport.is_writing = false;
+
     if (!closed_already) {
         const ret = python_c.PyObject_CallOneArg(transport.protocol_connection_lost.?, exception)
             orelse return error.PythonError;
@@ -66,7 +69,7 @@ pub fn transport_close(self: ?*StreamTransportObject) callconv(.C) ?PyObject {
 
     const fd = instance.fd;
     if (fd >= 0) {
-        std.posix.close(fd);
+        _ = std.os.linux.close(fd);
         instance.fd = -1;
     }
 

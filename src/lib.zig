@@ -42,13 +42,10 @@ const dynamic_leviathan_modules_names = .{
     "StreamTransport\x00"
 };
 
-fn module_cleanup(module: *python_c.PyObject) callconv(.C) void {
+fn module_cleanup(_: *python_c.PyObject) callconv(.C) void {
     deinitialize_leviathan_types();
     leviathan.utils.PythonImports.release_python_imports();
     _ = utils.gpa.deinit();
-
-    const @"type" = python_c.get_type(module);
-    @"type".tp_free.?(@ptrCast(module));
 }
 
 var leviathan_module = python_c.PyModuleDef{

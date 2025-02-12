@@ -68,16 +68,25 @@ pub fn future_clear(self: ?*PythonFutureObject) callconv(.C) c_int {
         const _result = future_data.result;
         if (_result) |res| {
             python_c.py_decref(@alignCast(@ptrCast(res)));
+            future_data.result = null;
         }
         future_data.release();
     }
 
-    python_c.deinitialize_object_fields(py_future, &.{});
+    python_c.deinitialize_object_fields(py_future, &.{"ob_base"});
 
     return 0;
 }
 
 pub fn future_traverse(self: ?*PythonFutureObject, visit: python_c.visitproc, arg: ?*anyopaque) callconv(.C) c_int {
+    const instance = self.?;
+    const future_data = utils.get_data_ptr(Future, instance);
+    if (future_data.result) |res| {
+        const vret = visit.?(@alignCast(@ptrCast(res)), arg);
+        if (vret != 0) {
+            return vret;
+        }
+    }
     return python_c.py_visit(self.?, visit, arg);
 }
 
@@ -136,7 +145,9 @@ pub fn future_iternext(self: ?*PythonFutureObject) callconv(.C) ?PyObject {
     if (future_data.status != .PENDING) {
         const res = result.get_result(instance);
         if (res) |py_res| {
-            python_c.PyErr_SetObject(python_c.PyExc_StopIteration, py_res);
+            const exc = python_c.PyObject_CallOneArg(python_c.PyExc_StopIteration, py_res)
+                orelse return null;
+            python_c.PyErr_SetRaisedException(exc);
         }
         return null;
     }

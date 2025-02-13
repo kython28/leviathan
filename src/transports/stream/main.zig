@@ -103,7 +103,7 @@ const PythonStreamMethods: []const python_c.PyMethodDef = &[_]python_c.PyMethodD
         .ml_name = "get_extra_info\x00",
         .ml_meth = @ptrCast(&ExtraInfo.transport_get_extra_info),
         .ml_doc = "Return information about the transport or underlying resources it uses.\x00",
-        .ml_flags = python_c.METH_NOARGS
+        .ml_flags = python_c.METH_FASTCALL | python_c.METH_KEYWORDS
     },
 
     python_c.PyMethodDef{

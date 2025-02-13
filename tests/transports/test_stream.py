@@ -574,3 +574,95 @@ async def _test_stream_transport_rapid_reading_toggle() -> None:
 
 def test_stream_transport_rapid_reading_toggle() -> None:
     leviathan.run(_test_stream_transport_rapid_reading_toggle())
+
+async def _test_stream_transport_buffer_types() -> None:
+    loop = asyncio.get_running_loop()
+    server_socket, client_socket = socket.socketpair()
+
+    server_socket.setblocking(False)
+    client_socket.setblocking(False)
+    
+    server_protocol = EchoProtocol()
+    client_protocol = EchoProtocol()
+    
+    # Create transport
+    server_transport = StreamTransport(server_socket.fileno(), server_protocol, loop)
+    client_transport = StreamTransport(client_socket.fileno(), client_protocol, loop)
+    
+    try:
+        # Test with bytes
+        bytes_data = b"Regular bytes data"
+        server_transport.write(bytes_data)
+        _, received_data = await asyncio.wait_for(asyncio.shield(client_protocol.received), 1)
+        assert received_data == bytes_data
+
+        # Test with bytearray
+        bytearray_data = bytearray(b"Bytearray data")
+        server_transport.write(bytearray_data)
+        _, received_data = await asyncio.wait_for(asyncio.shield(client_protocol.received), 1)
+        assert received_data == bytearray_data
+
+        # Test with memoryview
+        original_data = b"Memoryview data"
+        memview_data = memoryview(original_data)
+        server_transport.write(memview_data)
+        _, received_data = await asyncio.wait_for(asyncio.shield(client_protocol.received), 1)
+        assert received_data == original_data
+
+        # Test with sliced memoryview
+        full_data = b"Full data with slice"
+        memview_slice = memoryview(full_data)[5:15]  # slice "data with" portion
+        server_transport.write(memview_slice)
+        _, received_data = await asyncio.wait_for(asyncio.shield(client_protocol.received), 1)
+        assert received_data == full_data[5:15]
+
+    finally:
+        server_transport.close()
+        client_transport.close()
+
+def test_stream_transport_buffer_types() -> None:
+    leviathan.run(_test_stream_transport_buffer_types())
+
+async def _test_stream_transport_extra_info() -> None:
+    loop = asyncio.get_running_loop()
+    server_socket, client_socket = socket.socketpair()
+
+    server_socket.setblocking(False)
+    client_socket.setblocking(False)
+    
+    server_protocol = EchoProtocol()
+    client_protocol = EchoProtocol()
+    
+    # Create transport
+    server_transport = StreamTransport(server_socket.fileno(), server_protocol, loop)
+    client_transport = StreamTransport(client_socket.fileno(), client_protocol, loop)
+    
+    try:
+        # Test socket info
+        socket_info = server_transport.get_extra_info('socket')
+        assert isinstance(socket_info, socket.socket)
+        assert socket_info.fileno() == server_socket.fileno()
+
+        socket_info = client_transport.get_extra_info('socket')
+        assert isinstance(socket_info, socket.socket)
+        assert socket_info.fileno() == client_socket.fileno()
+
+        # Test peername
+        peername = server_transport.get_extra_info('peername')
+        assert peername == server_socket.getpeername()
+
+        peername = client_transport.get_extra_info('peername')
+        assert peername == client_socket.getpeername()
+
+        # Test sockname
+        sockname = server_transport.get_extra_info('sockname')
+        assert sockname == server_socket.getsockname()
+
+        sockname = client_transport.get_extra_info('sockname')
+        assert sockname == server_socket.getsockname()
+    finally:
+        server_transport.close()
+        client_transport.close()
+
+def test_stream_transport_extra_info() -> None:
+    leviathan.run(_test_stream_transport_extra_info())

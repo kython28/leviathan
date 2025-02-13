@@ -7,7 +7,8 @@ pub const PerformData = struct {
     fd: std.posix.fd_t,
     callback: CallbackManager.Callback,
     data: std.os.linux.IoUring.ReadBuffer,
-    offset: usize
+    offset: usize = 0,
+    zero_copy: bool = false
 };
 
 pub fn wait_ready(set: *IO.BlockingTasksSet, data: IO.WaitData) !usize {
@@ -29,7 +30,32 @@ pub fn perform(set: *IO.BlockingTasksSet, data: PerformData) !usize {
     errdefer set.pop(data_ptr) catch unreachable;
 
     const ring = &set.ring;
-    const sqe = try ring.read(@intCast(@intFromPtr(data_ptr)), data.fd, data.data, data.offset);
+    const sqe = blk: {
+        if (data.zero_copy) {
+            var msghr = comptime std.mem.zeroes(std.posix.msghdr);
+
+            switch (data.data) {
+                .buffer_selection => @panic("TODO"),
+                .iovecs => |iovecs| {
+                    msghr.iov = @constCast(iovecs.ptr);
+                    msghr.iovlen = @intCast(iovecs.len);
+                },
+                .buffer => |buffer| {
+                    const iovecs: [1]std.posix.iovec = .{
+                        std.posix.iovec{
+                            .base = buffer.ptr,
+                            .len = buffer.len
+                        }
+                    };
+                    msghr.iov = @constCast(&iovecs);
+                    msghr.iovlen = 1;
+                }
+            }
+
+            break :blk try ring.recvmsg(@intCast(@intFromPtr(data_ptr)), data.fd, &msghr, std.posix.MSG.ZEROCOPY);
+        }
+        break :blk try ring.read(@intCast(@intFromPtr(data_ptr)), data.fd, data.data, data.offset);
+    };
     sqe.flags |= std.os.linux.IOSQE_ASYNC;
     const ret = try ring.submit();
     if (ret != 1) {

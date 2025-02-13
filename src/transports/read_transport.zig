@@ -32,6 +32,7 @@ fd: std.posix.fd_t,
 
 blocking_task_id: usize = 0,
 
+zero_copying: bool,
 closed: bool = false,
 is_closing: bool = false,
 initialized: bool = false,
@@ -39,7 +40,8 @@ initialized: bool = false,
 pub fn init(
     self: *ReadTransport, loop: *Loop, fd: std.posix.fd_t, callback: ReadCompletedCallback,
     parent_transport: PyObject, exception_handler: PyObject,
-    connection_lost_callback: ConnectionLostCallback
+    connection_lost_callback: ConnectionLostCallback,
+    zero_copying: bool
 ) !void {
     const allocator = loop.allocator;
 
@@ -56,6 +58,8 @@ pub fn init(
         .read_completed_callback = callback,
         .buffer = buffer,
         .buffer_being_read = undefined,
+
+        .zero_copying = zero_copying,
 
         .fd = fd,
         .initialized = true
@@ -197,7 +201,7 @@ pub inline fn perform(self: *ReadTransport, buffer: ?[]u8) !void {
                 .data = .{
                     .buffer = buffer_being_read
                 },
-                .offset = 0
+                .zero_copy = self.zero_copying
             }
         }
     );

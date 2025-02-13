@@ -230,14 +230,16 @@ inline fn z_stream_init(self: *StreamTransportObject, args: ?PyObject, kwargs: ?
     const write_transport_data = utils.get_data_ptr2(WriteTransport, "write_transport", self);
     try write_transport_data.init(
         loop_data, @intCast(fd), &Write.write_operation_completed, @ptrCast(self),
-        leviathan_loop.exception_handler.?, &Lifecyle.connection_lost_callback
+        leviathan_loop.exception_handler.?, &Lifecyle.connection_lost_callback,
+        false // TODO
     );
     errdefer write_transport_data.deinit();
 
     const read_transport_data = utils.get_data_ptr2(ReadTransport, "read_transport", self);
     try read_transport_data.init(
         loop_data, @intCast(fd), &Read.read_operation_completed, @ptrCast(self),
-        leviathan_loop.exception_handler.?, &Lifecyle.connection_lost_callback
+        leviathan_loop.exception_handler.?, &Lifecyle.connection_lost_callback,
+        false // TODO
     );
     errdefer read_transport_data.deinit();
 

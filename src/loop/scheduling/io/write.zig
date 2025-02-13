@@ -7,14 +7,16 @@ pub const PerformData = struct {
     fd: std.posix.fd_t,
     callback: CallbackManager.Callback,
     data: []const u8,
-    offset: usize = 0
+    offset: usize = 0,
+    zero_copy: bool = false
 };
 
 pub const PerformVData = struct {
     fd: std.posix.fd_t,
     callback: CallbackManager.Callback,
     data: []const std.posix.iovec_const,
-    offset: usize = 0
+    offset: usize = 0,
+    zero_copy: bool = false
 };
 
 pub fn wait_ready(set: *IO.BlockingTasksSet, data: IO.WaitData) !usize {
@@ -36,7 +38,22 @@ pub fn perform(set: *IO.BlockingTasksSet, data: PerformData) !usize {
     errdefer set.pop(data_ptr) catch unreachable;
 
     const ring = &set.ring;
-    const sqe = try ring.write(@intCast(@intFromPtr(data_ptr)), data.fd, data.data, data.offset);
+    const sqe = blk: {
+        if (data.zero_copy) {
+            const iovecs: [1]std.posix.iovec_const = .{
+                std.posix.iovec_const{
+                    .base = data.data.ptr,
+                    .len = data.data.len
+                }
+            };
+            var msghr = comptime std.mem.zeroes(std.posix.msghdr_const);
+            msghr.iov = &iovecs;
+            msghr.iovlen = 1;
+
+            break :blk try ring.sendmsg(@intCast(@intFromPtr(data_ptr)), data.fd, &msghr, std.posix.MSG.ZEROCOPY);
+        }
+        break :blk try ring.write(@intCast(@intFromPtr(data_ptr)), data.fd, data.data, data.offset);
+    };
     sqe.flags |= std.os.linux.IOSQE_ASYNC;
     const ret = try ring.submit();
     if (ret != 1) {
@@ -46,11 +63,22 @@ pub fn perform(set: *IO.BlockingTasksSet, data: PerformData) !usize {
 }
 
 pub fn perform_with_iovecs(set: *IO.BlockingTasksSet, data: PerformVData) !usize {
-    const data_ptr = try set.push(.PerformWrite, data.callback);
+    const data_ptr = try set.push(.PerformWriteV, data.callback);
     errdefer set.pop(data_ptr) catch unreachable;
 
     const ring = &set.ring;
-    const sqe = try ring.writev(@intCast(@intFromPtr(data_ptr)), data.fd, data.data, data.offset);
+    const sqe = blk: {
+        if (data.zero_copy) {
+            var msghr = comptime std.mem.zeroes(std.posix.msghdr_const);
+            msghr.iov = data.data.ptr;
+            msghr.iovlen = @intCast(data.data.len);
+
+            std.log.info("LOOOLLLLLL", .{});
+
+            break :blk try ring.sendmsg(@intCast(@intFromPtr(data_ptr)), data.fd, &msghr, std.posix.MSG.ZEROCOPY);
+        }
+        break :blk try ring.writev(@intCast(@intFromPtr(data_ptr)), data.fd, data.data, data.offset);
+    };
     sqe.flags |= std.os.linux.IOSQE_ASYNC;
     const ret = try ring.submit();
     if (ret != 1) {

@@ -36,9 +36,10 @@ buffer_size: usize = 0,
 fd: std.posix.fd_t,
 
 ready_to_queue_write_op: bool = true,
+zero_copying: bool,
+
 blocking_task_id: usize = 0,
 
-is_writing: bool = false,
 is_closing: bool = false,
 closed: bool = false,
 initialized: bool = false,
@@ -47,7 +48,8 @@ initialized: bool = false,
 pub fn init(
     self: *WriteTransport, loop: *Loop, fd: std.posix.fd_t,
     callback: WriteCompletedCallback, parent_transport: PyObject,
-    exception_handler: PyObject, connection_lost_callback: ConnectionLostCallback
+    exception_handler: PyObject, connection_lost_callback: ConnectionLostCallback,
+    zero_copying: bool
 ) !void {
     const allocator = loop.allocator;
 
@@ -85,7 +87,8 @@ pub fn init(
         .busy_py_buffers = busy_py_objects,
 
         .fd = fd,
-        .initialized = true
+        .zero_copying = zero_copying,
+        .initialized = true,
     };
 }
 
@@ -166,6 +169,7 @@ inline fn queue_remaining_data(self: *WriteTransport, data_written: usize) !void
                 },
                 .fd = self.fd,
                 .data = self.busy_buffers.items[current_ioves_index..],
+                .zero_copy = ((remaining >= 10_000) and self.zero_copying)
             }
         }
     );
@@ -314,6 +318,8 @@ pub fn queue_buffers_and_swap(self: *WriteTransport) !void {
     const current_busy_buffers = self.busy_buffers;
     const current_busy_py_buffers = self.busy_py_buffers;
 
+    const buffer_size = self.buffer_size;
+
     self.blocking_task_id = try Loop.Scheduling.IO.queue(
         self.loop, .{
             .PerformWriteV = .{
@@ -324,7 +330,8 @@ pub fn queue_buffers_and_swap(self: *WriteTransport) !void {
                     }
                 },
                 .fd = self.fd,
-                .data = current_free_buffers.items
+                .data = current_free_buffers.items,
+                .zero_copy = ((buffer_size >= 10_000) and self.zero_copying)
             }
         }
     );
@@ -335,7 +342,7 @@ pub fn queue_buffers_and_swap(self: *WriteTransport) !void {
     self.busy_buffers = current_free_buffers;
     self.busy_py_buffers = current_free_py_buffers;
     self.busy_buffers_data_written = 0;
-    self.busy_buffers_size = self.buffer_size;
+    self.busy_buffers_size = buffer_size;
     self.current_iovec_index = 0;
 
     self.ready_to_queue_write_op = false;

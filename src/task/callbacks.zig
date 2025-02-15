@@ -39,7 +39,7 @@ inline fn set_result(
     result: PyObject
 ) CallbackManager.ExecuteCallbacksReturn {
     if (task.must_cancel) {
-        if (!Future.Python.Cancel.future_fast_cancel(&task.fut, task.fut.cancel_msg_py_object)) {
+        if (!Future.Python.Cancel.future_fast_cancel(&task.fut, future_data, task.fut.cancel_msg_py_object)) {
             return .Exception;
         }
         return .Continue;
@@ -107,7 +107,10 @@ inline fn cancel_future_object(
     task: *Task.PythonTaskObject, future: anytype
 ) CallbackManager.ExecuteCallbacksReturn {
     if (@TypeOf(future) == *Future.Python.FutureObject) {
-        if (!Future.Python.Cancel.future_fast_cancel(future, task.fut.cancel_msg_py_object)) {
+        const canceled = Future.Python.Cancel.future_fast_cancel(
+            future, utils.get_data_ptr(Future, &task.fut), task.fut.cancel_msg_py_object
+        );
+        if (!canceled) {
             return .Exception;
         }
     }else{
@@ -286,7 +289,7 @@ inline fn failed_execution(
 
     const cancelled_error = utils.PythonImports.cancelled_error_exc;
     if (exc_match(exception, cancelled_error) > 0) {
-        if (!Future.Python.Cancel.future_fast_cancel(fut, null)) {
+        if (!Future.Python.Cancel.future_fast_cancel(fut, future_data, null)) {
             return .Exception;
         }
         return .Continue;

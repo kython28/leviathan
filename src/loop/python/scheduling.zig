@@ -30,11 +30,6 @@ pub inline fn get_callback_info(allocator: std.mem.Allocator, args: []?PyObject)
         }
     }
 
-    if (python_c.PyCallable_Check(callback_info[0]) < 0) {
-        python_c.raise_python_type_error("Invalid callback\x00");
-        return error.PythonError;
-    }
-
     return callback_info;
 }
 
@@ -88,6 +83,11 @@ inline fn z_loop_call_soon(
 
     const py_callback = python_c.py_newref(args[0].?);
     errdefer python_c.py_decref(py_callback);
+
+    if (python_c.PyCallable_Check(py_callback) <= 0) {
+        python_c.raise_python_type_error("Invalid callback\x00");
+        return error.PythonError;
+    }
 
     if (python_c.PyCallable_Check(py_callback) < 0) {
         python_c.raise_python_type_error("Invalid callback\x00");
@@ -169,6 +169,11 @@ inline fn z_loop_delayed_call(
 
     const time: std.posix.timespec = blk: {
         const ts: f64 = python_c.PyFloat_AsDouble(args[0].?);
+        if (ts < 0.0) {
+            python_c.raise_python_value_error("Invalid value received in the first parameter\x00");
+            return error.PythonError;
+        }
+
         if (is_absolute) {
             const when_sec = @trunc(ts);
             break :blk .{
@@ -193,6 +198,11 @@ inline fn z_loop_delayed_call(
 
     const py_callback = python_c.py_newref(args[1].?);
     errdefer python_c.py_decref(py_callback);
+
+    if (python_c.PyCallable_Check(py_callback) <= 0) {
+        python_c.raise_python_type_error("Invalid callback\x00");
+        return error.PythonError;
+    }
 
     if (python_c.PyCallable_Check(py_callback) < 0) {
         python_c.raise_python_type_error("Invalid callback\x00");

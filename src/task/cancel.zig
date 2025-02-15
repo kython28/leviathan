@@ -10,9 +10,11 @@ const PythonTaskObject = Task.PythonTaskObject;
 
 fn cancel_future_waiter(future: PyObject, cancel_msg_py_object: ?PyObject) ?bool {
     if (python_c.type_check(future, &Task.PythonTaskType)) {
-        return fast_task_cancel(@ptrCast(future), cancel_msg_py_object);
+        const task: *PythonTaskObject = @ptrCast(future);
+        return fast_task_cancel(task, utils.get_data_ptr(Future, &task.fut), cancel_msg_py_object);
     }else if (python_c.type_check(future, &Future.Python.FutureType)) {
-        return Future.Python.Cancel.future_fast_cancel(@ptrCast(future), cancel_msg_py_object);
+        const fut: *Future.Python.FutureObject = @ptrCast(future);
+        return Future.Python.Cancel.future_fast_cancel(fut, utils.get_data_ptr(Future, fut), cancel_msg_py_object);
     }
 
     const cancel_function: PyObject = python_c.PyObject_GetAttrString(future, "cancel\x00")
@@ -25,7 +27,12 @@ fn cancel_future_waiter(future: PyObject, cancel_msg_py_object: ?PyObject) ?bool
     return (python_c.PyObject_IsTrue(ret) != 0);
 }
 
-inline fn fast_task_cancel(task: *PythonTaskObject, cancel_msg_py_object: ?PyObject) ?bool {
+inline fn fast_task_cancel(task: *PythonTaskObject, data: *Future, cancel_msg_py_object: ?PyObject) ?bool {
+    switch (data.status) {
+        .FINISHED, .CANCELED => return false,
+        else => {}
+    }
+
     if (cancel_msg_py_object) |pyobj| {
         if (python_c.unicode_check(pyobj)) {
             python_c.raise_python_type_error("Cancel message must be a string\x00");
@@ -69,7 +76,7 @@ pub fn task_cancel(self: ?*PythonTaskObject, args: ?PyObject, kwargs: ?PyObject)
         return null;
     }
 
-    const cancelled = fast_task_cancel(instance, cancel_msg_py_object);
+    const cancelled = fast_task_cancel(instance, future_data, cancel_msg_py_object);
     if (cancelled) |v| {
         return python_c.PyBool_FromLong(@intCast(@intFromBool(v)));
     }

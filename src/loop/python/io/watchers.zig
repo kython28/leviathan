@@ -120,7 +120,7 @@ inline fn z_loop_add_watcher(
     const py_callback = python_c.py_newref(args[1].?);
     errdefer python_c.py_decref(py_callback);
 
-    if (python_c.PyCallable_Check(py_callback) < 0) {
+    if (python_c.PyCallable_Check(py_callback) <= 0) {
         python_c.raise_python_runtime_error("Invalid callback\x00");
         return error.PythonError;
     }

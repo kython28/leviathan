@@ -8,7 +8,12 @@ const PythonFutureObject = Future.Python.FutureObject;
 
 const utils = @import("../../utils/utils.zig");
 
-pub inline fn future_fast_cancel(instance: *PythonFutureObject, cancel_msg_py_object: ?PyObject) bool {
+pub inline fn future_fast_cancel(instance: *PythonFutureObject, data: *Future, cancel_msg_py_object: ?PyObject) bool {
+    switch (data.status) {
+        .FINISHED,.CANCELED => return false,
+        else => {}
+    }
+
     if (cancel_msg_py_object) |pyobj| {
         if (python_c.unicode_check(pyobj)) {
             python_c.raise_python_type_error("Cancel message must be a string\x00");
@@ -19,8 +24,7 @@ pub inline fn future_fast_cancel(instance: *PythonFutureObject, cancel_msg_py_ob
         instance.cancel_msg_py_object = python_c.py_newref(pyobj);
     }
 
-    const future_data = utils.get_data_ptr(Future, instance);
-    Future.Callback.call_done_callbacks(future_data, .CANCELED) catch |err| {
+    Future.Callback.call_done_callbacks(data, .CANCELED) catch |err| {
         return utils.handle_zig_function_error(err, false);
     };
 
@@ -52,7 +56,7 @@ pub fn future_cancel(
         return utils.handle_zig_function_error(err, null);
     };
 
-    if (!future_fast_cancel(instance, cancel_msg_py_object)) {
+    if (!future_fast_cancel(instance, future_data, cancel_msg_py_object)) {
         return null;
     }
 

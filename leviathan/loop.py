@@ -196,6 +196,9 @@ class Loop(_Loop):
                 call_soon_threadsafe(future.set_exception, ex)
 
     async def shutdown_default_executor(self, timeout: float|None = None) -> None:
+        if timeout is not None and timeout < 0:
+            raise ValueError("Invalid timeout")
+
         self._shutdown_executor_called = True
         executor = self._default_executor
         if executor is None:

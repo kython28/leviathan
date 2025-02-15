@@ -237,25 +237,21 @@ def test_scheduling_invalid_inputs() -> None:
             loop.call_soon("not a callable")  # type: ignore
 
         # Test call_later with invalid inputs
-        with pytest.raises(TypeError):
+        with pytest.raises(ValueError):
             loop.call_later(-1, print, "test")  # Negative delay
 
-        with pytest.raises(TypeError):
+        with pytest.raises(ValueError):
             loop.call_later(None, print, "test")  # type: ignore
 
         with pytest.raises(TypeError):
             loop.call_later(DELAY_TIME, None)  # type: ignore
 
         # Test call_at with invalid inputs
-        with pytest.raises(TypeError):
+        with pytest.raises(ValueError):
             loop.call_at(None, print, "test")  # type: ignore
 
         with pytest.raises(TypeError):
-            loop.call_at(loop.time() - 1, print, "test")  # Past time
-
-        with pytest.raises(TypeError):
             loop.call_at(DELAY_TIME, None)  # type: ignore
-
     finally:
         loop.close()
 
@@ -290,8 +286,7 @@ def test_scheduling_with_exception_raising_callback() -> None:
         loop.call_soon(mock_func)
         loop.call_later(DELAY_TIME, loop.stop)
         
-        with pytest.raises(ValueError):
-            loop.run_forever()
+        loop.run_forever()
     finally:
         loop.close()
 

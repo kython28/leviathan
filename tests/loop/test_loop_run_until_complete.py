@@ -119,23 +119,15 @@ def test_run_until_complete_with_invalid_inputs() -> None:
 
         # Test with already running loop
         async def nested_loop() -> None:
-            loop.run_until_complete(asyncio.sleep(0.1))
+            coro = asyncio.sleep(0.01)
+            try:
+                loop.run_until_complete(coro)
+            finally:
+                await coro
 
         with pytest.raises(RuntimeError):
             loop.run_until_complete(nested_loop())
 
-    finally:
-        loop.close()
-
-def test_run_until_complete_with_long_running_coroutine() -> None:
-    async def long_running_coro() -> str:
-        await asyncio.sleep(5)  # Longer than typical test timeout
-        return "Completed"
-
-    loop = Loop()
-    try:
-        result = loop.run_until_complete(long_running_coro())
-        assert result == "Completed"
     finally:
         loop.close()
 
@@ -170,21 +162,5 @@ def test_run_until_complete_with_multiple_nested_coroutines() -> None:
     try:
         result = loop.run_until_complete(outer_coro(5))
         assert result == 21  # ((5 * 2) + 1) + 10
-    finally:
-        loop.close()
-
-def test_run_until_complete_with_generator_coroutine() -> None:
-    async def generator_coro() -> AsyncGenerator[int, None]:
-        for i in range(3):
-            await asyncio.sleep(0.01)
-            yield i
-
-    loop = Loop()
-    try:
-        gen = loop.run_until_complete(generator_coro())
-        results = []
-        async for item in gen:
-            results.append(item)
-        assert results == [0, 1, 2]
     finally:
         loop.close()

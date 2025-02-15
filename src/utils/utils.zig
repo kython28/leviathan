@@ -9,7 +9,7 @@ const CallbackManager = @import("../callback_manager.zig");
 
 pub var gpa = blk: {
     if (builtin.mode == .Debug) {
-        break :blk std.heap.GeneralPurposeAllocator(.{}){};
+        break :blk std.heap.DebugAllocator(.{}){};
     }else{
         break :blk jdz_allocator.JdzAllocator(.{}).init();
     }
@@ -49,31 +49,6 @@ pub inline fn get_parent_ptr(comptime T: type, leviathan_object: anytype) *T {
     return @as(*T, @ptrFromInt(@intFromPtr(leviathan_object) - @offsetOf(T, "data")));
 }
 
-pub fn print_error_traces(
-    trace: ?*std.builtin.StackTrace, @"error": anyerror,
-) void {
-    const writer = std.io.getStdErr().writer();
-    if (trace == null) {
-        writer.print("No zig's traces available", .{}) catch unreachable;
-        return;
-    }
-
-    var debug_info = std.debug.getSelfDebugInfo() catch {
-        writer.print("No zig's traces available", .{}) catch unreachable;
-        return;
-    };
-    defer debug_info.deinit();
-
-    std.debug.writeStackTrace(
-        trace.?.*, writer, debug_info,
-        std.io.tty.detectConfig(std.io.getStdOut())
-    ) catch {
-        writer.print("No zig's traces available", .{}) catch unreachable;
-        return;
-    };
-    writer.print("\nError name: {s}\n", .{@errorName(@"error")}) catch unreachable;
-}
-
 fn get_func_return_type(func: anytype) type {
     const func_type_info = @typeInfo(@TypeOf(func));
     if (func_type_info != .@"fn") {
@@ -102,9 +77,7 @@ pub inline fn handle_zig_function_error(@"error": anyerror, return_value: anytyp
         error.PythonError => {},
         error.OutOfMemory => python_c.raise_python_error(python_c.PyExc_MemoryError.?, null),
         else => {
-            const err_trace = @errorReturnTrace();
-            print_error_traces(err_trace, @"error");
-
+            std.debug.dumpCurrentStackTrace(@returnAddress());
             python_c.raise_python_runtime_error(@errorName(@"error"));
         }
     }

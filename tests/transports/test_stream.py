@@ -1,7 +1,7 @@
 from leviathan import StreamTransport
 import leviathan
 
-import asyncio, socket, os
+import asyncio, socket, os, pytest
 from typing import Any
 
 class BufferedEchoProtocol(asyncio.BufferedProtocol):
@@ -666,3 +666,73 @@ async def _test_stream_transport_extra_info() -> None:
 
 def test_stream_transport_extra_info() -> None:
     leviathan.run(_test_stream_transport_extra_info())
+
+async def _test_stream_transport_invalid_inputs() -> None:
+    loop = asyncio.get_running_loop()
+    server_socket, _ = socket.socketpair()
+    server_socket.setblocking(False)
+    
+    server_protocol = EchoProtocol()
+
+    # Test invalid file descriptor
+    with pytest.raises(ValueError):
+        StreamTransport(-1, server_protocol, loop)
+
+    # Test None protocol
+    with pytest.raises(TypeError):
+        StreamTransport(server_socket.fileno(), None, loop) # type: ignore
+
+    # Test None loop
+    with pytest.raises(TypeError):
+        StreamTransport(server_socket.fileno(), server_protocol, None) # type: ignore
+
+    # Test invalid extra_info key
+    server_transport = StreamTransport(server_socket.fileno(), server_protocol, loop)
+    try:
+        server_transport.get_extra_info('invalid_key')
+    finally:
+        server_transport.close()
+
+def test_stream_transport_invalid_inputs() -> None:
+    leviathan.run(_test_stream_transport_invalid_inputs())
+
+async def _test_stream_transport_write_edge_cases() -> None:
+    loop = asyncio.get_running_loop()
+    server_socket, client_socket = socket.socketpair()
+
+    server_socket.setblocking(False)
+    client_socket.setblocking(False)
+    
+    server_protocol = EchoProtocol()
+    client_protocol = EchoProtocol()
+    
+    server_transport = StreamTransport(server_socket.fileno(), server_protocol, loop)
+    client_transport = StreamTransport(client_socket.fileno(), client_protocol, loop)
+    
+    try:
+        # Test writing empty bytes
+        server_transport.write(b'')
+        await asyncio.sleep(0.1)  # Give time for potential processing
+
+        # Test writing None
+        with pytest.raises(TypeError):
+            server_transport.write(None) # type: ignore
+
+        # Test writing non-bytes/bytearray/memoryview
+        with pytest.raises(TypeError):
+            server_transport.write("not bytes") # type: ignore
+
+        # Test writelines with invalid input
+        with pytest.raises(TypeError):
+            server_transport.writelines(["not", "bytes"]) # type: ignore
+
+        # Test writelines with None
+        with pytest.raises(TypeError):
+            server_transport.writelines(None) # type: ignore
+
+    finally:
+        server_transport.close()
+        client_transport.close()
+
+def test_stream_transport_write_edge_cases() -> None:
+    leviathan.run(_test_stream_transport_write_edge_cases())

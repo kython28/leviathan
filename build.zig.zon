@@ -1,11 +1,11 @@
 .{
     .name = "leviathan",
-    .version = "0.3.0",
+    .version = "0.4.0",
 
     .dependencies = .{
         .jdz_allocator = .{
-            .url = "https://github.com/kython28/jdz_allocator/archive/refs/tags/0.0.4.zip",
-            .hash = "12205353c7f550b1aadf245d70a30d5a0a92eb151f735e15358ff35fcfe53343c93f",
+            .url = "https://github.com/kython28/jdz_allocator/archive/refs/tags/0.1.0.zip",
+            .hash = "1220cb38c3002d829cd1d58c4f988553c64f3fac4f918cb0303867eb1cb2b1654765"
         },
     },
     .paths = .{

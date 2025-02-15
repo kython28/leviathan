@@ -73,7 +73,7 @@ class LeviathanTest(Command):
         self.run_command("build")
 
         errno = subprocess.call(
-            [sys.executable, "-m", "pytest", "-s", "--verbose", "--full-trace"],
+            [sys.executable, "-m", "pytest", "-s", "-x", "--verbose", "--full-trace"],
             cwd=os.path.join("build", "lib"),
         )
         raise SystemExit(errno)

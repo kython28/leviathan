@@ -58,15 +58,18 @@ def test_run_in_executor_with_invalid_inputs() -> None:
     try:
         # Test with non-callable function
         with pytest.raises(TypeError):
-            loop.run_in_executor(None, "not a function")  # type: ignore
+            fut = loop.run_in_executor(None, "not a function")  # type: ignore
+            loop.run_until_complete(fut)
 
         # Test with None function
         with pytest.raises(TypeError):
-            loop.run_in_executor(None, None)  # type: ignore
+            fut = loop.run_in_executor(None, None)  # type: ignore
+            loop.run_until_complete(fut)
 
         # Test with invalid executor type
-        with pytest.raises(TypeError):
-            loop.run_in_executor("not an executor", simple_function, "test")  # type: ignore
+        with pytest.raises(AttributeError):
+            fut = loop.run_in_executor("not an executor", simple_function, "test")  # type: ignore
+            loop.run_until_complete(fut)
 
     finally:
         loop.run_until_complete(loop.shutdown_default_executor())
@@ -75,6 +78,7 @@ def test_run_in_executor_with_invalid_inputs() -> None:
 def test_shutdown_default_executor_edge_cases() -> None:
     loop = Loop()
     try:
+        loop.set_default_executor(ThreadPoolExecutor())
         # Test multiple shutdowns
         loop.run_until_complete(loop.shutdown_default_executor())
         loop.run_until_complete(loop.shutdown_default_executor())  # Should not raise error

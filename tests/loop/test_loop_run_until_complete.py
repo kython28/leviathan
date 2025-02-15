@@ -105,3 +105,86 @@ def test_run_until_complete_with_multiple_tasks() -> None:
         assert results == [0, 2, 4, 6, 8]
     finally:
         loop.close()
+
+def test_run_until_complete_with_invalid_inputs() -> None:
+    loop = Loop()
+    try:
+        # Test with None input
+        with pytest.raises(TypeError):
+            loop.run_until_complete(None)  # type: ignore
+
+        # Test with non-awaitable input
+        with pytest.raises(TypeError):
+            loop.run_until_complete("not an awaitable")  # type: ignore
+
+        # Test with already running loop
+        async def nested_loop() -> None:
+            loop.run_until_complete(asyncio.sleep(0.1))
+
+        with pytest.raises(RuntimeError):
+            loop.run_until_complete(nested_loop())
+
+    finally:
+        loop.close()
+
+def test_run_until_complete_with_long_running_coroutine() -> None:
+    async def long_running_coro() -> str:
+        await asyncio.sleep(5)  # Longer than typical test timeout
+        return "Completed"
+
+    loop = Loop()
+    try:
+        result = loop.run_until_complete(long_running_coro())
+        assert result == "Completed"
+    finally:
+        loop.close()
+
+def test_run_until_complete_with_recursive_coroutine() -> None:
+    async def recursive_coro(depth: int) -> int:
+        if depth <= 0:
+            return 0
+        await asyncio.sleep(0.01)
+        return depth + await recursive_coro(depth - 1)
+
+    loop = Loop()
+    try:
+        result = loop.run_until_complete(recursive_coro(10))
+        assert result == 55  # Sum of numbers from 1 to 10
+    finally:
+        loop.close()
+
+def test_run_until_complete_with_multiple_nested_coroutines() -> None:
+    async def inner_coro(x: int) -> int:
+        await asyncio.sleep(0.01)
+        return x * 2
+
+    async def middle_coro(x: int) -> int:
+        result = await inner_coro(x)
+        return result + 1
+
+    async def outer_coro(x: int) -> int:
+        result = await middle_coro(x)
+        return result + 10
+
+    loop = Loop()
+    try:
+        result = loop.run_until_complete(outer_coro(5))
+        assert result == 21  # ((5 * 2) + 1) + 10
+    finally:
+        loop.close()
+
+def test_run_until_complete_with_generator_coroutine() -> None:
+    async def generator_coro() -> AsyncGenerator[int, None]:
+        for i in range(3):
+            await asyncio.sleep(0.01)
+            yield i
+
+    loop = Loop()
+    try:
+        gen = loop.run_until_complete(generator_coro())
+        results = []
+        async for item in gen:
+            results.append(item)
+        assert results == [0, 1, 2]
+    finally:
+        loop.close()

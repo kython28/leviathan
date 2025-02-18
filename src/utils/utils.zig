@@ -6,14 +6,25 @@ const jdz_allocator = @import("jdz_allocator");
 
 const CallbackManager = @import("../callback_manager.zig");
 
-
-pub var gpa = blk: {
+const gpaType: type = blk: {
     if (builtin.mode == .Debug) {
-        break :blk std.heap.DebugAllocator(.{}){};
+        break :blk std.heap.DebugAllocator(.{});
     }else{
-        break :blk jdz_allocator.JdzAllocator(.{}).init();
+        break :blk jdz_allocator.JdzAllocator(.{});
     }
 };
+
+pub var gpa: gpaType = undefined;
+
+pub inline fn init_gpa() void {
+    gpa = blk: {
+        if (builtin.mode == .Debug) {
+            break :blk std.heap.DebugAllocator(.{}){};
+        }else{
+            break :blk jdz_allocator.JdzAllocator(.{}).init();
+        }
+    };
+}
 
 pub inline fn get_data_ptr2(comptime T: type, comptime field_name: []const u8, leviathan_pyobject: anytype) *T {
     const type_info = @typeInfo(@TypeOf(leviathan_pyobject));

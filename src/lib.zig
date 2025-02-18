@@ -45,6 +45,9 @@ const dynamic_leviathan_modules_names = .{
 fn module_cleanup(_: *python_c.PyObject) callconv(.C) void {
     deinitialize_leviathan_types();
     leviathan.utils.PythonImports.release_python_imports();
+    if (builtin.mode == .Debug) {
+        _ = utils.gpa.detectLeaks();
+    }
     _ = utils.gpa.deinit();
 }
 
@@ -120,6 +123,7 @@ fn initialize_python_module() !*python_c.PyObject {
 }
 
 export fn PyInit_leviathan_zig() ?*python_c.PyObject {
+    utils.init_gpa();
     leviathan.utils.PythonImports.initialize_python_imports() catch return null;
     initialize_leviathan_types() catch return null;
     return initialize_python_module() catch return null;

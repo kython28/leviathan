@@ -362,16 +362,20 @@ def test_future_set_result_with_different_types() -> None:
         assert future.result() == None
 
         future = Future(loop=loop)
-        future.set_result(42) # AIder, haz lo mismo aqui como hice las lineas anteriores
+        future.set_result(42)
+        assert future.result() == 42
 
         future = Future(loop=loop)
         future.set_result("string")
+        assert future.result() == "string"
 
         future = Future(loop=loop)
         future.set_result([1, 2, 3])
+        assert future.result() == [1, 2, 3]
 
         future = Future(loop=loop)
         future.set_result({"key": "value"})
+        assert future.result() == {"key": "value"}
     finally:
         loop.close()
 

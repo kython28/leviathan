@@ -232,6 +232,24 @@ def test_future_await() -> None:
         loop.close()
 
 
+def test_future_await_tuple() -> None:
+    async def test_func(fut: asyncio.Future[tuple[int, str]]) -> tuple[int, str]:
+        loop = asyncio.get_running_loop()
+        loop.call_soon(fut.set_result, (42, "hello"))
+        result = await fut
+        return result
+
+    loop = Loop()
+    try:
+        future = Future(loop=loop)
+        result = loop.run_until_complete(test_func(future))
+        assert future.done()
+        assert future.result() == (42, "hello")
+        assert result == (42, "hello")
+    finally:
+        loop.close()
+
+
 def test_future_cancel_during_callback() -> None:
     def callback(fut: asyncio.Future[Any]) -> None:
         fut.cancel()

@@ -308,3 +308,93 @@ def test_future_set_result_after_done() -> None:
         assert future.result() == "First"
     finally:
         loop.close()
+
+
+def test_future_set_exception_after_result() -> None:
+    loop = Loop()
+    try:
+        future = Future(loop=loop)
+        future.set_result("First")
+
+        with pytest.raises(asyncio.InvalidStateError):
+            future.set_exception(ValueError("Test exception"))
+
+        assert future.result() == "First"
+    finally:
+        loop.close()
+
+
+def test_future_set_result_after_exception() -> None:
+    loop = Loop()
+    try:
+        future = Future(loop=loop)
+        future.set_exception(ValueError("Test exception"))
+
+        with pytest.raises(asyncio.InvalidStateError):
+            future.set_result("First")
+
+        with pytest.raises(ValueError):
+            future.result()
+    finally:
+        loop.close()
+
+
+def test_future_set_invalid_exception() -> None:
+    loop = Loop()
+    try:
+        future = Future(loop=loop)
+        
+        with pytest.raises(TypeError):
+            future.set_exception(None)
+        
+        with pytest.raises(TypeError):
+            future.set_exception("Not an exception")
+    finally:
+        loop.close()
+
+
+def test_future_set_result_with_invalid_type() -> None:
+    loop = Loop()
+    try:
+        future = Future(loop=loop)
+        
+        # Test setting result with various types to ensure no unexpected behavior
+        future.set_result(None)
+        future.set_result(42)
+        future.set_result("string")
+        future.set_result([1, 2, 3])
+        future.set_result({"key": "value"})
+    finally:
+        loop.close()
+
+
+def test_future_multiple_cancellations() -> None:
+    loop = Loop()
+    try:
+        future = Future(loop=loop)
+        
+        # First cancellation should return True
+        assert future.cancel() is True
+        
+        # Subsequent cancellations should return False
+        assert future.cancel() is False
+        assert future.cancel() is False
+        
+        assert future.cancelled()
+    finally:
+        loop.close()
+
+
+def test_future_cancel_with_invalid_message() -> None:
+    loop = Loop()
+    try:
+        future = Future(loop=loop)
+        
+        # Test various invalid message types
+        future.cancel(msg=None)
+        future.cancel(msg=42)
+        future.cancel(msg=["invalid"])
+        
+        assert future.cancelled()
+    finally:
+        loop.close()

@@ -39,9 +39,9 @@ inline fn set_result(
     result: PyObject
 ) CallbackManager.ExecuteCallbacksReturn {
     if (task.must_cancel) {
-        if (!Future.Python.Cancel.future_fast_cancel(&task.fut, future_data, task.fut.cancel_msg_py_object)) {
-            return .Exception;
-        }
+        _ = Future.Python.Cancel.future_fast_cancel(&task.fut, future_data, task.fut.cancel_msg_py_object) catch |err| {
+            return utils.handle_zig_function_error(err, CallbackManager.ExecuteCallbacksReturn.Exception);
+        };
         return .Continue;
     }else{
         return execute_zig_function(
@@ -107,12 +107,11 @@ inline fn cancel_future_object(
     task: *Task.PythonTaskObject, future: anytype
 ) CallbackManager.ExecuteCallbacksReturn {
     if (@TypeOf(future) == *Future.Python.FutureObject) {
-        const canceled = Future.Python.Cancel.future_fast_cancel(
+        _ = Future.Python.Cancel.future_fast_cancel(
             future, utils.get_data_ptr(Future, &task.fut), task.fut.cancel_msg_py_object
-        );
-        if (!canceled) {
-            return .Exception;
-        }
+        ) catch |err| {
+            return utils.handle_zig_function_error(err, CallbackManager.ExecuteCallbacksReturn.Exception);
+        };
     }else{
         const cancel_function: PyObject = python_c.PyObject_GetAttrString(
             future, "cancel\x00"
@@ -302,9 +301,9 @@ inline fn failed_execution(
 
     const cancelled_error = utils.PythonImports.cancelled_error_exc;
     if (exc_match(exception, cancelled_error) > 0) {
-        if (!Future.Python.Cancel.future_fast_cancel(fut, future_data, null)) {
-            return .Exception;
-        }
+        _ = Future.Python.Cancel.future_fast_cancel(fut, future_data, null) catch |err| {
+            return utils.handle_zig_function_error(err, CallbackManager.ExecuteCallbacksReturn.Exception);
+        };
         return .Continue;
     }
 

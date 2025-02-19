@@ -38,6 +38,10 @@ pub inline fn long_check(obj: *Python.PyObject) bool {
 pub inline fn unicode_check(obj: *Python.PyObject) bool {
     return type_hasfeature(get_type(obj), Python.Py_TPFLAGS_UNICODE_SUBCLASS);
 }
+
+pub inline fn exception_check(obj: *Python.PyObject) bool {
+    return type_hasfeature(get_type(obj), Python.Py_TPFLAGS_BASE_EXC_SUBCLASS);
+}
 // -------------------------------------------------
 
 pub inline fn get_py_true() *Python.PyObject {

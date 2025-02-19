@@ -8,26 +8,22 @@ const PythonFutureObject = Future.Python.FutureObject;
 
 const utils = @import("../../utils/utils.zig");
 
-pub inline fn future_fast_cancel(instance: *PythonFutureObject, data: *Future, cancel_msg_py_object: ?PyObject) bool {
+pub inline fn future_fast_cancel(instance: *PythonFutureObject, data: *Future, cancel_msg_py_object: ?PyObject) !bool {
     switch (data.status) {
         .FINISHED,.CANCELED => return false,
         else => {}
     }
 
     if (cancel_msg_py_object) |pyobj| {
-        if (python_c.unicode_check(pyobj)) {
-            python_c.raise_python_type_error("Cancel message must be a string\x00");
-            return false;
-        }
-
         python_c.py_xdecref(instance.cancel_msg_py_object);
-        instance.cancel_msg_py_object = python_c.py_newref(pyobj);
+        if (python_c.unicode_check(pyobj)) {
+            instance.cancel_msg_py_object = python_c.PyObject_Str(pyobj) orelse return error.PythonError;
+        }else{
+            instance.cancel_msg_py_object = python_c.py_newref(pyobj);
+        }
     }
 
-    Future.Callback.call_done_callbacks(data, .CANCELED) catch |err| {
-        return utils.handle_zig_function_error(err, false);
-    };
-
+    try Future.Callback.call_done_callbacks(data, .CANCELED);
     return true;
 }
 
@@ -42,10 +38,6 @@ pub fn future_cancel(
     const instance = self.?;
 
     const future_data = utils.get_data_ptr(Future, instance);
-    switch (future_data.status) {
-        .FINISHED,.CANCELED => return python_c.get_py_false(),
-        else => {}
-    }
 
     var cancel_msg_py_object: ?PyObject = null;
     python_c.parse_vector_call_kwargs(
@@ -56,11 +48,11 @@ pub fn future_cancel(
         return utils.handle_zig_function_error(err, null);
     };
 
-    if (!future_fast_cancel(instance, future_data, cancel_msg_py_object)) {
-        return null;
-    }
+    const ret = future_fast_cancel(instance, future_data, cancel_msg_py_object) catch |err| {
+        return utils.handle_zig_function_error(err, null);
+    };
 
-    return python_c.get_py_true();
+    return python_c.PyBool_FromLong(@intCast(@intFromBool(ret)));
 }
 
 pub fn future_cancelled(self: ?*PythonFutureObject, _: ?PyObject) callconv(.C) ?PyObject {

@@ -404,7 +404,7 @@ def test_future_cancel_with_invalid_message() -> None:
         
         # Test various invalid message types
         future.cancel(msg=None)
-        future.cancel(msg=42)
+        future.cancel(msg=42) # Aider, aqui solo haremos un cancel por cada instancia future
         future.cancel(msg=["invalid"])
         
         assert future.cancelled()

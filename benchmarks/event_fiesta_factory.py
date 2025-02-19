@@ -16,16 +16,25 @@ lock_users = asyncio.Lock()
 lock_orders = asyncio.Lock()
 lock_data = asyncio.Lock()
 
+tasks = set()
+
 
 async def handle_user_signup(event_data: dict[str, Any]) -> None:
+    global tasks
+
     user_id = event_data["user_id"]
     user_email = event_data["email"]
 
     async with lock_users:
         registered_users[user_id] = {"email": user_email, "status": "registered"}
 
-    asyncio.create_task(notify_signup(user_id, user_email))
-    asyncio.create_task(log_action("signup", user_id))
+    t = asyncio.create_task(notify_signup(user_id, user_email))
+    tasks.add(t)
+    t.add_done_callback(tasks.discard)
+
+    t = asyncio.create_task(log_action("signup", user_id))
+    tasks.add(t)
+    t.add_done_callback(tasks.discard)
 
 
 async def notify_signup(user_id: str, user_email: str) -> None:
@@ -50,8 +59,13 @@ async def handle_order_placement(event_data: dict[str, Any]) -> None:
         "status": "processing",
     }
 
-    asyncio.create_task(update_order_status(order_id, "completed"))
-    asyncio.create_task(log_action("order_placed", order_id))
+    t = asyncio.create_task(update_order_status(order_id, "completed"))
+    tasks.add(t)
+    t.add_done_callback(tasks.discard)
+
+    t = asyncio.create_task(log_action("order_placed", order_id))
+    tasks.add(t)
+    t.add_done_callback(tasks.discard)
 
 
 async def update_order_status(order_id: str, new_status: str) -> None:
@@ -65,7 +79,9 @@ async def handle_data_processing(event_data: dict[str, Any]) -> None:
 
     transformed = [str(x).upper() for x in payload]
     data_store[data_id] = transformed
-    asyncio.create_task(log_action("data_processed", data_id))
+    t = asyncio.create_task(log_action("data_processed", data_id))
+    tasks.add(t)
+    t.add_done_callback(tasks.discard)
 
 
 async def process_event(event: Dict[str, Any]) -> None:

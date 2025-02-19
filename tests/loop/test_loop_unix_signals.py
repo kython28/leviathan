@@ -51,6 +51,45 @@ def test_remove_signal_handler_not_registered() -> None:
         loop.close()
 
 
+def test_sigint_does_not_stop_loop() -> None:
+    loop = Loop()
+
+    try:
+        interrupt_received = False
+        loop_iterations = 0
+
+        def sigint_handler() -> None:
+            nonlocal interrupt_received
+            interrupt_received = True
+
+        def periodic_task() -> None:
+            nonlocal loop_iterations
+            loop_iterations += 1
+            if loop_iterations >= 3:
+                loop.stop()
+
+        # Add SIGINT handler that doesn't stop the loop
+        loop.add_signal_handler(signal.SIGINT, sigint_handler)
+
+        # Schedule periodic task and signal
+        loop.call_later(0.1, os.kill, os.getpid(), signal.SIGINT)
+        loop.call_every(0.2, periodic_task)
+
+        # Run the loop
+        loop.run_forever()
+
+        assert interrupt_received, "SIGINT was not received"
+        assert loop_iterations == 3, "Loop was unexpectedly stopped by SIGINT"
+
+        # Remove signal handler
+        assert loop.remove_signal_handler(signal.SIGINT), (
+            "Failed to remove SIGINT handler"
+        )
+
+    finally:
+        loop.close()
+
+
 def test_add_signal_handler_invalid_signal() -> None:
     loop = Loop()
 

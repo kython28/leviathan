@@ -145,9 +145,13 @@ pub fn future_iternext(self: ?*PythonFutureObject) callconv(.C) ?PyObject {
     if (future_data.status != .PENDING) {
         const res = result.get_result(instance);
         if (res) |py_res| {
-            const exc = python_c.PyObject_CallOneArg(python_c.PyExc_StopIteration, py_res)
-                orelse return null;
-            python_c.PyErr_SetRaisedException(exc);
+            if (python_c.is_type(py_res, &python_c.PyTuple_Type)) {
+                const exc = python_c.PyObject_CallOneArg(python_c.PyExc_StopIteration, py_res)
+                    orelse return null;
+                python_c.PyErr_SetRaisedException(exc);
+                return null;
+            }
+            python_c.PyErr_SetObject(python_c.PyExc_StopIteration, py_res);
         }
         return null;
     }

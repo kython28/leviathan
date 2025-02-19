@@ -18,7 +18,7 @@ async def producer(producer_id: int) -> str:
     return result
 
 async def consumer(fut: asyncio.Future[str], producer_id: int) -> None:
-    delay = 0.3
+    delay = 0.03
     await asyncio.sleep(delay)
     random_value = round(random.random(), 3)
     fut.set_result(f"Value {random_value} after {delay:.2f}s (prod {producer_id})")

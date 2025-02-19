@@ -67,13 +67,15 @@ def test_sigint_does_not_stop_loop() -> None:
             loop_iterations += 1
             if loop_iterations >= 3:
                 loop.stop()
+                return
+            loop.call_soon(periodic_task)
 
         # Add SIGINT handler that doesn't stop the loop
         loop.add_signal_handler(signal.SIGINT, sigint_handler)
 
         # Schedule periodic task and signal
         loop.call_later(0.1, os.kill, os.getpid(), signal.SIGINT)
-        loop.call_every(0.2, periodic_task)
+        loop.call_later(0.2, periodic_task)
 
         # Run the loop
         loop.run_forever()

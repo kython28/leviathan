@@ -117,7 +117,7 @@ def create_comparison_table(
         "Relative Speed",
     ]
 
-    base_loop_results = results["asyncio"]
+    base_loop_results = results[LOOPS[0][0]]
     for loop_name, loop_results in results.items():
         for i, (m, _time) in enumerate(loop_results):
             base_time: float = base_loop_results[i][1].avg

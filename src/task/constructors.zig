@@ -26,33 +26,16 @@ inline fn task_init_configuration(
     coro: PyObject, context: PyObject, name: ?PyObject
 ) !void {
     Future.Python.Constructors.future_init_configuration(&self.fut, loop);
-    if (python_c.PyCoro_CheckExact(coro) == 0) {
-        switch (python_c.PyObject_HasAttrStringWithError(coro, "__await__\x00")) {
-            1 => {},
-            0 => {
-                python_c.raise_python_type_error("Coro argument must be a coroutine\x00");
-                return error.PythonError;
-            },
-            else => return error.PythonError
-        }
+    const coro_type = python_c.get_type(coro);
+    if (coro_type.tp_as_async == null or coro_type.tp_as_async.*.am_await == null) {
+        python_c.raise_python_type_error("Coro argument must be a coroutine\x00");
+        return error.PythonError;
     }
 
-    const coro_throw: PyObject = python_c.PyObject_GetAttrString(coro, "throw\x00") orelse return error.PythonError;
-    errdefer python_c.py_decref(coro_throw);
-
-    const wrapper = python_c.PyCFunction_New(
-        @constCast(&callbacks.LeviathanPyTaskWakeupMethod), @ptrCast(self)
-    ) orelse return error.PythonError;
-    errdefer python_c.py_decref(wrapper);
-
     self.name = name;
-
     self.coro = coro;
-    self.coro_throw = coro_throw;
 
     self.py_context = context;
-
-    self.wake_up_task_callback = wrapper;
 }
 
 inline fn task_schedule_coro(self: *PythonTaskObject, loop: *LoopObject) !void {

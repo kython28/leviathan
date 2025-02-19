@@ -136,6 +136,15 @@ inline fn cancel_future_object(
     return .Continue;
 }
 
+fn create_wake_up_task_callback(task: *Task.PythonTaskObject) !PyObject {
+    const wrapper = python_c.PyCFunction_New(
+        @constCast(&LeviathanPyTaskWakeupMethod), @ptrCast(task)
+    ) orelse return error.PythonError;
+
+    task.wake_up_task_callback = wrapper;
+    return wrapper;
+}
+
 inline fn handle_legacy_future_object(
     task: *Task.PythonTaskObject, future: PyObject
 ) CallbackManager.ExecuteCallbacksReturn { 
@@ -162,7 +171,11 @@ inline fn handle_legacy_future_object(
         ) orelse return .Exception;
         defer python_c.py_decref(add_done_callback_func);
         
-        const ret: PyObject = python_c.PyObject_CallOneArg(add_done_callback_func, task.wake_up_task_callback)
+        const wrapper = task.wake_up_task_callback orelse create_wake_up_task_callback(task) catch |err| {
+            return utils.handle_zig_function_error(err, .Exception);
+        };
+
+        const ret: PyObject = python_c.PyObject_CallOneArg(add_done_callback_func, wrapper)
             orelse return .Exception;
         python_c.py_decref(ret);
         python_c.py_incref(@ptrCast(task));
@@ -401,17 +414,23 @@ pub fn step_run_and_handle_result(
             return .Exception;
         }
 
+        const coro = task.coro.?;
         var coro_ret: ?PyObject = null;
         const gen_ret: python_c.PySendResult = blk2: {
             if (exception_value) |value| {
-                if (python_c.PyObject_CallOneArg(task.coro_throw.?, value)) |v| {
+                const coro_throw: PyObject = python_c.PyObject_GetAttrString(coro, "throw\x00")
+                    orelse return .Exception;
+                defer python_c.py_decref(coro_throw);
+
+                if (python_c.PyObject_CallOneArg(coro_throw, value)) |v| {
                     coro_ret = v;
                     break :blk2 python_c.PYGEN_NEXT;
                 }
+
                 break :blk2 python_c.PYGEN_ERROR;
-            }else{
-                break :blk2 python_c.PyIter_Send(task.coro.?, py_none, &coro_ret);
             }
+
+            break :blk2 python_c.PyIter_Send(coro, py_none, &coro_ret);
         };
 
         if (python_c.PyContext_Exit(context) < 0) {

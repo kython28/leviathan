@@ -353,16 +353,24 @@ def test_future_set_invalid_exception() -> None:
         loop.close()
 
 
-def test_future_set_result_with_invalid_type() -> None:
+def test_future_set_result_with_different_types() -> None:
     loop = Loop()
     try:
-        future = Future(loop=loop)
-        
         # Test setting result with various types to ensure no unexpected behavior
+        future = Future(loop=loop)
         future.set_result(None)
-        future.set_result(42)
+        assert future.result() == None
+
+        future = Future(loop=loop)
+        future.set_result(42) # AIder, haz lo mismo aqui como hice las lineas anteriores
+
+        future = Future(loop=loop)
         future.set_result("string")
+
+        future = Future(loop=loop)
         future.set_result([1, 2, 3])
+
+        future = Future(loop=loop)
         future.set_result({"key": "value"})
     finally:
         loop.close()

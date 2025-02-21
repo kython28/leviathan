@@ -26,14 +26,13 @@ inline fn z_loop_create_task(
         &.{&context, &name},
     );
     errdefer python_c.py_xdecref(name);
+    errdefer python_c.py_xdecref(context);
 
     if (context) |py_ctx| {
         if (python_c.is_none(py_ctx)) {
             context = python_c.PyContext_CopyCurrent()
                 orelse return error.PythonError;
             python_c.py_decref(py_ctx);
-        }else if (python_c.is_type(py_ctx, &python_c.PyContext_Type)) {
-            python_c.py_incref(py_ctx);
         }else{
             python_c.raise_python_type_error("Invalid context\x00");
             return error.PythonError;
@@ -41,16 +40,14 @@ inline fn z_loop_create_task(
     }else {
         context = python_c.PyContext_CopyCurrent() orelse return error.PythonError;
     }
-    errdefer python_c.py_decref(context.?);
 
     if (name) |v| {
         if (python_c.is_none(v)) {
+            python_c.py_decref(v);
             name = null;
-        }else{
-            if (python_c.unicode_check(v)) {
-                python_c.raise_python_type_error("name must be a string\x00");
-                return error.PythonError;
-            }
+        }else if (python_c.unicode_check(v)) {
+            python_c.raise_python_type_error("name must be a string\x00");
+            return error.PythonError;
         }
     }
 

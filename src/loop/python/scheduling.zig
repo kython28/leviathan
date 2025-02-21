@@ -48,22 +48,20 @@ inline fn z_loop_call_soon(
         &.{"context\x00"},
         &.{&context},
     );
+    errdefer python_c.py_xdecref(context);
 
     if (context) |py_ctx| {
         if (python_c.is_none(py_ctx)) {
             context = python_c.PyContext_CopyCurrent()
                 orelse return error.PythonError;
             python_c.py_decref(py_ctx);
-        }else if (python_c.is_type(py_ctx, &python_c.PyContext_Type)) {
-            python_c.py_incref(py_ctx);
         }else{
             python_c.raise_python_type_error("Invalid context\x00");
             return error.PythonError;
         }
-    }else {
+    }else{
         context = python_c.PyContext_CopyCurrent() orelse return error.PythonError;
     }
-    errdefer python_c.py_decref(context.?);
 
     const loop_data = utils.get_data_ptr(Loop, self);
     const allocator = loop_data.allocator;
@@ -149,9 +147,19 @@ inline fn z_loop_delayed_call(
         &.{&context},
     );
 
-    if (context == null) {
+    if (context) |py_ctx| {
+        if (python_c.is_none(py_ctx)) {
+            context = python_c.PyContext_CopyCurrent()
+                orelse return error.PythonError;
+            python_c.py_decref(py_ctx);
+        }else{
+            python_c.raise_python_type_error("Invalid context\x00");
+            return error.PythonError;
+        }
+    }else{
         context = python_c.PyContext_CopyCurrent() orelse return error.PythonError;
     }
+
     errdefer python_c.py_decref(context.?);
 
     const loop_data = utils.get_data_ptr(Loop, self);

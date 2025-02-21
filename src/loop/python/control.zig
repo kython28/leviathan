@@ -6,6 +6,8 @@ const utils = @import("../../utils/main.zig");
 const Loop = @import("../main.zig");
 const LoopObject = Loop.Python.LoopObject;
 
+const Hooks = @import("hooks.zig");
+
 const CallbackManager = @import("../../callback_manager.zig");
 
 const std = @import("std");
@@ -13,14 +15,14 @@ const std = @import("std");
 inline fn z_loop_run_forever(self: *LoopObject) !PyObject {
     const loop_data = utils.get_data_ptr(Loop, self);
 
-    try Loop.Python.Hooks.setup_asyncgen_hooks(self);
+    try Hooks.setup_asyncgen_hooks(self);
 
     const set_running_loop = utils.PythonImports.set_running_loop;
     if (python_c.PyObject_CallOneArg(set_running_loop, @ptrCast(self))) |v| {
         python_c.py_decref(v);
     }else{
         const exc = python_c.PyErr_GetRaisedException();
-        Loop.Python.Hooks.cleanup_asyncgen_hooks(self);
+        Hooks.cleanup_asyncgen_hooks(self);
         python_c.PyErr_SetRaisedException(exc);
         return error.PythonError;
     }
@@ -52,7 +54,7 @@ inline fn z_loop_run_forever(self: *LoopObject) !PyObject {
         py_exception = py_exc;
     }
 
-    Loop.Python.Hooks.cleanup_asyncgen_hooks(self);
+    Hooks.cleanup_asyncgen_hooks(self);
     if (py_exception) |v| {
         python_c.PyErr_SetRaisedException(v);
     }

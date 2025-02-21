@@ -115,6 +115,10 @@ inline fn z_transport_set_write_buffer_limits(
         &.{"high\x00", "low\x00"},
         &.{&py_high_water_mark, &py_low_water_mark}
     );
+    defer {
+        python_c.py_xdecref(py_high_water_mark);
+        python_c.py_xdecref(py_low_water_mark);
+    }
 
     const watermark = (comptime std.math.maxInt(usize))/2;
     const py_long_error = comptime std.math.maxInt(c_ulonglong);

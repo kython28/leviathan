@@ -13,7 +13,8 @@ const Control = @import("control.zig");
 const Utils = @import("utils/main.zig");
 const UnixSignal = @import("unix_signals.zig");
 const Watchers = @import("io/watchers.zig");
-pub const Hooks = @import("hooks.zig");
+const Hooks = @import("hooks.zig");
+const Network = @import("network/main.zig");
 
 const PythonLoopMethods: []const python_c.PyMethodDef = &[_]python_c.PyMethodDef{
     // --------------------- Control ---------------------
@@ -135,6 +136,36 @@ const PythonLoopMethods: []const python_c.PyMethodDef = &[_]python_c.PyMethodDef
         .ml_doc = "Stop monitoring the fd file descriptor for write availability\x00",
         .ml_flags = python_c.METH_O
     },
+    // --------------------- Watchers ---------------------
+    //
+    python_c.PyMethodDef{
+        .ml_name = "create_connection\x00",
+        .ml_meth = @ptrCast(&Network.Client.CreateConnection.loop_create_connection),
+        .ml_doc = "Open a streaming transport connection to a given address specified by host and port.\x00",
+        .ml_flags = python_c.METH_FASTCALL | python_c.METH_KEYWORDS
+    },
+    // python_c.PyMethodDef{
+    //     .ml_name = "remove_writer\x00",
+    //     .ml_meth = @ptrCast(&Watchers.loop_remove_writer),
+    //     .ml_doc = "Stop monitoring the fd file descriptor for write availability\x00",
+    //     .ml_flags = python_c.METH_O
+    // },
+    // python_c.PyMethodDef{
+    //     .ml_name = "remove_writer\x00",
+    //     .ml_meth = @ptrCast(&Watchers.loop_remove_writer),
+    //     .ml_doc = "Stop monitoring the fd file descriptor for write availability\x00",
+    //     .ml_flags = python_c.METH_O
+    // },
+    // python_c.PyMethodDef{
+    //     .ml_name = "remove_writer\x00",
+    //     .ml_meth = @ptrCast(&Watchers.loop_remove_writer),
+    //     .ml_doc = "Stop monitoring the fd file descriptor for write availability\x00",
+    //     .ml_flags = python_c.METH_O
+    // },
+
+
+
+
     // --------------------- Sentinel ---------------------
     python_c.PyMethodDef{
         .ml_name = null, .ml_meth = null, .ml_doc = null, .ml_flags = 0

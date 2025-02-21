@@ -49,6 +49,7 @@ inline fn z_transport_get_extra_info(
         &.{"default\x00"},
         &.{&default_value}
     );
+    errdefer python_c.py_xdecref(default_value);
 
     var info_name_length: python_c.Py_ssize_t = undefined;
     const name_ptr: [*]const u8 = python_c.PyUnicode_AsUTF8AndSize(info_name, &info_name_length)

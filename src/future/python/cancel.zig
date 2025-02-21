@@ -19,7 +19,7 @@ pub inline fn future_fast_cancel(instance: *PythonFutureObject, data: *Future, c
         if (python_c.unicode_check(pyobj)) {
             instance.cancel_msg_py_object = python_c.PyObject_Str(pyobj) orelse return error.PythonError;
         }else{
-            instance.cancel_msg_py_object = python_c.py_newref(pyobj);
+            instance.cancel_msg_py_object = pyobj;
         }
     }
 
@@ -47,6 +47,7 @@ pub fn future_cancel(
     ) catch |err| {
         return utils.handle_zig_function_error(err, null);
     };
+    errdefer python_c.py_xdecref(cancel_msg_py_object);
 
     const ret = future_fast_cancel(instance, future_data, cancel_msg_py_object) catch |err| {
         return utils.handle_zig_function_error(err, null);

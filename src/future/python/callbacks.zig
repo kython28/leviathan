@@ -26,14 +26,14 @@ inline fn z_future_add_done_callback(
         &.{"context\x00"},
         &.{&context},
     );
+    errdefer python_c.py_xdecref(context);
 
     const py_loop: *Loop.Python.LoopObject = @ptrCast(self.py_loop.?);
     if (context) |py_ctx| {
         if (python_c.is_none(py_ctx)) {
             context = python_c.PyContext_CopyCurrent()
                 orelse return error.PythonError;
-        }else if (python_c.is_type(py_ctx, &python_c.PyContext_Type)) {
-            python_c.py_incref(py_ctx);
+            python_c.py_decref(py_ctx);
         }else{
             python_c.raise_python_type_error("Invalid context\x00");
             return error.PythonError;
@@ -41,13 +41,12 @@ inline fn z_future_add_done_callback(
     }else {
         context = python_c.PyContext_CopyCurrent() orelse return error.PythonError;
     }
-    errdefer python_c.py_decref(context.?);
 
     const future_data = utils.get_data_ptr(Future, self);
     const callback = python_c.py_newref(args[0].?);
     errdefer python_c.py_decref(callback);
 
-    if (python_c.PyCallable_Check(callback) < 0) {
+    if (python_c.PyCallable_Check(callback) <= 0) {
         python_c.raise_python_type_error("Invalid callback\x00");
         return error.PythonError;
     }

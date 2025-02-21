@@ -68,7 +68,7 @@ fn default_sigint_signal_callback(
 ) CallbackManager.ExecuteCallbacksReturn {
     if (status != .Continue) return status;
     python_c.PyErr_SetNone(python_c.PyExc_KeyboardInterrupt);
-    return .Continue;
+    return .Exception;
 }
 
 fn enqueue_signal_fd(self: *UnixSignals) !void {

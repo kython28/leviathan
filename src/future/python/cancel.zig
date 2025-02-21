@@ -47,9 +47,9 @@ pub fn future_cancel(
     ) catch |err| {
         return utils.handle_zig_function_error(err, null);
     };
-    errdefer python_c.py_xdecref(cancel_msg_py_object);
 
     const ret = future_fast_cancel(instance, future_data, cancel_msg_py_object) catch |err| {
+        python_c.py_xdecref(cancel_msg_py_object);
         return utils.handle_zig_function_error(err, null);
     };
 

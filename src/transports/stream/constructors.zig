@@ -6,6 +6,7 @@ const PyObject = *python_c.PyObject;
 const utils = @import("../../utils/main.zig");
 
 const Loop = @import("../../loop/main.zig");
+const LoopObject = Loop.Python.LoopObject;
 
 const Stream = @import("main.zig");
 const StreamTransportObject = Stream.StreamTransportObject;
@@ -125,6 +126,72 @@ pub fn set_protocol(self: *StreamTransportObject, protocol: PyObject) !Stream.Pr
     return protocol_type;
 }
 
+fn stream_init_configuration(
+    self: *StreamTransportObject, protocol: PyObject, loop: *LoopObject,
+    fd: u32, zero_copying: bool
+) !void {
+    self.loop = @ptrCast(python_c.py_newref(loop));
+    errdefer python_c.py_decref_and_set_null(&self.loop);
+
+    self.protocol_max_read_constant = python_c.PyLong_FromUnsignedLongLong(ReadTransport.MAX_READ)
+        orelse return error.PythonError;
+    errdefer python_c.py_decref_and_set_null(&self.protocol_max_read_constant);
+
+    const loop_data = utils.get_data_ptr(Loop, loop);
+
+    const write_transport_data = utils.get_data_ptr2(WriteTransport, "write_transport", self);
+    try write_transport_data.init(
+        loop_data, @intCast(fd), &Write.write_operation_completed, @ptrCast(self),
+        loop.exception_handler.?, &Lifecyle.connection_lost_callback,
+        zero_copying
+    );
+    errdefer write_transport_data.deinit();
+
+    const read_transport_data = utils.get_data_ptr2(ReadTransport, "read_transport", self);
+    try read_transport_data.init(
+        loop_data, @intCast(fd), &Read.read_operation_completed, @ptrCast(self),
+        loop.exception_handler.?, &Lifecyle.connection_lost_callback,
+        zero_copying
+    );
+    errdefer read_transport_data.deinit();
+
+    const protocol_type = try set_protocol(self, protocol);
+    errdefer {
+        python_c.py_decref_and_set_null(&self.protocol);
+        python_c.py_decref_and_set_null(&self.protocol_get_buffer);
+        python_c.py_decref_and_set_null(&self.protocol_buffer_updated);
+        python_c.py_decref_and_set_null(&self.protocol_data_received);
+        python_c.py_decref_and_set_null(&self.protocol_eof_received);
+        python_c.py_decref_and_set_null(&self.protocol_connection_lost);
+        python_c.py_decref_and_set_null(&self.protocol_pause_writing);
+        python_c.py_decref_and_set_null(&self.protocol_resume_writing);
+    }
+
+    const watermark = (comptime std.math.maxInt(usize))/2;
+
+    self.writing_low_water_mark = watermark;
+    self.writing_high_water_mark = watermark;
+
+    self.is_writing = true;
+    self.is_reading = true;
+    self.closed = false;
+    self.fd = @intCast(fd);
+
+    try Read.queue_read_operation(self, read_transport_data, protocol_type);
+}
+
+pub fn new_stream_transport(protocol: PyObject, loop: *LoopObject, fd: u32, zero_copying: bool) !*StreamTransportObject {
+    const instance: *StreamTransportObject = @ptrCast(
+        Stream.StreamType.tp_alloc.?(Stream.StreamType, 0) orelse return error.PythonError
+    );
+    errdefer Stream.StreamType.tp_free.?(instance);
+
+    try stream_init_configuration(
+        instance, protocol, loop, fd, zero_copying
+    );
+
+    return instance;
+}
 
 inline fn z_stream_new(@"type": *python_c.PyTypeObject) !*StreamTransportObject {
     const instance: *StreamTransportObject = @ptrCast(@"type".tp_alloc.?(@"type", 0) orelse return error.PythonError);
@@ -206,66 +273,18 @@ inline fn z_stream_init(self: *StreamTransportObject, args: ?PyObject, kwargs: ?
         return error.PythonError;
     }
 
-    if (!python_c.type_check(loop.?, Loop.Python.LoopType)) {
-        python_c.raise_python_type_error("Invalid event loop. Only Leviathan's loops are allow\x00");
-        return error.PythonError;
-    }
-
-    const leviathan_loop: *Loop.Python.LoopObject = @ptrCast(loop.?);
-
-    self.loop = @ptrCast(python_c.py_newref(leviathan_loop));
-    errdefer python_c.py_decref_and_set_null(&self.loop);
-
     if (fd < 0) {
         python_c.raise_python_value_error("Invalid fd\x00");
         return error.PythonError;
     }
 
-    self.protocol_max_read_constant = python_c.PyLong_FromUnsignedLongLong(ReadTransport.MAX_READ)
-        orelse return error.PythonError;
-    errdefer python_c.py_decref_and_set_null(&self.protocol_max_read_constant);
-
-    const loop_data = utils.get_data_ptr(Loop, leviathan_loop);
-
-    const write_transport_data = utils.get_data_ptr2(WriteTransport, "write_transport", self);
-    try write_transport_data.init(
-        loop_data, @intCast(fd), &Write.write_operation_completed, @ptrCast(self),
-        leviathan_loop.exception_handler.?, &Lifecyle.connection_lost_callback,
-        false // TODO
-    );
-    errdefer write_transport_data.deinit();
-
-    const read_transport_data = utils.get_data_ptr2(ReadTransport, "read_transport", self);
-    try read_transport_data.init(
-        loop_data, @intCast(fd), &Read.read_operation_completed, @ptrCast(self),
-        leviathan_loop.exception_handler.?, &Lifecyle.connection_lost_callback,
-        false // TODO
-    );
-    errdefer read_transport_data.deinit();
-
-    const protocol_type = try set_protocol(self, py_protocol.?);
-    errdefer {
-        python_c.py_decref_and_set_null(&self.protocol);
-        python_c.py_decref_and_set_null(&self.protocol_get_buffer);
-        python_c.py_decref_and_set_null(&self.protocol_buffer_updated);
-        python_c.py_decref_and_set_null(&self.protocol_data_received);
-        python_c.py_decref_and_set_null(&self.protocol_eof_received);
-        python_c.py_decref_and_set_null(&self.protocol_connection_lost);
-        python_c.py_decref_and_set_null(&self.protocol_pause_writing);
-        python_c.py_decref_and_set_null(&self.protocol_resume_writing);
+    if (!python_c.type_check(loop.?, Loop.Python.LoopType)) {
+        python_c.raise_python_type_error("Invalid event loop. Only Leviathan's loops are allow\x00");
+        return error.PythonError;
     }
 
-    const watermark = (comptime std.math.maxInt(usize))/2;
-
-    self.writing_low_water_mark = watermark;
-    self.writing_high_water_mark = watermark;
-
-    self.is_writing = true;
-    self.is_reading = true;
-    self.closed = false;
-    self.fd = @intCast(fd);
-
-    try Read.queue_read_operation(self, read_transport_data, protocol_type);
+    const leviathan_loop: *LoopObject = @ptrCast(loop.?);
+    try stream_init_configuration(self, py_protocol.?, leviathan_loop, @intCast(fd), false);
 
     return 0;
 }

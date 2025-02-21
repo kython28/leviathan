@@ -107,8 +107,11 @@ inline fn cancel_future_object(
     task: *Task.PythonTaskObject, future: anytype
 ) CallbackManager.ExecuteCallbacksReturn {
     if (@TypeOf(future) == *Future.Python.FutureObject) {
+        const cancel_msg = task.fut.cancel_msg_py_object;
+        python_c.py_xincref(cancel_msg);
+
         _ = Future.Python.Cancel.future_fast_cancel(
-            future, utils.get_data_ptr(Future, &task.fut), task.fut.cancel_msg_py_object
+            future, utils.get_data_ptr(Future, &task.fut), cancel_msg
         ) catch |err| {
             return utils.handle_zig_function_error(err, CallbackManager.ExecuteCallbacksReturn.Exception);
         };

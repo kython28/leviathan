@@ -14,6 +14,8 @@ fn cancel_future_waiter(future: PyObject, cancel_msg_py_object: ?PyObject) anyer
         const ret = try fast_task_cancel(task, utils.get_data_ptr(Future, &task.fut), cancel_msg_py_object);
         return ret;
     }else if (python_c.type_check(future, &Future.Python.FutureType)) {
+        python_c.py_xincref(cancel_msg_py_object);
+
         const fut: *Future.Python.FutureObject = @ptrCast(future);
         const ret = try Future.Python.Cancel.future_fast_cancel(
             fut, utils.get_data_ptr(Future, fut), cancel_msg_py_object

@@ -82,10 +82,12 @@ pub fn setup_asyncgen_hooks(self: *LoopObject) !void {
     args[0] = python_c.PyCFunction_New(
         @constCast(&LoopAsyncGenFirstIterHookMethod), @ptrCast(self)
     ) orelse return error.PythonError;
+    defer python_c.py_decref(args[0]);
 
     args[1] =  python_c.PyCFunction_New(
         @constCast(&LoopAsyncGenFinalizerHookMethod), @ptrCast(self)
     ) orelse return error.PythonError;
+    defer python_c.py_decref(args[1]);
 
     const ret: PyObject = python_c.PyObject_Vectorcall(
         utils.PythonImports.set_asyncgen_hooks, &args, args.len, null

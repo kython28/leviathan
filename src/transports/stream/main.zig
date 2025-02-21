@@ -7,7 +7,7 @@ const WriteStream = @import("../write_transport.zig");
 const ReadStream = @import("../read_transport.zig");
 const utils = @import("../../utils/main.zig");
 
-const Constructors = @import("constructors.zig");
+pub const Constructors = @import("constructors.zig");
 const Lifecyle = @import("lifecycle.zig");
 const ExtraInfo = @import("extra_info.zig");
 const Read = @import("read.zig");

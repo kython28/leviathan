@@ -34,7 +34,7 @@ inline fn z_future_add_done_callback(
             context = python_c.PyContext_CopyCurrent()
                 orelse return error.PythonError;
             python_c.py_decref(py_ctx);
-        }else{
+        }else if (!python_c.is_type(py_ctx, &python_c.PyContext_Type)) {
             python_c.raise_python_type_error("Invalid context\x00");
             return error.PythonError;
         }

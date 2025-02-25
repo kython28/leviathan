@@ -29,18 +29,22 @@ const SocketCreationData = struct {
     py_interleave: ?PyObject = null,
     py_all_errors: ?PyObject = null,
 
-    protocol: PyObject = undefined,
+    protocol_factory: PyObject = undefined,
     future: *FutureObject = undefined
 };
 
 const TransportCreationData = struct {
-    protocol: PyObject,
+    protocol_factory: PyObject,
     future: *FutureObject,
     loop: *LoopObject,
     socket_fd: u32,
     zero_copying: bool,
     fd_created: bool = true
 };
+
+// fn z_create_socket_connection(
+//     data: ?*anyopaque, status: CallbackManager.ExecuteCallbacksReturn
+// )
 
 fn create_socket_connection(
     data: ?*anyopaque, status: CallbackManager.ExecuteCallbacksReturn
@@ -49,56 +53,65 @@ fn create_socket_connection(
     return status;
 }
 
-fn create_transport_and_set_future_result(
-    data: ?*anyopaque, status: CallbackManager.ExecuteCallbacksReturn
-) CallbackManager.ExecuteCallbacksReturn {
-    if (status != .Continue) return status;
+inline fn z_create_transport_and_set_future_result(data: TransportCreationData) !void {
+    const transport = try Stream.Constructors.new_stream_transport(
+        data.protocol_factory, data.loop, data.socket_fd, data.zero_copying
+    );
+    errdefer python_c.py_decref(@ptrCast(transport));
 
-    const transport_creation_data: *TransportCreationData = @alignCast(@ptrCast(data.?));
+    const protocol = python_c.PyObject_CallNoArgs(data.protocol_factory) orelse return error.PythonError;
+    errdefer python_c.py_decref(protocol);
 
-    const loop = transport_creation_data.loop;
-    const loop_data = utils.get_data_ptr(Loop, loop);
-    const allocator = loop_data.allocator;
+    const connection_made_func = python_c.PyObject_GetAttrString(protocol, "connection_made\x00")
+        orelse return error.PythonError;
+    defer python_c.py_decref(connection_made_func);
 
-    defer {
-        python_c.py_decref(@ptrCast(loop));
-        if (transport_creation_data.fd_created) {
-            std.posix.close(@intCast(transport_creation_data.socket_fd));
-        }
+    const ret = python_c.PyObject_CallOneArg(connection_made_func, @ptrCast(transport))
+        orelse return error.PythonError;
+    python_c.py_decref(ret);
 
-        allocator.destroy(transport_creation_data);
-    }
+    const result_tuple = python_c.PyTuple_New(2) orelse return error.PythonError;
+    errdefer python_c.py_decref(result_tuple);
 
-    const future = transport_creation_data.future;
-    defer python_c.py_decref(@ptrCast(future));
-
-    const protocol = transport_creation_data.protocol;
-    defer python_c.py_decref(protocol);
-
-    const transport = Stream.Constructors.new_stream_transport(
-        protocol, loop, transport_creation_data.socket_fd, transport_creation_data.zero_copying
-    ) catch |err| {
-        return utils.handle_zig_function_error(err, CallbackManager.ExecuteCallbacksReturn.Exception);
-    };
-    defer python_c.py_decref(@ptrCast(transport));
-
-    const result_tuple = python_c.PyTuple_New(2) orelse return CallbackManager.ExecuteCallbacksReturn.Exception;
-    defer python_c.py_decref(result_tuple);
-
-    var ret = python_c.PyTuple_SetItem(result_tuple, 0, @ptrCast(transport));
-    if (ret != 0) {
-        return CallbackManager.ExecuteCallbacksReturn.Exception;
+    if (python_c.PyTuple_SetItem(result_tuple, 0, @ptrCast(transport)) != 0) {
+        return error.PythonError;
     }
     python_c.py_incref(@ptrCast(transport));
 
-    ret = python_c.PyTuple_SetItem(result_tuple, 1, protocol);
-    if (ret != 0) {
-        return CallbackManager.ExecuteCallbacksReturn.Exception;
+    if (python_c.PyTuple_SetItem(result_tuple, 1, protocol) != 0) {
+        return error.PythonError;
     }
     python_c.py_incref(protocol);
 
-    const future_data = utils.get_data_ptr(Future, future);
-    Future.Python.Result.future_fast_set_result(future_data, result_tuple) catch |err| {
+    const future_data = utils.get_data_ptr(Future, data.future);
+    try Future.Python.Result.future_fast_set_result(future_data, result_tuple);
+}
+
+fn create_transport_and_set_future_result(
+    data: ?*anyopaque, status: CallbackManager.ExecuteCallbacksReturn
+) CallbackManager.ExecuteCallbacksReturn {
+    const transport_creation_data_ptr: *TransportCreationData = @alignCast(@ptrCast(data.?));
+
+    const loop = transport_creation_data_ptr.loop;
+    const loop_data = utils.get_data_ptr(Loop, loop);
+    const allocator = loop_data.allocator;
+
+    defer allocator.destroy(transport_creation_data_ptr);
+
+    const transport_creation_data = transport_creation_data_ptr.*;
+    defer {
+        python_c.py_decref(transport_creation_data.protocol_factory);
+        python_c.py_decref(@ptrCast(transport_creation_data.loop));
+        python_c.py_decref(@ptrCast(transport_creation_data.future));
+
+        if (transport_creation_data.fd_created) {
+            std.posix.close(@intCast(transport_creation_data.socket_fd));
+        }
+    }
+
+    if (status != .Continue) return status;
+
+    z_create_transport_and_set_future_result(transport_creation_data) catch |err| {
         return utils.handle_zig_function_error(err, CallbackManager.ExecuteCallbacksReturn.Exception);
     };
 
@@ -160,16 +173,16 @@ inline fn z_loop_create_connection(
             &creation_data.py_all_errors
         },
     );
-    defer python_c.py_xdecref(py_sock);
-    errdefer python_c.deinitialize_object_fields(&creation_data, &.{"future", "protocol"});
+    defer {
+        python_c.py_xdecref(py_sock);
+        python_c.py_xdecref(protocol_factory);
+    }
+    errdefer python_c.deinitialize_object_fields(&creation_data, &.{"future", "protocol_factory"});
 
     if (python_c.PyCallable_Check(protocol_factory) <= 0) {
         python_c.raise_python_value_error("Invalid protocol_factory. It must be a callable");
         return error.PythonError;
     }
-
-    const protocol = python_c.PyObject_CallNoArgs(protocol_factory) orelse return error.PythonError;
-    errdefer python_c.py_decref(protocol);
 
     const loop_data = utils.get_data_ptr(Loop, self);
     const allocator = loop_data.allocator;
@@ -198,7 +211,7 @@ inline fn z_loop_create_connection(
         errdefer allocator.destroy(transport_creation_data);
 
         transport_creation_data.* = .{
-            .protocol = protocol,
+            .protocol_factory = protocol_factory,
             .future = fut,
             .loop = python_c.py_newref(self),
             .socket_fd = @intCast(fd),
@@ -217,7 +230,7 @@ inline fn z_loop_create_connection(
     }
 
     creation_data.future = fut;
-    creation_data.protocol = protocol;
+    creation_data.protocol_factory = protocol_factory;
 
     const creation_data_ptr = try allocator.create(SocketCreationData);
     creation_data_ptr.* = creation_data;

@@ -285,6 +285,10 @@ pub fn deinitialize_object_fields(
     loop: inline for (fields) |field| {
         const field_name = field.name;
 
+        if (comptime std.mem.eql(u8, field_name, "ob_base")) {
+            continue;
+        }
+
         inline for (exclude_fields) |exclude_field| {
             if (comptime std.mem.eql(u8, field_name, exclude_field)) {
                 continue :loop;
@@ -306,6 +310,12 @@ pub fn deinitialize_object_fields(
                 if (data.child == Python.PyObject) {
                     py_decref(@field(object, field_name));
                     @field(object, field_name) = undefined;
+                }else if (@typeInfo(data.child) == .@"struct") {
+                    if (@hasField(data.child, "ob_base")) {
+                        py_decref(@ptrCast(@field(object, field_name)));
+                        continue :loop;
+                    }
+                    deinitialize_object_fields(@field(object, field_name), exclude_fields);
                 }
             },
             .@"struct" => {

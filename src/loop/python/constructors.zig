@@ -61,7 +61,7 @@ pub fn loop_clear(self: ?*LoopObject) callconv(.C) c_int {
         loop_data.release();
     }
 
-    python_c.deinitialize_object_fields(py_loop, &.{"ob_base"});
+    python_c.deinitialize_object_fields(py_loop, &.{});
     return 0;
 }
 

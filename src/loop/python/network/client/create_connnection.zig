@@ -49,18 +49,35 @@ const TransportCreationData = struct {
 fn create_socket_connection(
     data: ?*anyopaque, status: CallbackManager.ExecuteCallbacksReturn
 ) CallbackManager.ExecuteCallbacksReturn {
-    _ = data;
-    return status;
+    const socket_creation_data_ptr: *SocketCreationData = @alignCast(@ptrCast(data.?));
+    defer python_c.deinitialize_object_fields(socket_creation_data_ptr, &.{});
+
+    if (status != .Continue) return status;
+
+
+    return .Continue;
 }
 
 inline fn z_create_transport_and_set_future_result(data: TransportCreationData) !void {
+    var transport_added_to_tuple: bool = false;
+    var protocol_added_to_tuple: bool = false;
+
     const transport = try Stream.Constructors.new_stream_transport(
         data.protocol_factory, data.loop, data.socket_fd, data.zero_copying
     );
-    errdefer python_c.py_decref(@ptrCast(transport));
+    errdefer {
+        // PyTuple_SetItem steal reference
+        if (!transport_added_to_tuple) {
+            python_c.py_decref(@ptrCast(transport));
+        }
+    }
 
     const protocol = python_c.PyObject_CallNoArgs(data.protocol_factory) orelse return error.PythonError;
-    errdefer python_c.py_decref(protocol);
+    errdefer {
+        if (!protocol_added_to_tuple) {
+            python_c.py_decref(protocol);
+        }
+    }
 
     const connection_made_func = python_c.PyObject_GetAttrString(protocol, "connection_made\x00")
         orelse return error.PythonError;
@@ -68,7 +85,7 @@ inline fn z_create_transport_and_set_future_result(data: TransportCreationData) 
 
     const ret = python_c.PyObject_CallOneArg(connection_made_func, @ptrCast(transport))
         orelse return error.PythonError;
-    python_c.py_decref(ret);
+    defer python_c.py_decref(ret);
 
     const result_tuple = python_c.PyTuple_New(2) orelse return error.PythonError;
     errdefer python_c.py_decref(result_tuple);
@@ -76,12 +93,12 @@ inline fn z_create_transport_and_set_future_result(data: TransportCreationData) 
     if (python_c.PyTuple_SetItem(result_tuple, 0, @ptrCast(transport)) != 0) {
         return error.PythonError;
     }
-    python_c.py_incref(@ptrCast(transport));
+    transport_added_to_tuple = true;
 
     if (python_c.PyTuple_SetItem(result_tuple, 1, protocol) != 0) {
         return error.PythonError;
     }
-    python_c.py_incref(protocol);
+    protocol_added_to_tuple = true;
 
     const future_data = utils.get_data_ptr(Future, data.future);
     try Future.Python.Result.future_fast_set_result(future_data, result_tuple);
@@ -191,6 +208,11 @@ inline fn z_loop_create_connection(
     errdefer python_c.py_decref(@ptrCast(fut));
 
     if (py_sock) |v| {
+        if (creation_data.py_host != null or creation_data.py_port != null) {
+            python_c.raise_python_value_error("host/port and sock can not be specified at the same time");
+            return error.PythonError;
+        }
+
         const fileno_func = python_c.PyObject_GetAttrString(v, "fileno\x00")
             orelse return error.PythonError;
         defer python_c.py_decref(fileno_func);
@@ -217,6 +239,7 @@ inline fn z_loop_create_connection(
             .socket_fd = @intCast(fd),
             .zero_copying = false
         };
+        errdefer python_c.py_decref(@ptrCast(self));
 
         try Loop.Scheduling.Soon.dispatch(loop_data, CallbackManager.Callback{
             .ZigGeneric = .{
@@ -225,7 +248,7 @@ inline fn z_loop_create_connection(
             }
         });
 
-        python_c.deinitialize_object_fields(&creation_data, &.{"future", "protocol"});
+        python_c.deinitialize_object_fields(&creation_data, &.{"future", "protocol_factory"});
         return python_c.py_newref(fut);
     }
 

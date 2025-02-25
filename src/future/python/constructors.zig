@@ -73,7 +73,7 @@ pub fn future_clear(self: ?*PythonFutureObject) callconv(.C) c_int {
         future_data.release();
     }
 
-    python_c.deinitialize_object_fields(py_future, &.{"ob_base"});
+    python_c.deinitialize_object_fields(py_future, &.{});
 
     return 0;
 }

@@ -125,10 +125,10 @@ class ZigInstallCommand(install):
 
 setup(
     name="leviathan",
-    version="0.3.0",
+    version="0.4.0",
     description="Leviathan: A lightning-fast Zig-powered event loop for Python's asyncio.",
     author="Enrique Miguel Mora Meza",
-    author_email="kike28.py@pm.me",
+    author_email="kike28.py@protonmail.ch",
     url="https://github.com/kython28/leviathan",
     packages=find_packages(
         exclude=["tests", "zig-out", "src"], include=["leviathan", "leviathan.*"]

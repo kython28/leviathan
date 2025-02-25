@@ -57,7 +57,7 @@ pub fn callback_for_python_generic_callbacks(
             return .Continue;
         }
     }else{
-        if (@atomicLoad(bool, data.cancelled, .monotonic)) {
+        if (@atomicLoad(bool, data.cancelled, .acquire)) {
             return .Continue;
         }
     }
@@ -190,7 +190,7 @@ fn handle_get_context(self: ?*PythonHandleObject, _: ?PyObject) callconv(.C) ?Py
 pub inline fn fast_handle_cancel(self: *PythonHandleObject) !void {
     const finished = switch (builtin.single_threaded) {
         true => self.finished,
-        false => @atomicLoad(bool, &self.finished, .monotonic)
+        false => @atomicLoad(bool, &self.finished, .acquire)
     };
     if (finished) {
         return;
@@ -198,7 +198,7 @@ pub inline fn fast_handle_cancel(self: *PythonHandleObject) !void {
 
     const cancelled = switch (builtin.single_threaded) {
         true => self.cancelled,
-        false => @atomicLoad(bool, &self.cancelled, .monotonic)
+        false => @atomicLoad(bool, &self.cancelled, .acquire)
     };
 
     if (!cancelled) {
@@ -218,7 +218,7 @@ pub inline fn fast_handle_cancel(self: *PythonHandleObject) !void {
         if (builtin.single_threaded) {
             self.cancelled = true;
         }else{
-            @atomicStore(bool, &self.cancelled, true, .monotonic);
+            @atomicStore(bool, &self.cancelled, true, .release);
         }
     }
 }
@@ -234,7 +234,7 @@ fn handle_cancel(self: ?*PythonHandleObject, _: ?PyObject) callconv(.C) ?PyObjec
 fn handle_cancelled(self: ?*PythonHandleObject, _: ?PyObject) callconv(.C) ?PyObject {
     const cancelled = switch (builtin.single_threaded) {
         true => self.?.cancelled,
-        false => @atomicLoad(bool, &self.?.cancelled, .monotonic)
+        false => @atomicLoad(bool, &self.?.cancelled, .acquire)
     };
 
     return python_c.PyBool_FromLong(@intCast(@intFromBool(cancelled)));

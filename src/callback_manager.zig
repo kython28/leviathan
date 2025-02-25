@@ -122,7 +122,7 @@ pub inline fn is_callback_cancelled(callback: Callback) bool {
                     data.cancelled.* = true;
                     return !data.cancelled.*;
                 }else{
-                    return @atomicLoad(bool, data.cancelled, .monotonic);
+                    return @atomicLoad(bool, data.cancelled, .acquire);
                 }
             }else{
                 @compileError(

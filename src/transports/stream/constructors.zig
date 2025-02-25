@@ -66,8 +66,8 @@ pub fn set_protocol(self: *StreamTransportObject, protocol: PyObject) !Stream.Pr
 
     self.protocol_type = protocol_type;
 
-    self.protocol = protocol;
-    errdefer python_c.py_decref(protocol);
+    self.protocol = python_c.py_newref(protocol);
+    errdefer python_c.py_decref_and_set_null(&self.protocol);
 
     switch (protocol_type) {
         .Buffered => {

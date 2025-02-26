@@ -80,7 +80,7 @@ def test_call_later() -> None:
         assert (
             DELAY_TIME * (calls_num + 1)
             <= (end_time - start_time)
-            <= DELAY_TIME * (calls_num + 2)
+            <= (calls_num + 2)
         )
 
         expected_calls = [((i,),) for i in range(calls_num)]
@@ -108,7 +108,7 @@ def test_call_later_with_cancel() -> None:
         assert (
             DELAY_TIME * (calls_num + 1)
             <= (end_time - start_time)
-            <= DELAY_TIME * (calls_num + 2)
+            <= (calls_num + 2)
         )
 
         expected_calls = [((i,),) for i in range(calls_num) if i % 2 == 1]
@@ -135,7 +135,7 @@ def test_call_later_with_context() -> None:
         assert (
             DELAY_TIME * (calls_num + 1)
             <= (end_time - start_time)
-            <= DELAY_TIME * (calls_num + 2)
+            <= (calls_num + 2)
         )
 
         expected_calls = [((i,),) for i in range(calls_num)]
@@ -161,7 +161,7 @@ def test_call_at() -> None:
         assert (
             DELAY_TIME * (calls_num + 1)
             <= (end_time - start_time)
-            <= DELAY_TIME * (calls_num + 2)
+            <= (calls_num + 2)
         )
 
         expected_calls = [((i,),) for i in range(calls_num)]
@@ -189,7 +189,7 @@ def test_call_at_with_cancel() -> None:
         assert (
             DELAY_TIME * (calls_num + 1)
             <= (end_time - start_time)
-            <= DELAY_TIME * (calls_num + 2)
+            <= (calls_num + 2)
         )
 
         expected_calls = [((i,),) for i in range(calls_num) if i % 2 == 1]

@@ -213,8 +213,8 @@ fn poll_blocking_events(
     const epoll_fd = loop.blocking_tasks_epoll_fd;
     const blocking_ready_epoll_events = loop.blocking_ready_epoll_events;
 
-    var nevents: usize = 0;
-    while (nevents < blocking_ready_epoll_events.len) {
+    var nevents: usize = blocking_ready_epoll_events.len;
+    while (nevents == blocking_ready_epoll_events.len) {
         if (wait) {
             loop.epoll_locked = true;
             mutex.unlock();

@@ -290,7 +290,7 @@ pub fn start(self: *Loop) !void {
         defer {
             for (quanrantine_blocking_tasks.items) |set| {
                 if (set.tasks_data.len == 0) {
-                    Loop.Scheduling.IO.remove_tasks_set(self.blocking_tasks_epoll_fd, &self.blocking_tasks_queue, set);
+                    Loop.Scheduling.IO.remove_tasks_set(self.blocking_tasks_epoll_fd, set);
                 }else{
                     set.clear_quarantine();
                 }

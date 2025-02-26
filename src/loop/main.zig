@@ -138,7 +138,7 @@ pub fn release(self: *Loop) void {
         for (0..blocking_tasks_queue.len) |_| {
             const set = blocking_tasks_queue.pop() catch unreachable;
             set.cancel_all(self) catch unreachable;
-            _ = set.deinit();
+            set.deinit(false);
         }
     }
 

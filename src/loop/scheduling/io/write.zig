@@ -73,8 +73,6 @@ pub fn perform_with_iovecs(set: *IO.BlockingTasksSet, data: PerformVData) !usize
             msghr.iov = data.data.ptr;
             msghr.iovlen = @intCast(data.data.len);
 
-            std.log.info("LOOOLLLLLL", .{});
-
             break :blk try ring.sendmsg(@intCast(@intFromPtr(data_ptr)), data.fd, &msghr, std.posix.MSG.ZEROCOPY);
         }
         break :blk try ring.writev(@intCast(@intFromPtr(data_ptr)), data.fd, data.data, data.offset);

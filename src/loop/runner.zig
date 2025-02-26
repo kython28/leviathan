@@ -213,24 +213,24 @@ fn poll_blocking_events(
     const epoll_fd = loop.blocking_tasks_epoll_fd;
     const blocking_ready_epoll_events = loop.blocking_ready_epoll_events;
 
-    var nevents: usize = blocking_ready_epoll_events.len;
-    while (nevents == blocking_ready_epoll_events.len) {
-        if (wait) {
-            loop.epoll_locked = true;
-            mutex.unlock();
-            defer {
-                mutex.lock();
-                loop.epoll_locked = false;
-            }
-
-            const py_thread_state = PyEval_SaveThread();
-            defer PyEval_RestoreThread(py_thread_state);
-
-            nevents = std.posix.epoll_wait(epoll_fd, blocking_ready_epoll_events, -1);
-        }else{
-            nevents = std.posix.epoll_wait(epoll_fd, blocking_ready_epoll_events, 0);
+    var nevents: usize = undefined;
+    if (wait) {
+        loop.epoll_locked = true;
+        mutex.unlock();
+        defer {
+            mutex.lock();
+            loop.epoll_locked = false;
         }
 
+        const py_thread_state = PyEval_SaveThread();
+        defer PyEval_RestoreThread(py_thread_state);
+
+        nevents = std.posix.epoll_wait(epoll_fd, blocking_ready_epoll_events, -1);
+    }else{
+        nevents = std.posix.epoll_wait(epoll_fd, blocking_ready_epoll_events, 0);
+    }
+
+    while (nevents > 0) {
         const allocator = loop.allocator;
         const blocking_ready_tasks = loop.blocking_ready_tasks;
 
@@ -241,6 +241,12 @@ fn poll_blocking_events(
             );
 
             try quarantine_array.append(set);
+        }
+
+        if (nevents == blocking_ready_epoll_events.len) {
+            nevents = std.posix.epoll_wait(epoll_fd, blocking_ready_epoll_events, 0);
+        }else{
+            break;
         }
     }
 }

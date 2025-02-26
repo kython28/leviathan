@@ -22,7 +22,7 @@ pub const BlockingTaskData = struct {
 
 pub const TotalItems = switch (builtin.mode) {
     .Debug => 4,
-    else => 1024
+    else => 8192
 };
 
 pub const BlockingTasksSet = struct {
@@ -100,10 +100,13 @@ pub const BlockingTasksSet = struct {
             @panic("Tasks set is not empty");
         }
 
-        if (can_release_node and self.free_items.len > 0) {
+        if (can_release_node) {
             const node = self.node;
             const blocking_tasks_queue = self.blocking_tasks_queue;
-            blocking_tasks_queue.unlink_node(node);
+            if (self.free_items.len > 0) {
+                blocking_tasks_queue.unlink_node(node);
+            }
+
             blocking_tasks_queue.release_node(node);
         }
 

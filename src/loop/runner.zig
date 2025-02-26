@@ -295,6 +295,8 @@ pub fn start(self: *Loop) !void {
                     set.clear_quarantine();
                 }
             }
+
+            quanrantine_blocking_tasks.clearRetainingCapacity();
         }
 
         ready_tasks_queue_index = 1 - ready_tasks_queue_index;

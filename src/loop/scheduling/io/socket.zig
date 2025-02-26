@@ -10,7 +10,7 @@ pub const ShutdownData = struct {
 
 pub fn shutdown(set: *IO.BlockingTasksSet, data: ShutdownData) !usize {
     const data_ptr = try set.push(.WaitReadable, null);
-    errdefer set.pop(data_ptr) catch unreachable;
+    errdefer set.pop(data_ptr);
 
     const ring: *std.os.linux.IoUring = &set.ring;
     const sqe = try ring.shutdown(@intCast(@intFromPtr(data_ptr)), data.socket_fd, data.how);

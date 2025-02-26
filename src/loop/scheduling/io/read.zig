@@ -13,7 +13,7 @@ pub const PerformData = struct {
 
 pub fn wait_ready(set: *IO.BlockingTasksSet, data: IO.WaitData) !usize {
     const data_ptr = try set.push(.WaitReadable, data.callback);
-    errdefer set.pop(data_ptr) catch unreachable;
+    errdefer set.pop(data_ptr);
 
     const ring: *std.os.linux.IoUring = &set.ring;
     const sqe = try ring.poll_add(@intCast(@intFromPtr(data_ptr)), data.fd, std.c.POLL.IN);
@@ -27,7 +27,7 @@ pub fn wait_ready(set: *IO.BlockingTasksSet, data: IO.WaitData) !usize {
 
 pub fn perform(set: *IO.BlockingTasksSet, data: PerformData) !usize {
     const data_ptr = try set.push(.PerformRead, data.callback);
-    errdefer set.pop(data_ptr) catch unreachable;
+    errdefer set.pop(data_ptr);
 
     const ring = &set.ring;
     const sqe = blk: {

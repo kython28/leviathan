@@ -158,8 +158,8 @@ pub const BlockingTasksSet = struct {
     }
 
     pub inline fn clear_quarantine(self: *BlockingTasksSet) void {
-        self.free_items.extend(self.quarantine_items);
-        self.free_cancel_items.extend(self.quarantine_cancel_items);
+        self.free_items.extend(&self.quarantine_items);
+        self.free_cancel_items.extend(&self.quarantine_cancel_items);
     }
 
     pub fn cancel_all(self: *BlockingTasksSet, loop: *Loop) !void {
@@ -232,7 +232,7 @@ inline fn get_blocking_tasks_set(
     const new_set = try BlockingTasksSet.init(allocator, new_node);
     errdefer {
         _ = new_set.deinit();
-        blocking_tasks_queue.unlink_node(new_node) catch unreachable;
+        blocking_tasks_queue.unlink_node(new_node);
         blocking_tasks_queue.release_node(new_node);
     }
 

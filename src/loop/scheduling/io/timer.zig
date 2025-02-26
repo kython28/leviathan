@@ -16,7 +16,7 @@ pub const WaitData = struct {
 
 pub fn wait(set: *IO.BlockingTasksSet, data: WaitData) !usize {
     const data_ptr = try set.push(.WaitTimer, data.callback);
-    errdefer set.pop(data_ptr) catch unreachable;
+    errdefer set.pop(data_ptr);
 
     const ring: *std.os.linux.IoUring = &set.ring;
 

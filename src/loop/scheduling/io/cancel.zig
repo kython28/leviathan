@@ -10,7 +10,7 @@ pub fn perform(task_id: usize) !usize {
     const set = task_data.set; // Cancel requests must be in same IOUring ring
 
     const data_ptr = try set.push(.Cancel, null);
-    errdefer set.pop(data_ptr) catch unreachable;
+    errdefer set.pop(data_ptr);
 
     const ring: *std.os.linux.IoUring = &set.ring;
     if (task_data.operation == .WaitTimer) {

@@ -262,7 +262,6 @@ pub inline fn remove_tasks_set(
 
 pub fn queue(self: *Loop, event: BlockingOperationData) !usize {
     if (event == .Cancel) {
-        std.debug.dumpCurrentStackTrace(@returnAddress());
         return try Cancel.perform(event.Cancel);
     }
 

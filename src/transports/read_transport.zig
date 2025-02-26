@@ -35,6 +35,7 @@ blocking_task_id: usize = 0,
 zero_copying: bool,
 closed: bool = false,
 is_closing: bool = false,
+cancelling: bool = false,
 initialized: bool = false,
 
 pub fn init(
@@ -101,6 +102,7 @@ fn read_operation_completed(
 ) CallbackManager.ExecuteCallbacksReturn {
     const self: *ReadTransport = @alignCast(@ptrCast(data.?));
     self.blocking_task_id = 0;
+    self.cancelling = false;
 
     const parent_transport = self.parent_transport;
     defer python_c.py_decref(parent_transport);
@@ -211,15 +213,18 @@ pub inline fn perform(self: *ReadTransport, buffer: ?[]u8) !void {
 }
 
 pub inline fn cancel(self: *ReadTransport) !void {
-    if (self.blocking_task_id == 0) {
+    const blocking_task_id = self.blocking_task_id;
+    if (blocking_task_id == 0 or self.cancelling) {
         return;
     }
 
     _ = try Loop.Scheduling.IO.queue(
         self.loop, .{
-            .Cancel = self.blocking_task_id
+            .Cancel = blocking_task_id
         }
     );
+
+    self.cancelling = true;
 }
 
 const ReadTransport = @This();

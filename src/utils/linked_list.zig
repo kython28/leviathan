@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 
 pub fn init(comptime T: type) type {
     return struct {
@@ -37,9 +38,9 @@ pub fn init(comptime T: type) type {
             self.allocator.destroy(node);
         }
 
-        pub fn unlink_node(self: *@This(), node: Node) !void {
-            if (self.len == 0) {
-                return errors.LinkedListEmpty;
+        pub fn unlink_node(self: *@This(), node: Node) void {
+            if (builtin.mode == .Debug and self.len == 0) {
+                @panic("Trying to pop elements while linked list is empty");
             }
 
             const prev_node = node.prev;
@@ -161,6 +162,26 @@ pub fn init(comptime T: type) type {
                 allocator.destroy(n);
             }
             self.* = @This().init(allocator);
+        }
+
+        pub fn extend(self: *@This(), list: *@This()) void {
+            const f_node2 = list.first orelse return;
+            const l_node2 = list.last.?;
+            const new_len = list.len;
+
+            list.first = null;
+            list.last = null;
+            list.len = 0;
+
+            if (self.last) |l_node| {
+                f_node2.prev = l_node;
+                l_node.next = f_node2;
+            }else{
+                self.first = f_node2;
+            }
+
+            self.last = l_node2;
+            self.len += new_len;
         }
     };
 }

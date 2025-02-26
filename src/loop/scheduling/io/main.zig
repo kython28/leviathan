@@ -20,7 +20,10 @@ pub const BlockingTaskData = struct {
     operation: BlockingOperation
 };
 
-pub const TotalItems = 1024;
+pub const TotalItems = switch (builtin.mode) {
+    .Debug => 4,
+    else => 1024
+};
 
 pub const BlockingTasksSet = struct {
     allocator: std.mem.Allocator,
@@ -29,6 +32,9 @@ pub const BlockingTasksSet = struct {
     tasks_data: BlockingTaskDataLinkedList,
     free_items: BlockingTaskDataLinkedList,
     free_cancel_items: BlockingTaskDataLinkedList,
+
+    quarantine_items: BlockingTaskDataLinkedList,
+    quarantine_cancel_items: BlockingTaskDataLinkedList,
 
     eventfd: std.posix.fd_t,
 
@@ -45,8 +51,13 @@ pub const BlockingTasksSet = struct {
             .allocator = allocator,
             .ring = try std.os.linux.IoUring.init(TotalItems * 2, 0),
             .tasks_data = BlockingTaskDataLinkedList.init(allocator),
+
             .free_items = BlockingTaskDataLinkedList.init(allocator),
             .free_cancel_items = BlockingTaskDataLinkedList.init(allocator),
+
+            .quarantine_items = BlockingTaskDataLinkedList.init(allocator),
+            .quarantine_cancel_items = BlockingTaskDataLinkedList.init(allocator),
+
             .node = node,
             .eventfd = eventfd
         };
@@ -87,6 +98,9 @@ pub const BlockingTasksSet = struct {
         self.free_items.clear();
         self.free_cancel_items.clear();
 
+        self.quarantine_cancel_items.clear();
+        self.quarantine_items.clear();
+
         const node = self.node;
 
         self.ring.deinit();
@@ -119,18 +133,33 @@ pub const BlockingTasksSet = struct {
         return node;
     }
 
-    pub inline fn pop(self: *BlockingTasksSet, node: BlockingTaskDataLinkedList.Node) !void {
+    pub fn pop(self: *BlockingTasksSet, node: BlockingTaskDataLinkedList.Node) void {
         const tasks_data = &self.tasks_data;
-        if (tasks_data.len == 0) {
-            return error.NoBusyItems;
-        }
+        tasks_data.unlink_node(node);
 
-        try tasks_data.unlink_node(node);
+        const free_items = switch (node.data.operation) {
+            .Cancel => &self.free_cancel_items,
+            else => &self.free_items,
+        };
 
-        switch (node.data.operation) {
-            .Cancel => self.free_cancel_items.append_node(node),
-            else => self.free_items.append_node(node),
-        }
+        free_items.append_node(node);
+    }
+
+    pub inline fn push_in_quarantine(self: *BlockingTasksSet, node: BlockingTaskDataLinkedList.Node) void {
+        const tasks_data = &self.tasks_data;
+        tasks_data.unlink_node(node);
+
+        const free_items = switch (node.data.operation) {
+            .Cancel => &self.free_cancel_items,
+            else => &self.free_items
+        };
+
+        free_items.append_node(node);
+    }
+
+    pub inline fn clear_quarantine(self: *BlockingTasksSet) void {
+        self.free_items.extend(self.quarantine_items);
+        self.free_cancel_items.extend(self.quarantine_cancel_items);
     }
 
     pub fn cancel_all(self: *BlockingTasksSet, loop: *Loop) !void {
@@ -227,7 +256,7 @@ pub inline fn remove_tasks_set(
 ) void {
     std.posix.epoll_ctl(epoll_fd, std.os.linux.EPOLL.CTL_DEL, blocking_tasks_set.eventfd, null) catch unreachable;
     const node = blocking_tasks_set.deinit();
-    blocking_tasks_queue.unlink_node(node) catch unreachable;
+    blocking_tasks_queue.unlink_node(node);
     blocking_tasks_queue.release_node(node);
 }
 

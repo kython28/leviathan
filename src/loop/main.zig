@@ -20,7 +20,10 @@ const WatchersBTree = @import("../utils/btree.zig").init(std.posix.fd_t, *FDWatc
 
 const lock = @import("../utils/lock.zig");
 
-pub const MaxCallbacks = 128;
+pub const MaxCallbacks = switch (builtin.mode) {
+    .Debug => 4,
+    else => 128
+};
 
 allocator: std.mem.Allocator,
 
@@ -63,7 +66,10 @@ pub fn init(self: *Loop, allocator: std.mem.Allocator, rtq_min_capacity: usize) 
     const blocking_ready_tasks = try allocator.alloc(std.os.linux.io_uring_cqe, Scheduling.IO.TotalItems);
     errdefer allocator.free(blocking_ready_tasks);
 
-    const blocking_ready_epoll_events = try allocator.alloc(std.os.linux.epoll_event, 256);
+    const blocking_ready_epoll_events = try allocator.alloc(std.os.linux.epoll_event, switch (builtin.mode) {
+        .Debug => 8,
+        else => 256
+    });
     errdefer allocator.free(blocking_ready_epoll_events);
 
     const unlock_epoll_fd = try std.posix.eventfd(0, std.os.linux.EFD.NONBLOCK|std.os.linux.EFD.CLOEXEC);

@@ -13,6 +13,8 @@ const PyObject = *python_c.PyObject;
 const std = @import("std");
 const builtin = @import("builtin");
 
+const BlockingTasksSetQuarantineArray = std.ArrayList(*Loop.Scheduling.IO.BlockingTasksSet);
+
 // ------------------------------------------------------------
 // https://github.com/ziglang/zig/issues/1499
 const PyThreadState = opaque {};
@@ -171,53 +173,48 @@ inline fn check_io_uring_result(
 }
 
 inline fn fetch_completed_tasks(
-    allocator: std.mem.Allocator, epoll_fd: std.posix.fd_t, blocking_tasks_queue: *BlockingTasksSetLinkedList,
-    blocking_tasks_set: ?*Loop.Scheduling.IO.BlockingTasksSet, blocking_ready_tasks: []std.os.linux.io_uring_cqe,
-    ready_queue: *CallbackManager.CallbacksSetsQueue
+    allocator: std.mem.Allocator, blocking_tasks_set: *Loop.Scheduling.IO.BlockingTasksSet,
+    blocking_ready_tasks: []std.os.linux.io_uring_cqe, ready_queue: *CallbackManager.CallbacksSetsQueue
 ) !void {
-    if (blocking_tasks_set) |set| {
-        const ring = &set.ring;
-        const nevents = try ring.copy_cqes(blocking_ready_tasks, 0);
-        for (blocking_ready_tasks[0..nevents]) |cqe| {
-            const user_data = cqe.user_data;
-            const err: std.os.linux.E = @call(.always_inline, std.os.linux.io_uring_cqe.err, .{cqe});
+    const ring = &blocking_tasks_set.ring;
+    const nevents = try ring.copy_cqes(blocking_ready_tasks, 0);
+    for (blocking_ready_tasks[0..nevents]) |cqe| {
+        const user_data = cqe.user_data;
+        const err: std.os.linux.E = @call(.always_inline, std.os.linux.io_uring_cqe.err, .{cqe});
 
-            const blocking_task_data_node: Loop.Scheduling.IO.BlockingTaskDataLinkedList.Node = @ptrFromInt(user_data);
+        const blocking_task_data_node: Loop.Scheduling.IO.BlockingTaskDataLinkedList.Node = @ptrFromInt(user_data);
 
-            const blocking_task_data = blocking_task_data_node.data;
-            try set.pop(blocking_task_data_node);
+        const blocking_task_data = blocking_task_data_node.data;
+        blocking_tasks_set.push_in_quarantine(blocking_task_data_node);
 
-            var callback = blocking_task_data.callback_data orelse continue;
+        var callback = blocking_task_data.callback_data orelse continue;
 
-            switch (callback) {
-                .ZigGenericIO => |*data| {
-                    check_io_uring_result(blocking_task_data.operation, &callback, err, false);
-                    data.io_uring_res = cqe.res;
-                    data.io_uring_err = err;
-                },
-                else => {
-                    check_io_uring_result(blocking_task_data.operation, &callback, err, true);
-                }
+        switch (callback) {
+            .ZigGenericIO => |*data| {
+                check_io_uring_result(blocking_task_data.operation, &callback, err, false);
+                data.io_uring_res = cqe.res;
+                data.io_uring_err = err;
+            },
+            else => {
+                check_io_uring_result(blocking_task_data.operation, &callback, err, true);
             }
-
-            _ = try CallbackManager.append_new_callback(
-                allocator, ready_queue, callback, Loop.MaxCallbacks
-            );
         }
 
-        if (set.tasks_data.len == 0) {
-            Loop.Scheduling.IO.remove_tasks_set(epoll_fd, blocking_tasks_queue, set);
-        }
+        _ = try CallbackManager.append_new_callback(
+            allocator, ready_queue, callback, Loop.MaxCallbacks
+        );
     }
 }
 
 fn poll_blocking_events(
-    loop: *Loop, mutex: *Lock, wait: bool, ready_queue: *CallbackManager.CallbacksSetsQueue
+    loop: *Loop, mutex: *Lock, wait: bool, ready_queue: *CallbackManager.CallbacksSetsQueue,
+    quarantine_array: *BlockingTasksSetQuarantineArray
 ) !void {
     const epoll_fd = loop.blocking_tasks_epoll_fd;
     const blocking_ready_epoll_events = loop.blocking_ready_epoll_events;
 
-    const nevents = blk: {
+    var nevents: usize = 0;
+    while (nevents < blocking_ready_epoll_events.len) {
         if (wait) {
             loop.epoll_locked = true;
             mutex.unlock();
@@ -229,21 +226,22 @@ fn poll_blocking_events(
             const py_thread_state = PyEval_SaveThread();
             defer PyEval_RestoreThread(py_thread_state);
 
-            break :blk std.posix.epoll_wait(epoll_fd, blocking_ready_epoll_events, -1);
+            nevents = std.posix.epoll_wait(epoll_fd, blocking_ready_epoll_events, -1);
         }else{
-            break :blk std.posix.epoll_wait(epoll_fd, blocking_ready_epoll_events, 0);
+            nevents = std.posix.epoll_wait(epoll_fd, blocking_ready_epoll_events, 0);
         }
-    };
 
-    const allocator = loop.allocator;
-    const blocking_tasks_queue = &loop.blocking_tasks_queue;
-    const blocking_ready_tasks = loop.blocking_ready_tasks;
+        const allocator = loop.allocator;
+        const blocking_ready_tasks = loop.blocking_ready_tasks;
 
-    for (blocking_ready_epoll_events[0..nevents]) |event| {
-        try fetch_completed_tasks(
-            allocator, epoll_fd, blocking_tasks_queue, @ptrFromInt(event.data.ptr),
-            blocking_ready_tasks, ready_queue
-        );
+        for (blocking_ready_epoll_events[0..nevents]) |event| {
+            const set = (@as(?*Loop.Scheduling.IO.BlockingTasksSet, @ptrFromInt(event.data.ptr)) orelse continue);
+            try fetch_completed_tasks(
+                allocator, set, blocking_ready_tasks, ready_queue
+            );
+
+            try quarantine_array.append(set);
+        }
     }
 }
 
@@ -278,12 +276,26 @@ pub fn start(self: *Loop) !void {
     const ready_tasks_queue_min_bytes_capacity = self.ready_tasks_queue_min_bytes_capacity;
     const allocator = self.allocator;
 
+    var quanrantine_blocking_tasks = BlockingTasksSetQuarantineArray.init(allocator);
+    defer quanrantine_blocking_tasks.deinit();
+
     var ready_tasks_queue_index = self.ready_tasks_queue_index;
     var wait_for_blocking_events: bool = false;
     while (!self.stopping) {
         const old_index = ready_tasks_queue_index;
         const ready_tasks_queue = &ready_tasks_queues[old_index];
-        try poll_blocking_events(self, mutex, wait_for_blocking_events, ready_tasks_queue);
+
+
+        try poll_blocking_events(self, mutex, wait_for_blocking_events, ready_tasks_queue, &quanrantine_blocking_tasks);
+        defer {
+            for (quanrantine_blocking_tasks.items) |set| {
+                if (set.tasks_data.len == 0) {
+                    Loop.Scheduling.IO.remove_tasks_set(self.blocking_tasks_epoll_fd, &self.blocking_tasks_queue, set);
+                }else{
+                    set.clear_quarantine();
+                }
+            }
+        }
 
         ready_tasks_queue_index = 1 - ready_tasks_queue_index;
         self.ready_tasks_queue_index = ready_tasks_queue_index;

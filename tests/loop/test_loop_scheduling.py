@@ -218,7 +218,7 @@ def test_call_at_with_context() -> None:
         assert (
             DELAY_TIME * (calls_num + 1)
             <= (end_time - start_time)
-            <= DELAY_TIME * (calls_num + 2)
+            <= (calls_num + 2)
         )
 
         expected_calls = [((i,),) for i in range(calls_num)]

@@ -30,7 +30,29 @@ const SocketCreationData = struct {
     py_all_errors: ?PyObject = null,
 
     protocol_factory: PyObject = undefined,
-    future: *FutureObject = undefined
+    future: *FutureObject = undefined,
+    loop: *LoopObject = undefined,
+};
+
+const SocketConnectionMethod = enum {
+    Single, HappyEyeballs
+};
+
+const SocketConnectionMethodData = union(SocketConnectionMethod) {
+    Single: usize,
+    HappyEyeballs: []usize
+};
+
+const SocketConnectionData = struct {
+    creation_data: *SocketCreationData,
+    address_list: *std.net.AddressList,
+    method: SocketConnectionMethodData,
+    owned: bool
+};
+
+const SocketData = struct {
+    connection_data: *SocketConnectionData,
+    socket_fd: u32
 };
 
 const TransportCreationData = struct {
@@ -42,9 +64,97 @@ const TransportCreationData = struct {
     fd_created: bool = true
 };
 
-// fn z_create_socket_connection(
-//     data: ?*anyopaque, status: CallbackManager.ExecuteCallbacksReturn
-// )
+fn interleave_address_list(allocator: std.mem.Allocator, address_list: []std.net.Address, interleave: usize) !void {
+    const tmp_list = try allocator.alloc(std.net.Address, address_list.len * 2);
+    defer allocator.free(tmp_list);
+
+    var ipv4_addresses: usize = 0;
+    var ipv6_addresses: usize = 0;
+
+    for (address_list) |*address| {
+        switch (address.any.family) {
+            std.posix.AF.INET => {
+                tmp_list[ipv4_addresses] = address.*;
+                ipv4_addresses += 1;
+            },
+            std.posix.AF.INET6 => {
+                tmp_list[address_list.len + ipv6_addresses] = address.*;
+                ipv6_addresses += 1;
+            },
+            else => unreachable
+        }
+    }
+
+    if (ipv6_addresses == 0 or ipv4_addresses == 0) {
+        return;
+    }
+
+    var interleave_count: usize = interleave;
+    for (address_list) |*v| {
+        if (interleave_count == 0 or ipv6_addresses == 0) {
+            ipv4_addresses -= 1;
+            v.* = tmp_list[ipv4_addresses];
+            interleave_count = interleave;
+        }else{
+            ipv6_addresses -= 1;
+            v.* = tmp_list[address_list.len + ipv6_addresses];
+            interleave_count -= 1;
+        }
+    }
+}
+
+fn z_create_socket_connection(data: *SocketCreationData) !void {
+    const py_host = data.py_host orelse {
+        python_c.raise_python_value_error("Host is required");
+        return error.PythonError;
+    };
+
+    if (python_c.unicode_check(py_host)) {
+        python_c.raise_python_value_error("Host must be a valid string");
+        return error.PythonError;
+    }
+
+    var host_ptr_lenght: python_c.Py_ssize_t = undefined;
+    const host_ptr = python_c.PyUnicode_AsUTF8AndSize(py_host, &host_ptr_lenght) orelse
+        return error.PythonError;
+
+    const host = host_ptr[0..@intCast(host_ptr_lenght)];
+    const port: u16 = blk: {
+        if (data.py_port) |v| {
+            const value = python_c.PyLong_AsInt(v);
+            if (value == -1) {
+                if (python_c.PyErr_Occurred()) |_| {
+                    return error.PythonError;
+                }
+            }
+
+            break :blk @intCast(value);
+        }
+        break :blk 0;
+    };
+
+    const loop = data.loop;
+    const loop_data = utils.get_data_ptr(Loop, loop);
+    const allocator = loop_data.allocator;
+
+    const address_list = try std.net.getAddressList(allocator, host, port);
+    errdefer address_list.deinit();
+
+    const connection_data = try allocator.create(SocketConnectionData);
+    errdefer allocator.destroy(connection_data);
+
+    // if (data.py_happy_eyeballs_delay) {
+
+    // }
+    // connection_data.* = .{
+    //     .address_list = address_list,
+    //     .creation_data = data,
+    //     .method = 
+    // };
+
+    // if (python_c.unicode_check())
+    // const host = python_c.PyObject
+}
 
 fn create_socket_connection(
     data: ?*anyopaque, status: CallbackManager.ExecuteCallbacksReturn
@@ -54,11 +164,14 @@ fn create_socket_connection(
 
     if (status != .Continue) return status;
 
+    z_create_socket_connection(socket_creation_data_ptr) catch |err| {
+        return utils.handle_zig_function_error(err, CallbackManager.ExecuteCallbacksReturn.Exception);
+    };
 
     return .Continue;
 }
 
-inline fn z_create_transport_and_set_future_result(data: TransportCreationData) !void {
+fn z_create_transport_and_set_future_result(data: TransportCreationData) !void {
     var transport_added_to_tuple: bool = false;
     var protocol_added_to_tuple: bool = false;
 
@@ -125,7 +238,6 @@ fn create_transport_and_set_future_result(
             std.posix.close(@intCast(transport_creation_data.socket_fd));
         }
     }
-
     if (status != .Continue) return status;
 
     z_create_transport_and_set_future_result(transport_creation_data) catch |err| {
@@ -252,6 +364,7 @@ inline fn z_loop_create_connection(
         return python_c.py_newref(fut);
     }
 
+    creation_data.loop = python_c.py_newref(self);
     creation_data.future = fut;
     creation_data.protocol_factory = protocol_factory;
 

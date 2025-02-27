@@ -82,11 +82,6 @@ inline fn z_loop_call_soon(
     const py_callback = python_c.py_newref(args[0].?);
     errdefer python_c.py_decref(py_callback);
 
-    if (python_c.PyCallable_Check(py_callback) <= 0) {
-        python_c.raise_python_type_error("Invalid callback\x00");
-        return error.PythonError;
-    }
-
     if (python_c.PyCallable_Check(py_callback) < 0) {
         python_c.raise_python_type_error("Invalid callback\x00");
         return error.PythonError;
@@ -207,11 +202,6 @@ inline fn z_loop_delayed_call(
     errdefer python_c.py_decref(py_callback);
 
     if (python_c.PyCallable_Check(py_callback) <= 0) {
-        python_c.raise_python_type_error("Invalid callback\x00");
-        return error.PythonError;
-    }
-
-    if (python_c.PyCallable_Check(py_callback) < 0) {
         python_c.raise_python_type_error("Invalid callback\x00");
         return error.PythonError;
     }

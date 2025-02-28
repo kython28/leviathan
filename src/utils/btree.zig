@@ -479,7 +479,7 @@ pub fn BTree(
 }
 
 test "BTree: Initialization creates empty tree" {
-    var new_btree = try BTree.init(usize, usize, 3).init(std.testing.allocator);
+    var new_btree = try BTree(usize, usize, 3).init(std.testing.allocator);
     defer new_btree.deinit() catch unreachable;
 
     try std.testing.expectEqual(@as(usize, 0), new_btree.parent.nkeys);
@@ -488,7 +488,7 @@ test "BTree: Initialization creates empty tree" {
 }
 
 test "BTree: Insert and delete sequential usize elements" {
-    var new_btree = try BTree.init(usize, usize, 3).init(std.testing.allocator);
+    var new_btree = try BTree(usize, usize, 3).init(std.testing.allocator);
     defer new_btree.deinit() catch unreachable;
 
     const element_count = 20;
@@ -510,7 +510,7 @@ test "BTree: Insert and delete sequential usize elements" {
 }
 
 test "BTree: Complex insertion, partial deletion, and reinsertion" {
-    var new_btree = try BTree.init(usize, usize, 3).init(std.testing.allocator);
+    var new_btree = try BTree(usize, usize, 3).init(std.testing.allocator);
     defer new_btree.deinit() catch unreachable;
 
     const element_count = 15;
@@ -582,7 +582,7 @@ test "BTree: Complex insertion, partial deletion, and reinsertion" {
 }
 
 test "BTree: Random order insertion and deletion with usize" {
-    var new_btree = try BTree.init(usize, usize, 3).init(std.testing.allocator);
+    var new_btree = try BTree(usize, usize, 3).init(std.testing.allocator);
     defer new_btree.deinit() catch unreachable;
 
     const element_count = 30;
@@ -613,7 +613,7 @@ test "BTree: Random order insertion and deletion with usize" {
 }
 
 test "BTree: Random order insertion and deletion with floating point" {
-    var new_btree = try BTree.init(f64, f64, 3).init(std.testing.allocator);
+    var new_btree = try BTree(f64, f64, 3).init(std.testing.allocator);
     defer new_btree.deinit() catch unreachable;
 
     const element_count = 100;

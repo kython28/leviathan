@@ -118,17 +118,28 @@ pub fn build(b: *std.Build) void {
         &modules_name, &modules, false, check_step
     );
 
-    const lib_unit_tests = b.addTest(.{
+    const leviathan_module_unit_tests = b.addTest(.{
         .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
         .single_threaded = !python_is_gil_disabled
     });
-    lib_unit_tests.root_module.addImport("python_c", python_c_module);
-    lib_unit_tests.root_module.addImport("utils", utils_module);
+    leviathan_module_unit_tests.root_module.addImport("python_c", python_c_module);
+    leviathan_module_unit_tests.root_module.addImport("utils", utils_module);
 
-    const run_lib_unit_tests = b.addRunArtifact(lib_unit_tests);
+    const utils_unit_tests = b.addTest(.{
+        .root_source_file = b.path("src/utils/main.zig"),
+        .target = target,
+        .optimize = optimize,
+        .single_threaded = !python_is_gil_disabled
+    });
+    utils_unit_tests.root_module.addImport("python_c", python_c_module);
+    utils_unit_tests.root_module.addImport("utils", utils_module);
+
+    const run_leviathan_module_unit_tests = b.addRunArtifact(leviathan_module_unit_tests);
+    const run_utils_unit_tests = b.addRunArtifact(utils_unit_tests);
 
     const test_step = b.step("test", "Run unit tests");
-    test_step.dependOn(&run_lib_unit_tests.step);
+    test_step.dependOn(&run_leviathan_module_unit_tests.step);
+    test_step.dependOn(&run_utils_unit_tests.step);
 }

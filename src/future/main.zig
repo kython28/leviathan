@@ -29,7 +29,7 @@ pub fn init(self: *Future, loop: *Loop) void {
 
     self.callbacks_arena_allocator = self.callbacks_arena.allocator();
     self.callbacks_queue = .{
-        .queue = CallbackManager.LinkedList.init(self.callbacks_arena_allocator),
+        .queue = CallbackManager.CallbacksSetLinkedList.init(self.callbacks_arena_allocator),
         .last_set = null
     };
 }

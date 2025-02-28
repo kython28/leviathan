@@ -113,3 +113,6 @@ pub inline fn execute_zig_function(func: anytype, args: anytype) get_func_return
     };
 }
 
+test {
+    std.testing.refAllDecls(@This());
+}

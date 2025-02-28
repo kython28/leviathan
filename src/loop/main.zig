@@ -5,7 +5,7 @@ const CallbackManager = @import("../callback_manager.zig");
 const python_c = @import("python_c");
 
 
-const CallbacksSetLinkedList = CallbackManager.LinkedList;
+const CallbacksSetLinkedList = CallbackManager.CallbacksSetLinkedList;
 const BlockingTasksSetLinkedList = Scheduling.IO.BlockingTasksSetLinkedList;
 
 pub const FDWatcher = struct {

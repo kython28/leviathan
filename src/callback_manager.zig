@@ -9,7 +9,7 @@ const Handle = @import("handle.zig");
 
 const utils = @import("utils");
 
-pub const LinkedList = utils.LinkedList(CallbacksSet);
+pub const CallbacksSetLinkedList = utils.LinkedList(CallbacksSet);
 
 pub const ExecuteCallbacksReturn = enum {
     Stop,
@@ -55,8 +55,8 @@ pub const CallbacksSet = struct {
 };
 
 pub const CallbacksSetsQueue = struct {
-    queue: LinkedList,
-    last_set: ?LinkedList.Node = null,
+    queue: CallbacksSetLinkedList,
+    last_set: ?CallbacksSetLinkedList.Node = null,
 };
 
 pub inline fn get_max_callbacks_sets(rtq_min_capacity: usize, callbacks_set_length: usize) usize {
@@ -229,7 +229,7 @@ pub fn execute_callbacks(
     comptime can_restart: bool
 ) ExecuteCallbacksReturn {
     const queue = &sets_queue.queue;
-    var _node: ?LinkedList.Node = queue.first orelse return .None;
+    var _node: ?CallbacksSetLinkedList.Node = queue.first orelse return .None;
     defer {
         if (can_restart) {
             sets_queue.last_set = queue.first;
@@ -319,7 +319,7 @@ test "Run callback" {
 
 test "Append multiple sets" {
     var set_queue = CallbacksSetsQueue{
-        .queue = LinkedList.init(std.testing.allocator)
+        .queue = CallbacksSetLinkedList.init(std.testing.allocator)
     };
     defer {
         for (0..set_queue.queue.len) |_| {
@@ -351,7 +351,7 @@ test "Append multiple sets" {
 
 test "Append new callback to set queue and execute it" {
     var set_queue = CallbacksSetsQueue{
-        .queue = LinkedList.init(std.testing.allocator)
+        .queue = CallbacksSetLinkedList.init(std.testing.allocator)
     };
     defer {
         for (0..set_queue.queue.len) |_| {
@@ -394,7 +394,7 @@ test "Append new callback to set queue and execute it" {
 
 test "Append and cancel callbacks" {
     var set_queue = CallbacksSetsQueue{
-        .queue = LinkedList.init(std.testing.allocator)
+        .queue = CallbacksSetLinkedList.init(std.testing.allocator)
     };
     defer {
         for (0..set_queue.queue.len) |_| {
@@ -423,7 +423,7 @@ test "Append and cancel callbacks" {
 
 test "Append and stopping with exception" {
     var set_queue = CallbacksSetsQueue{
-        .queue = LinkedList.init(std.testing.allocator)
+        .queue = CallbacksSetLinkedList.init(std.testing.allocator)
     };
     defer {
         for (0..set_queue.queue.len) |_| {

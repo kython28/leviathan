@@ -2,7 +2,7 @@ const Loop = @import("main.zig");
 const CallbackManager = @import("../callback_manager.zig");
 
 const BlockingTasksSetLinkedList = Loop.Scheduling.IO.BlockingTasksSetLinkedList;
-const CallbacksSetLinkedList = CallbackManager.LinkedList;
+const CallbacksSetLinkedList = CallbackManager.CallbacksSetLinkedList;
 
 const Lock = @import("../utils/lock.zig").Mutex;
 
@@ -330,7 +330,7 @@ test "Prune sets when maximum is 1" {
     const allocator = std.testing.allocator;
 
     var ready_tasks = CallbackManager.CallbacksSetsQueue{
-        .queue = CallbackManager.LinkedList.init(allocator),
+        .queue = CallbackManager.CallbacksSetLinkedList.init(allocator),
     };
     defer {
         for (0..ready_tasks.queue.len) |_| {
@@ -361,7 +361,7 @@ test "Prune sets when maximum is more than 1" {
     const allocator = std.testing.allocator;
 
     var ready_tasks = CallbackManager.CallbacksSetsQueue{
-        .queue = CallbackManager.LinkedList.init(allocator),
+        .queue = CallbackManager.CallbacksSetLinkedList.init(allocator),
     };
     defer {
         for (0..ready_tasks.queue.len) |_| {
@@ -398,7 +398,7 @@ test "Prune sets with high limit" {
     const allocator = std.testing.allocator;
 
     var ready_tasks = CallbackManager.CallbacksSetsQueue{
-        .queue = CallbackManager.LinkedList.init(allocator),
+        .queue = CallbackManager.CallbacksSetLinkedList.init(allocator),
     };
     defer {
         for (0..ready_tasks.queue.len) |_| {
@@ -434,7 +434,7 @@ test "Running callbaks and prune" {
     const allocator = std.testing.allocator;
 
     var ready_tasks = CallbackManager.CallbacksSetsQueue{
-        .queue = CallbackManager.LinkedList.init(allocator),
+        .queue = CallbackManager.CallbacksSetLinkedList.init(allocator),
     };
     defer {
         for (0..ready_tasks.queue.len) |_| {

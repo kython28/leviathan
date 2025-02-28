@@ -467,7 +467,7 @@ test "interleave_address_list with different interleave values" {
     try std.testing.expectEqual(std.posix.AF.INET, addresses[4].any.family);
 }
 
-test "interleave_address_list with different interleave values2" {
+test "interleave_address_list with multiple IPv6 addresses and interleave value 2" {
     const allocator = std.testing.allocator;
     const addresses = try allocator.alloc(std.net.Address, 7);
     defer allocator.free(addresses);

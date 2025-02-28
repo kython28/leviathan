@@ -266,3 +266,23 @@ test "LinkedList is_empty method works correctly" {
     try std.testing.expect(list.is_empty());
 }
 
+test "LinkedList clear method removes all elements" {
+    var list = LinkedList(usize).init(std.testing.allocator);
+    defer list.clear();
+
+    const elements = [_]usize{1, 2, 3, 4, 5};
+    for (elements) |elem| {
+        try list.append(elem);
+    }
+
+    try std.testing.expectEqual(@as(usize, elements.len), list.len);
+    try std.testing.expect(!list.is_empty());
+
+    list.clear();
+
+    try std.testing.expectEqual(@as(usize, 0), list.len);
+    try std.testing.expect(list.is_empty());
+    try std.testing.expect(list.first == null);
+    try std.testing.expect(list.last == null);
+}
+

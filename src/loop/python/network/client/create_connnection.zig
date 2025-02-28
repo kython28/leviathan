@@ -391,3 +391,102 @@ pub fn loop_create_connection(
         }
     );
 }
+
+
+test "interleave_address_list with mixed IPv4 and IPv6" {
+    const allocator = std.testing.allocator;
+    const addresses = try allocator.alloc(std.net.Address, 5);
+    defer allocator.free(addresses);
+
+    addresses[0] = std.net.Address{ .any = .{ .family = std.posix.AF.INET, .data = undefined } };
+    addresses[1] = std.net.Address{ .any = .{ .family = std.posix.AF.INET6, .data = undefined } };
+    addresses[2] = std.net.Address{ .any = .{ .family = std.posix.AF.INET, .data = undefined } };
+    addresses[3] = std.net.Address{ .any = .{ .family = std.posix.AF.INET6, .data = undefined } };
+    addresses[4] = std.net.Address{ .any = .{ .family = std.posix.AF.INET, .data = undefined } };
+
+    try interleave_address_list(allocator, addresses, 1);
+
+    try std.testing.expectEqual(std.posix.AF.INET6, addresses[0].any.family);
+    try std.testing.expectEqual(std.posix.AF.INET, addresses[1].any.family);
+    try std.testing.expectEqual(std.posix.AF.INET6, addresses[2].any.family);
+    try std.testing.expectEqual(std.posix.AF.INET, addresses[3].any.family);
+    try std.testing.expectEqual(std.posix.AF.INET, addresses[4].any.family);
+}
+
+test "interleave_address_list with only IPv4" {
+    const allocator = std.testing.allocator;
+    const addresses = try allocator.alloc(std.net.Address, 3);
+    defer allocator.free(addresses);
+
+    addresses[0] = std.net.Address{ .any = .{ .family = std.posix.AF.INET, .data = undefined } };
+    addresses[1] = std.net.Address{ .any = .{ .family = std.posix.AF.INET, .data = undefined } };
+    addresses[2] = std.net.Address{ .any = .{ .family = std.posix.AF.INET, .data = undefined } };
+
+    try interleave_address_list(allocator, addresses, 1);
+
+    // Should remain unchanged
+    try std.testing.expectEqual(std.posix.AF.INET, addresses[0].any.family);
+    try std.testing.expectEqual(std.posix.AF.INET, addresses[1].any.family);
+    try std.testing.expectEqual(std.posix.AF.INET, addresses[2].any.family);
+}
+
+test "interleave_address_list with only IPv6" {
+    const allocator = std.testing.allocator;
+    const addresses = try allocator.alloc(std.net.Address, 3);
+    defer allocator.free(addresses);
+
+    addresses[0] = std.net.Address{ .any = .{ .family = std.posix.AF.INET6, .data = undefined } };
+    addresses[1] = std.net.Address{ .any = .{ .family = std.posix.AF.INET6, .data = undefined } };
+    addresses[2] = std.net.Address{ .any = .{ .family = std.posix.AF.INET6, .data = undefined } };
+
+    try interleave_address_list(allocator, addresses, 1);
+
+    // Should remain unchanged
+    try std.testing.expectEqual(std.posix.AF.INET6, addresses[0].any.family);
+    try std.testing.expectEqual(std.posix.AF.INET6, addresses[1].any.family);
+    try std.testing.expectEqual(std.posix.AF.INET6, addresses[2].any.family);
+}
+
+test "interleave_address_list with different interleave values" {
+    const allocator = std.testing.allocator;
+    const addresses = try allocator.alloc(std.net.Address, 5);
+    defer allocator.free(addresses);
+
+    addresses[0] = std.net.Address{ .any = .{ .family = std.posix.AF.INET, .data = undefined } };
+    addresses[1] = std.net.Address{ .any = .{ .family = std.posix.AF.INET6, .data = undefined } };
+    addresses[2] = std.net.Address{ .any = .{ .family = std.posix.AF.INET, .data = undefined } };
+    addresses[3] = std.net.Address{ .any = .{ .family = std.posix.AF.INET6, .data = undefined } };
+    addresses[4] = std.net.Address{ .any = .{ .family = std.posix.AF.INET, .data = undefined } };
+
+    try interleave_address_list(allocator, addresses, 2);
+
+    try std.testing.expectEqual(std.posix.AF.INET6, addresses[0].any.family);
+    try std.testing.expectEqual(std.posix.AF.INET6, addresses[1].any.family);
+    try std.testing.expectEqual(std.posix.AF.INET, addresses[2].any.family);
+    try std.testing.expectEqual(std.posix.AF.INET, addresses[3].any.family);
+    try std.testing.expectEqual(std.posix.AF.INET, addresses[4].any.family);
+}
+
+test "interleave_address_list with different interleave values2" {
+    const allocator = std.testing.allocator;
+    const addresses = try allocator.alloc(std.net.Address, 7);
+    defer allocator.free(addresses);
+
+    addresses[0] = std.net.Address{ .any = .{ .family = std.posix.AF.INET, .data = undefined } };
+    addresses[1] = std.net.Address{ .any = .{ .family = std.posix.AF.INET6, .data = undefined } };
+    addresses[2] = std.net.Address{ .any = .{ .family = std.posix.AF.INET, .data = undefined } };
+    addresses[3] = std.net.Address{ .any = .{ .family = std.posix.AF.INET6, .data = undefined } };
+    addresses[4] = std.net.Address{ .any = .{ .family = std.posix.AF.INET6, .data = undefined } };
+    addresses[5] = std.net.Address{ .any = .{ .family = std.posix.AF.INET6, .data = undefined } };
+    addresses[6] = std.net.Address{ .any = .{ .family = std.posix.AF.INET, .data = undefined } };
+
+    try interleave_address_list(allocator, addresses, 2);
+
+    try std.testing.expectEqual(std.posix.AF.INET6, addresses[0].any.family);
+    try std.testing.expectEqual(std.posix.AF.INET6, addresses[1].any.family);
+    try std.testing.expectEqual(std.posix.AF.INET, addresses[2].any.family);
+    try std.testing.expectEqual(std.posix.AF.INET6, addresses[3].any.family);
+    try std.testing.expectEqual(std.posix.AF.INET6, addresses[4].any.family);
+    try std.testing.expectEqual(std.posix.AF.INET, addresses[5].any.family);
+    try std.testing.expectEqual(std.posix.AF.INET, addresses[6].any.family);
+}

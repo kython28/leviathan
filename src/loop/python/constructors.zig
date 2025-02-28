@@ -1,9 +1,9 @@
 const python_c = @import("python_c");
 const PyObject = *python_c.PyObject;
 
-const python_imports = @import("../../utils/python_imports.zig");
 
-const utils = @import("../../utils/utils.zig");
+const utils = @import("utils");
+const PythonImports = utils.PythonImports;
 
 const Loop = @import("../main.zig");
 const LoopObject = Loop.Python.LoopObject;
@@ -21,7 +21,7 @@ inline fn z_loop_new(@"type": *python_c.PyTypeObject) !*LoopObject {
         }
     );
 
-    const weakref_set_class = python_c.PyObject_GetAttrString(python_imports.weakref_module, "WeakSet\x00")
+    const weakref_set_class = python_c.PyObject_GetAttrString(PythonImports.weakref_module, "WeakSet\x00")
         orelse return error.PythonError;
     defer python_c.py_decref(weakref_set_class);
 

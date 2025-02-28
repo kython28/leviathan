@@ -6,7 +6,7 @@ const PyObject = *python_c.PyObject;
 
 const CallbackManager = @import("callback_manager.zig");
 const Loop = @import("loop/main.zig");
-const utils = @import("utils/utils.zig");
+const utils = @import("utils");
 
 pub const PythonHandleObject = extern struct {
     ob_base: python_c.PyObject,

@@ -5,7 +5,7 @@ const PyObject = *python_c.PyObject;
 
 const WriteStream = @import("../write_transport.zig");
 const ReadStream = @import("../read_transport.zig");
-const utils = @import("../../utils/main.zig");
+const utils = @import("utils");
 
 pub const Constructors = @import("constructors.zig");
 const Lifecyle = @import("lifecycle.zig");

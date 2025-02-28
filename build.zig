@@ -85,6 +85,14 @@ pub fn build(b: *std.Build) void {
         .cwd_relative = python_lib
     });
 
+    const utils_module = b.addModule("python_c", .{
+        .root_source_file = b.path("src/utils/main.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true
+    });
+    utils_module.addImport("python_c", python_c_module);
+    utils_module.addImport("jdz_allocator", jdz_allocator_module);
 
     const leviathan_module = b.addModule("leviathan", .{
         .root_source_file = b.path("src/main.zig"),
@@ -93,9 +101,10 @@ pub fn build(b: *std.Build) void {
     });
     leviathan_module.addImport("python_c", python_c_module);
     leviathan_module.addImport("jdz_allocator", jdz_allocator_module);
+    leviathan_module.addImport("utils", utils_module);
 
-    const modules_name = .{ "leviathan", "python_c", "jdz_allocator" };
-    const modules = .{ leviathan_module, python_c_module, jdz_allocator_module };
+    const modules_name = .{ "leviathan", "python_c", "jdz_allocator", "utils" };
+    const modules = .{ leviathan_module, python_c_module, jdz_allocator_module, utils_module };
     const install_step = b.getInstallStep();
 
     create_build_step(
@@ -110,17 +119,16 @@ pub fn build(b: *std.Build) void {
     );
 
     const lib_unit_tests = b.addTest(.{
-        .root_source_file = b.path("tests/main.zig"),
+        .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
         .single_threaded = !python_is_gil_disabled
     });
-    lib_unit_tests.root_module.addImport("leviathan", leviathan_module);
+    lib_unit_tests.root_module.addImport("python_c", python_c_module);
+    lib_unit_tests.root_module.addImport("utils", utils_module);
 
     const run_lib_unit_tests = b.addRunArtifact(lib_unit_tests);
-    run_lib_unit_tests.has_side_effects = true;
 
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_lib_unit_tests.step);
-
 }

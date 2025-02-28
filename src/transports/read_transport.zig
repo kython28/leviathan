@@ -6,7 +6,7 @@ const PyObject = *python_c.PyObject;
 
 const Loop = @import("../loop/main.zig");
 const CallbackManager = @import("../callback_manager.zig");
-const utils = @import("../utils/main.zig");
+const utils = @import("utils");
 
 pub const ReadCompletedCallback = *const fn (*ReadTransport, []const u8, std.os.linux.E) anyerror!void;
 

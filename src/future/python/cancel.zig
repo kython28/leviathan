@@ -6,7 +6,7 @@ const PyObject = *python_c.PyObject;
 const Future = @import("../main.zig");
 const PythonFutureObject = Future.Python.FutureObject;
 
-const utils = @import("../../utils/utils.zig");
+const utils = @import("utils");
 
 pub inline fn future_fast_cancel(instance: *PythonFutureObject, data: *Future, cancel_msg_py_object: ?PyObject) !bool {
     switch (data.status) {

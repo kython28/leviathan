@@ -1,7 +1,7 @@
 const python_c = @import("python_c");
 const PyObject = *python_c.PyObject;
 
-const utils = @import("../../utils/utils.zig");
+const utils = @import("utils");
 
 const CallbackManager = @import("../../callback_manager.zig");
 const Loop = @import("../main.zig");
@@ -82,7 +82,7 @@ inline fn z_loop_call_soon(
     const py_callback = python_c.py_newref(args[0].?);
     errdefer python_c.py_decref(py_callback);
 
-    if (python_c.PyCallable_Check(py_callback) < 0) {
+    if (python_c.PyCallable_Check(py_callback) <= 0) {
         python_c.raise_python_type_error("Invalid callback\x00");
         return error.PythonError;
     }

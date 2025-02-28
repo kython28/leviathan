@@ -1,9 +1,10 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
-const linked_list =  @import("../../../utils/linked_list.zig");
-pub const BlockingTasksSetLinkedList = linked_list.init(*BlockingTasksSet);
-pub const BlockingTaskDataLinkedList = linked_list.init(BlockingTaskData);
+const utils =  @import("utils");
+
+pub const BlockingTasksSetLinkedList = utils.LinkedList(*BlockingTasksSet);
+pub const BlockingTaskDataLinkedList = utils.LinkedList(BlockingTaskData);
 
 const CallbackManger = @import("../../../callback_manager.zig");
 const Loop = @import("../../main.zig");

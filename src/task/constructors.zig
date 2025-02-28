@@ -1,7 +1,7 @@
 const python_c = @import("python_c");
 const PyObject = *python_c.PyObject;
 
-const utils = @import("../utils/main.zig");
+const utils = @import("utils");
 
 const CallbackManager = @import("../callback_manager.zig");
 const Future = @import("../future/main.zig");

@@ -9,7 +9,7 @@ const PythonFutureObject = Future.Python.FutureObject;
 
 const CallbackManager = @import("../../callback_manager.zig");
 
-const utils = @import("../../utils/utils.zig");
+const utils = @import("utils");
 
 inline fn z_future_add_done_callback(
     self: *PythonFutureObject, args: []?PyObject,

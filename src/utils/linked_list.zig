@@ -1,7 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
-pub fn init(comptime T: type) type {
+pub fn LinkedList(comptime T: type) type {
     return struct {
         const _linked_list_node = struct {
             data: T,
@@ -185,3 +185,107 @@ pub fn init(comptime T: type) type {
         }
     };
 }
+
+test "create and release" {
+    const list: LinkedList = LinkedList.init(std.testing.allocator);
+
+    try std.testing.expect(list.first == null);
+    try std.testing.expect(list.last == null);
+    try std.testing.expect(list.len == 0);
+}
+
+test "append" {
+    var list = LinkedList.init(std.testing.allocator);
+
+    const elements = [_]usize{10, 20, 100, 10, 10, 20};
+    for (elements) |elem| {
+        try list.append(
+            @ptrFromInt(elem)
+        );
+    }
+
+    var node = list.first;
+    var elements_total: usize = 0;
+    while (node != null) {
+        try std.testing.expect(@intFromPtr(node.?.data) == elements[elements_total]);
+        elements_total += 1;
+
+        const next_node = node.?.next;
+        std.testing.allocator.destroy(node.?);
+
+        node = next_node;
+    }
+    list.first = null;
+    list.last = null;
+
+    try std.testing.expect(elements_total == elements.len);
+}
+
+test "appendleft" {
+    var list = LinkedList.init(std.testing.allocator);
+
+    const elements = [_]usize{10, 20, 100, 10, 10, 20};
+    for (elements) |elem| {
+        try list.appendleft(
+            @ptrFromInt(elem)
+        );
+    }
+
+    var node = list.last;
+    var elements_total: usize = 0;
+    while (node != null) {
+        try std.testing.expect(@intFromPtr(node.?.data) == elements[elements_total]);
+        elements_total += 1;
+
+        const prev_node = node.?.prev;
+        std.testing.allocator.destroy(node.?);
+
+        node = prev_node;
+    }
+    list.first = null;
+    list.last = null;
+
+    try std.testing.expect(elements_total == elements.len);
+}
+
+test "pop and popleft" {
+    var list = LinkedList.init(std.testing.allocator);
+
+    try std.testing.expectError(LinkedList.errors.LinkedListEmpty, list.pop());
+    try std.testing.expectError(LinkedList.errors.LinkedListEmpty, list.popleft());
+
+    const elements = [_]usize{2, 3, 10, 40};
+    for (elements) |elem| {
+        try list.append(
+            @ptrFromInt(elem)
+        );
+    }
+
+    var value: usize = @intFromPtr((try list.popleft()).?);
+    try std.testing.expect(value == 2);
+
+    value = @intFromPtr((try list.pop()).?);
+    try std.testing.expect(value == 40);
+
+    value = @intFromPtr((try list.popleft()).?);
+    try std.testing.expect(value == 3);
+
+    value = @intFromPtr((try list.pop()).?);
+    try std.testing.expect(value == 10);
+
+    try std.testing.expect(list.first == null);
+    try std.testing.expect(list.last == null);
+}
+
+test "is_empty" {
+    var list = LinkedList.init(std.testing.allocator);
+
+    try std.testing.expect(list.is_empty());
+
+    try list.append(@ptrFromInt(3));
+    try std.testing.expect(!list.is_empty());
+
+    _ = try list.pop();
+    try std.testing.expect(list.is_empty());
+}
+

@@ -5,7 +5,7 @@ const Loop = @import("../loop/main.zig");
 const Future = @import("main.zig");
 
 const CallbacksSetLinkedList = CallbackManager.LinkedList;
-const utils = @import("../utils/utils.zig");
+const utils = @import("utils");
 
 const python_c = @import("python_c");
 const PyObject = *python_c.PyObject;

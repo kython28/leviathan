@@ -4,7 +4,7 @@ const PyObject = *python_c.PyObject;
 const Future = @import("../main.zig");
 const PythonFutureObject = Future.Python.FutureObject;
 
-const utils = @import("../../utils/main.zig");
+const utils = @import("utils");
 
 
 inline fn raise_cancel_exception(self: *PythonFutureObject) void {

@@ -6,7 +6,7 @@ const PyObject = *python_c.PyObject;
 
 const Loop = @import("loop/main.zig");
 const Handle = @import("handle.zig");
-const utils = @import("utils/utils.zig");
+const utils = @import("utils");
 
 
 pub const PythonTimerHandleObject = extern struct {

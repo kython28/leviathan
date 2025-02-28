@@ -1,6 +1,6 @@
 const std = @import("std");
 
-pub fn init(
+pub fn BTree(
     comptime Key: type,
     comptime Value: type,
     comptime Degree: usize
@@ -25,14 +25,14 @@ pub fn init(
         allocator: std.mem.Allocator,
         parent: *Node,
 
-        pub fn init(allocator: std.mem.Allocator) !BTree {
+        pub fn init(allocator: std.mem.Allocator) !@This() {
             return .{
                 .allocator = allocator,
                 .parent = try create_node(allocator)
             };
         }
 
-        pub fn deinit(self: *BTree) !void {
+        pub fn deinit(self: *@This()) !void {
             if (self.parent.nkeys > 0) return error.BTreeHasElements;
 
             const allocator = self.allocator;
@@ -48,7 +48,7 @@ pub fn init(
             return new_node;
         }
 
-        pub fn get_value_ptr(self: *BTree, key: Key, node: ?**Node) ?*Value {
+        pub fn get_value_ptr(self: *@This(), key: Key, node: ?**Node) ?*Value {
             var current_node: *Node = self.parent;
             var value: ?*Value = null;
             loop: while (true) {
@@ -94,7 +94,7 @@ pub fn init(
             return value;
         }
 
-        pub inline fn get_value(self: *BTree, key: Key, node: ?**Node) ?Value {
+        pub inline fn get_value(self: *@This(), key: Key, node: ?**Node) ?Value {
             const value_ptr = self.get_value_ptr(key, node)
                 orelse return null;
             return value_ptr.*;
@@ -119,11 +119,11 @@ pub fn init(
             return &current_node.values[nkeys - 1];
         }
 
-        pub fn get_max_value_ptr(self: *BTree, key: ?*Key, node: ?**Node) ?*Value {
+        pub fn get_max_value_ptr(self: *@This(), key: ?*Key, node: ?**Node) ?*Value {
             return find_max_from_node(self.parent, key, node);
         }
 
-        pub inline fn get_max_value(self: *BTree, key: ?*Key, node: ?**Node) ?Value {
+        pub inline fn get_max_value(self: *@This(), key: ?*Key, node: ?**Node) ?Value {
             const value_ptr = self.get_max_value_ptr(key, node)
                 orelse return null;
             return value_ptr.*;
@@ -144,11 +144,11 @@ pub fn init(
             return &current_node.values[0];
         }
 
-        pub fn get_min_value_ptr(self: *BTree, key: ?*Key, node: ?**Node) ?Value {
+        pub fn get_min_value_ptr(self: *@This(), key: ?*Key, node: ?**Node) ?Value {
             return find_min_from_node(self.parent, key, node);
         }
 
-        pub inline fn get_min_value(self: *BTree, key: ?*Key, node: ?**Node) ?Value {
+        pub inline fn get_min_value(self: *@This(), key: ?*Key, node: ?**Node) ?Value {
             const value_ptr = self.get_min_value_ptr(key, node)
                 orelse return null;
             return value_ptr.*;
@@ -299,7 +299,7 @@ pub fn init(
             split_nodes(allocator, node);
         }
 
-        pub fn insert(self: *BTree, key: Key, value: Value) bool {
+        pub fn insert(self: *@This(), key: Key, value: Value) bool {
             const allocator = self.allocator;
 
             var node: *Node = self.parent;
@@ -314,7 +314,7 @@ pub fn init(
             return true;
         }
 
-        pub fn replace(self: *BTree, key: Key, value: Value) ?Value {
+        pub fn replace(self: *@This(), key: Key, value: Value) ?Value {
             const allocator = self.allocator;
 
             var node: *Node = self.parent;
@@ -432,7 +432,7 @@ pub fn init(
             }
         }
 
-        pub fn delete(self: *BTree, key: Key) ?Value {
+        pub fn delete(self: *@This(), key: Key) ?Value {
             var node: *Node = undefined;
             const value = get_value(self, key, &node)
                 orelse return null;
@@ -463,7 +463,7 @@ pub fn init(
             return value;
         }
 
-        pub fn pop(self: *BTree, key: ?*Key) ?Value {
+        pub fn pop(self: *@This(), key: ?*Key) ?Value {
             var node: *Node = undefined;
             const value = get_max_value(self, key, &node)
                 orelse return null;
@@ -475,7 +475,5 @@ pub fn init(
 
             return value;
         }
-
-        const BTree = @This();
     };
 }

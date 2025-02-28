@@ -1,18 +1,19 @@
 const std = @import("std");
 
 const python_c = @import("python_c");
-const utils = @import("../utils/utils.zig");
+const utils = @import("utils");
 
 const Loop = @import("main.zig");
 const CallbackManager = @import("../callback_manager.zig");
+
 
 const c = @cImport({
     @cInclude("signal.h");
 });
 
-const BTree = @import("../utils/btree.zig").init(u6, CallbackManager.Callback, 3);
+const CallbacksBTree = utils.BTree(u6, CallbackManager.Callback, 3);
 
-callbacks: BTree,
+callbacks: CallbacksBTree,
 fd: std.posix.fd_t,
 mask: std.posix.sigset_t,
 loop: *Loop,
@@ -167,7 +168,7 @@ pub fn init(loop: *Loop) !void {
     errdefer std.posix.close(fd);
 
     loop.unix_signals = .{
-        .callbacks = try BTree.init(loop.allocator),
+        .callbacks = try CallbacksBTree.init(loop.allocator),
         .fd = fd,
         .mask = mask,
         .loop = loop

@@ -3,7 +3,7 @@ const std = @import("std");
 const python_c = @import("python_c");
 const PyObject = *python_c.PyObject;
 
-const utils = @import("../../../utils/utils.zig");
+const utils = @import("utils");
 
 const CallbackManager = @import("../../../callback_manager.zig");
 const Handle = @import("../../../handle.zig");

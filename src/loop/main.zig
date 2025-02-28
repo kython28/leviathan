@@ -16,7 +16,8 @@ pub const FDWatcher = struct {
     fd: std.posix.fd_t
 };
 
-const WatchersBTree = @import("../utils/btree.zig").init(std.posix.fd_t, *FDWatcher, 11);
+const utils = @import("utils");
+const WatchersBTree = utils.BTree(std.posix.fd_t, *FDWatcher, 11);
 
 const lock = @import("../utils/lock.zig");
 

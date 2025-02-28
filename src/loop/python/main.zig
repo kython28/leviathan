@@ -2,7 +2,7 @@ const std = @import("std");
 
 const Loop = @import("../main.zig");
 
-const utils = @import("../../utils/main.zig");
+const utils = @import("utils");
 
 const python_c = @import("python_c");
 const PyObject = *python_c.PyObject;
@@ -226,3 +226,6 @@ pub fn create_type() !void {
     LoopType = @ptrCast(type_obj);
 }
 
+test {
+    std.testing.refAllDeclsRecursive(Network);
+}

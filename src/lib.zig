@@ -4,7 +4,7 @@ const builtin = @import("builtin");
 const python_c = @import("python_c");
 const leviathan = @import("leviathan");
 
-const utils = leviathan.utils;
+const utils = @import("utils");
 const future = leviathan.Future;
 const task = leviathan.Task;
 const loop = leviathan.Loop;
@@ -44,7 +44,7 @@ const dynamic_leviathan_modules_names = .{
 
 fn module_cleanup(_: *python_c.PyObject) callconv(.C) void {
     deinitialize_leviathan_types();
-    leviathan.utils.PythonImports.release_python_imports();
+    utils.PythonImports.release_python_imports();
     if (builtin.mode == .Debug) {
         _ = utils.gpa.detectLeaks();
     }
@@ -124,7 +124,7 @@ fn initialize_python_module() !*python_c.PyObject {
 
 export fn PyInit_leviathan_zig() ?*python_c.PyObject {
     utils.init_gpa();
-    leviathan.utils.PythonImports.initialize_python_imports() catch return null;
+    utils.PythonImports.initialize_python_imports() catch return null;
     initialize_leviathan_types() catch return null;
     return initialize_python_module() catch return null;
 } 

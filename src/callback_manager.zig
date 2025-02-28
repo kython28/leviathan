@@ -7,7 +7,9 @@ const Future = @import("future/main.zig");
 const Task = @import("task/main.zig");
 const Handle = @import("handle.zig");
 
-pub const LinkedList = @import("utils/linked_list.zig").init(CallbacksSet);
+const utils = @import("utils");
+
+pub const LinkedList = utils.LinkedList(CallbacksSet);
 
 pub const ExecuteCallbacksReturn = enum {
     Stop,
@@ -260,4 +262,196 @@ pub fn execute_callbacks(
     }
 
     return status;
+}
+
+
+test "Creating a new callback set" {
+    const callback_set = try create_new_set(std.testing.allocator, 10);
+    defer release_set(std.testing.allocator, callback_set);
+
+    try std.testing.expectEqual(0, callback_set.callbacks_num);
+    try std.testing.expectEqual(10, callback_set.callbacks.len);
+}
+
+fn test_callback(
+    data: ?*anyopaque, status: ExecuteCallbacksReturn
+) ExecuteCallbacksReturn {
+    if (status != .Continue) return status;
+
+    const executed_ptr: *usize = @alignCast(@ptrCast(data.?));
+    executed_ptr.* += 1;
+    return status;
+}
+
+fn test_callback2(
+    _: ?*anyopaque, _: ExecuteCallbacksReturn
+) ExecuteCallbacksReturn {
+    return .Exception;
+}
+
+test "Run callback" {
+    var executed: usize = 0;
+
+    const ret = run_callback(
+        std.testing.allocator, .{
+            .ZigGeneric = .{
+                .data = &executed,
+                .callback = &test_callback
+            }
+        }, .Continue
+    );
+    try std.testing.expectEqual(.Continue, ret);
+    try std.testing.expectEqual(1, executed);
+
+    executed = 0;
+    const ret2 = run_callback(
+        std.testing.allocator, .{
+            .ZigGeneric = .{
+                .data = &executed,
+                .callback = &test_callback,
+                .can_execute = false
+            }
+        }, .Continue
+    );
+    try std.testing.expectEqual(.Continue, ret2);
+    try std.testing.expectEqual(0, executed);
+}
+
+test "Append multiple sets" {
+    var set_queue = CallbacksSetsQueue{
+        .queue = LinkedList.init(std.testing.allocator)
+    };
+    defer {
+        for (0..set_queue.queue.len) |_| {
+            const callbacks_set: CallbacksSet = set_queue.queue.pop() catch unreachable;
+            release_set(std.testing.allocator, callbacks_set);
+        }
+    }
+
+    for (0..70) |_| {
+        _ = try append_new_callback(std.testing.allocator, &set_queue, .{
+            .ZigGeneric = .{
+                .data = null,
+                .callback = &test_callback
+            }
+        }, 10);
+    }
+
+    try std.testing.expectEqual(3, set_queue.queue.len);
+    var node = set_queue.queue.first;
+    var callbacks_len: usize = 10;
+    while (node) |n| {
+        const callbacks_set: CallbacksSet = n.data;
+        try std.testing.expectEqual(callbacks_len, callbacks_set.callbacks.len);
+        try std.testing.expectEqual(callbacks_len, callbacks_set.callbacks_num);
+        callbacks_len *= 2;
+        node = n.next;
+    }
+}
+
+test "Append new callback to set queue and execute it" {
+    var set_queue = CallbacksSetsQueue{
+        .queue = LinkedList.init(std.testing.allocator)
+    };
+    defer {
+        for (0..set_queue.queue.len) |_| {
+            const callbacks_set: CallbacksSet = set_queue.queue.pop() catch unreachable;
+            release_set(std.testing.allocator, callbacks_set);
+        }
+    }
+
+    var executed: usize = 0;
+
+    const ret = try append_new_callback(std.testing.allocator, &set_queue, .{
+        .ZigGeneric = .{
+            .data = &executed,
+            .callback = &test_callback
+        }
+    }, 10);
+
+    try std.testing.expectEqual(&test_callback, ret.ZigGeneric.callback);
+    try std.testing.expectEqual(@intFromPtr(&executed), @intFromPtr(ret.ZigGeneric.data));
+
+    try std.testing.expect(set_queue.last_set != null);
+
+    const callbacks_set: *CallbacksSet = &set_queue.last_set.?.data;
+
+    try std.testing.expectEqual(1, callbacks_set.callbacks_num);
+    try std.testing.expectEqual(ret, &callbacks_set.callbacks[0]);
+    try std.testing.expectEqual(10, callbacks_set.callbacks.len);
+
+    _ = execute_callbacks(std.testing.allocator, &set_queue, .Continue, false);
+    try std.testing.expectEqual(1, executed);
+    try std.testing.expectEqual(0, callbacks_set.callbacks_num);
+
+    callbacks_set.callbacks_num = 1;
+    executed = 0;
+    _ = execute_callbacks(std.testing.allocator, &set_queue, .Continue, true);
+    try std.testing.expectEqual(1, executed);
+    try std.testing.expectEqual(0, callbacks_set.callbacks_num);
+    try std.testing.expectEqual(set_queue.queue.first, set_queue.last_set);
+}
+
+test "Append and cancel callbacks" {
+    var set_queue = CallbacksSetsQueue{
+        .queue = LinkedList.init(std.testing.allocator)
+    };
+    defer {
+        for (0..set_queue.queue.len) |_| {
+            const callbacks_set: CallbacksSet = set_queue.queue.pop() catch unreachable;
+            release_set(std.testing.allocator, callbacks_set);
+        }
+    }
+
+    var executed: usize = 0;
+    for (0..70) |i| {
+        const callback = try append_new_callback(std.testing.allocator, &set_queue, .{
+            .ZigGeneric = .{
+                .data = &executed,
+                .callback = &test_callback
+            }
+        }, 10);
+
+        if (i % 2 == 0) {
+            callback.ZigGeneric.can_execute = false;
+        }
+    }
+
+    _ = execute_callbacks(std.testing.allocator, &set_queue, .Continue, false);
+    try std.testing.expectEqual(35, executed);
+}
+
+test "Append and stopping with exception" {
+    var set_queue = CallbacksSetsQueue{
+        .queue = LinkedList.init(std.testing.allocator)
+    };
+    defer {
+        for (0..set_queue.queue.len) |_| {
+            const callbacks_set: CallbacksSet = set_queue.queue.pop() catch unreachable;
+            release_set(std.testing.allocator, callbacks_set);
+        }
+    }
+
+    var executed: usize = 0;
+    for (0..70) |i| {
+        const callback = try append_new_callback(std.testing.allocator, &set_queue, .{
+            .ZigGeneric = .{
+                .data = &executed,
+                .callback = blk: {
+                    if (i == 35) {
+                        break :blk &test_callback2;
+                    }else{
+                        break :blk &test_callback;
+                    }
+                }
+            }
+        }, 10);
+
+        if (i % 2 == 0) {
+            callback.ZigGeneric.can_execute = false;
+        }
+    }
+
+    _ = execute_callbacks(std.testing.allocator, &set_queue, .Continue, false);
+    try std.testing.expectEqual(17, executed);
 }

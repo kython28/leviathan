@@ -1,6 +1,5 @@
 const Loop = @import("../main.zig");
 
-const LinkedList = @import("../../utils/linked_list.zig");
 const CallbackManager = @import("../../callback_manager.zig");
 
 const std = @import("std");

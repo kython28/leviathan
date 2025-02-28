@@ -3,7 +3,7 @@ const std = @import("std");
 const python_c = @import("python_c");
 const PyObject = *python_c.PyObject;
 
-const utils = @import("../../utils/main.zig");
+const utils = @import("utils");
 
 const Loop = @import("../../loop/main.zig");
 

@@ -478,63 +478,65 @@ pub fn BTree(
     };
 }
 
-test "Create and release" {
+test "BTree: Initialization creates empty tree" {
     var new_btree = try BTree.init(usize, usize, 3).init(std.testing.allocator);
     defer new_btree.deinit() catch unreachable;
 
-    try std.testing.expectEqual(0, new_btree.parent.nkeys);
+    try std.testing.expectEqual(@as(usize, 0), new_btree.parent.nkeys);
     try std.testing.expectEqual(null, new_btree.parent.parent);
     for (new_btree.parent.childs) |v| try std.testing.expectEqual(null, v);
 }
 
-test "Inserting elements and removing" {
+test "BTree: Insert and delete sequential usize elements" {
     var new_btree = try BTree.init(usize, usize, 3).init(std.testing.allocator);
     defer new_btree.deinit() catch unreachable;
 
-    for (0..20) |v| {
+    const element_count = 20;
+    for (0..element_count) |v| {
         const value = (v + 1) * 23;
         const inserted = new_btree.insert(v, value);
         try std.testing.expect(inserted);
     }
 
-    for (0..20) |v| {
+    for (0..element_count) |v| {
         const value = new_btree.get_value(v, null);
         try std.testing.expectEqual((v + 1) * 23, value);
     }
 
-    for (0..20) |v| {
+    for (0..element_count) |v| {
         const value = new_btree.delete(v);
         try std.testing.expectEqual((v + 1) * 23, value);
     }
 }
 
-test "Insert, search, partial delete, reinsert and full delete" {
+test "BTree: Complex insertion, partial deletion, and reinsertion" {
     var new_btree = try BTree.init(usize, usize, 3).init(std.testing.allocator);
     defer new_btree.deinit() catch unreachable;
 
+    const element_count = 15;
     // Initial insertion of elements
-    for (0..15) |v| {
+    for (0..element_count) |v| {
         const value = v * 100 + 50;
         const inserted = new_btree.insert(v, value);
         try std.testing.expect(inserted);
     }
 
     // Verify all elements are present
-    for (0..15) |v| {
+    for (0..element_count) |v| {
         const value = new_btree.get_value(v, null);
         try std.testing.expectEqual(v * 100 + 50, value);
     }
 
-    // Delete some elements (even numbers)
-    for (0..15) |v| {
+    // Delete even-indexed elements
+    for (0..element_count) |v| {
         if (v % 2 == 0) {
             const value = new_btree.delete(v);
             try std.testing.expectEqual(v * 100 + 50, value);
         }
     }
 
-    // Verify odd numbers still present, even numbers gone
-    for (0..15) |v| {
+    // Verify odd-indexed elements remain, even-indexed are removed
+    for (0..element_count) |v| {
         const value = new_btree.get_value(v, null);
         if (v % 2 == 0) {
             try std.testing.expectEqual(null, value);
@@ -543,8 +545,8 @@ test "Insert, search, partial delete, reinsert and full delete" {
         }
     }
 
-    // Reinsert even numbers with new values
-    for (0..15) |v| {
+    // Reinsert even-indexed elements with new values
+    for (0..element_count) |v| {
         if (v % 2 == 0) {
             const value = v * 200 + 25;
             const inserted = new_btree.insert(v, value);
@@ -552,8 +554,8 @@ test "Insert, search, partial delete, reinsert and full delete" {
         }
     }
 
-    // Verify all numbers present with correct values
-    for (0..15) |v| {
+    // Verify all elements with updated values
+    for (0..element_count) |v| {
         const value = new_btree.get_value(v, null);
         if (v % 2 == 0) {
             try std.testing.expectEqual(v * 200 + 25, value);
@@ -563,7 +565,7 @@ test "Insert, search, partial delete, reinsert and full delete" {
     }
 
     // Delete all elements
-    for (0..15) |v| {
+    for (0..element_count) |v| {
         const value = new_btree.delete(v);
         if (v % 2 == 0) {
             try std.testing.expectEqual(v * 200 + 25, value);
@@ -573,17 +575,18 @@ test "Insert, search, partial delete, reinsert and full delete" {
     }
 
     // Verify tree is empty
-    for (0..15) |v| {
+    for (0..element_count) |v| {
         const value = new_btree.get_value(v, null);
         try std.testing.expectEqual(null, value);
     }
 }
 
-test "Inserting in random order, searching and removing" {
+test "BTree: Random order insertion and deletion with usize" {
     var new_btree = try BTree.init(usize, usize, 3).init(std.testing.allocator);
     defer new_btree.deinit() catch unreachable;
 
-    var values: [30]usize = undefined;
+    const element_count = 30;
+    var values: [element_count]usize = undefined;
     for (&values, 0..) |*v, i| v.* = i * 3;
 
     const randpgr = std.crypto.random;
@@ -609,12 +612,13 @@ test "Inserting in random order, searching and removing" {
     }
 }
 
-test "Inserting in random float elements, searching and removing" {
+test "BTree: Random order insertion and deletion with floating point" {
     var new_btree = try BTree.init(f64, f64, 3).init(std.testing.allocator);
     defer new_btree.deinit() catch unreachable;
 
+    const element_count = 100;
     const randpgr = std.crypto.random;
-    var values: [100]f64 = undefined;
+    var values: [element_count]f64 = undefined;
     for (&values) |*v| v.* = -10.0 + randpgr.float(f64) * 20.0;
 
     randpgr.shuffle(f64, &values);

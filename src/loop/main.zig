@@ -34,7 +34,8 @@ ready_tasks_queues: [2]CallbackManager.CallbacksSetsQueue,
 
 blocking_tasks_epoll_fd: std.posix.fd_t = -1,
 blocking_ready_epoll_events: []std.os.linux.epoll_event,
-blocking_tasks_queue: BlockingTasksSetLinkedList,
+available_blocking_tasks_queue: BlockingTasksSetLinkedList,
+busy_blocking_tasks_queue: BlockingTasksSetLinkedList,
 blocking_ready_tasks: []std.os.linux.io_uring_cqe,
 
 reader_watchers: WatchersBTree,
@@ -101,7 +102,8 @@ pub fn init(self: *Loop, allocator: std.mem.Allocator, rtq_min_capacity: usize) 
             max_callbacks_sets_per_queue,
         },
         .ready_tasks_queue_min_bytes_capacity = rtq_min_capacity,
-        .blocking_tasks_queue = BlockingTasksSetLinkedList.init(allocator),
+        .available_blocking_tasks_queue = BlockingTasksSetLinkedList.init(allocator),
+        .busy_blocking_tasks_queue = BlockingTasksSetLinkedList.init(allocator),
         .blocking_ready_tasks = blocking_ready_tasks,
         .blocking_tasks_epoll_fd = try std.posix.epoll_create1(0),
         .blocking_ready_epoll_events = blocking_ready_epoll_events,
@@ -134,13 +136,18 @@ pub fn release(self: *Loop) void {
     }
 
     const allocator = self.allocator;
-    const blocking_tasks_queue = &self.blocking_tasks_queue;
-    if (!blocking_tasks_queue.is_empty()) {
-        for (0..blocking_tasks_queue.len) |_| {
-            const set = blocking_tasks_queue.pop() catch unreachable;
-            set.cancel_all(self) catch unreachable;
-            set.deinit(false);
-        }
+    const available_blocking_tasks_queue = &self.available_blocking_tasks_queue;
+    for (0..available_blocking_tasks_queue.len) |_| {
+        const set = available_blocking_tasks_queue.pop() catch unreachable;
+        set.cancel_all(self) catch unreachable;
+        set.deinit(false);
+    }
+
+    const busy_blocking_tasks_queue = &self.busy_blocking_tasks_queue;
+    for (0..busy_blocking_tasks_queue.len) |_| {
+        const set = busy_blocking_tasks_queue.pop() catch unreachable;
+        set.cancel_all(self) catch unreachable;
+        set.deinit(false);
     }
 
     self.unix_signals.deinit() catch unreachable;

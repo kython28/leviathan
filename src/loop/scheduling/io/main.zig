@@ -39,12 +39,13 @@ pub const BlockingTasksSet = struct {
 
     eventfd: std.posix.fd_t,
 
-    blocking_tasks_queue: *BlockingTasksSetLinkedList,
+    available_blocking_tasks_queue: *BlockingTasksSetLinkedList,
+    busy_blocking_tasks_queue: *BlockingTasksSetLinkedList,
     node: BlockingTasksSetLinkedList.Node,
 
     pub fn init(
-        allocator: std.mem.Allocator, blocking_tasks_queue: *BlockingTasksSetLinkedList,
-        node: BlockingTasksSetLinkedList.Node
+        allocator: std.mem.Allocator, available_blocking_tasks_queue: *BlockingTasksSetLinkedList,
+        busy_blocking_tasks_queue: *BlockingTasksSetLinkedList, node: BlockingTasksSetLinkedList.Node
     ) !*BlockingTasksSet {
         const set = allocator.create(BlockingTasksSet) catch unreachable;
         errdefer allocator.destroy(set);
@@ -52,7 +53,7 @@ pub const BlockingTasksSet = struct {
         const eventfd = try std.posix.eventfd(0, std.os.linux.EFD.NONBLOCK|std.os.linux.EFD.CLOEXEC);
         errdefer std.posix.close(eventfd);
 
-        set.* = .{
+        set.* = BlockingTasksSet{
             .allocator = allocator,
             .ring = try std.os.linux.IoUring.init(TotalItems * 2, 0),
             .tasks_data = BlockingTaskDataLinkedList.init(allocator),
@@ -64,7 +65,8 @@ pub const BlockingTasksSet = struct {
             .quarantine_cancel_items = BlockingTaskDataLinkedList.init(allocator),
 
             .node = node,
-            .blocking_tasks_queue = blocking_tasks_queue,
+            .available_blocking_tasks_queue = available_blocking_tasks_queue,
+            .busy_blocking_tasks_queue = busy_blocking_tasks_queue,
             .eventfd = eventfd
         };
         errdefer set.ring.deinit();
@@ -103,12 +105,14 @@ pub const BlockingTasksSet = struct {
 
         if (can_release_node) {
             const node = self.node;
-            const blocking_tasks_queue = self.blocking_tasks_queue;
+            const available_blocking_tasks_queue = self.available_blocking_tasks_queue;
             if (self.free_items.len > 0) {
-                blocking_tasks_queue.unlink_node(node);
+                available_blocking_tasks_queue.unlink_node(node);
+            }else if (self.quarantine_items.len > 0) {
+                self.busy_blocking_tasks_queue.unlink_node(node);
             }
 
-            blocking_tasks_queue.release_node(node);
+            available_blocking_tasks_queue.release_node(node);
         }
 
         self.free_items.clear();
@@ -145,7 +149,8 @@ pub const BlockingTasksSet = struct {
         self.tasks_data.append_node(node);
 
         if (operation != .Cancel and free_items_len == 1) {
-            self.blocking_tasks_queue.unlink_node(self.node);
+            self.available_blocking_tasks_queue.unlink_node(self.node);
+            self.busy_blocking_tasks_queue.append_node(self.node);
         }
 
         return node;
@@ -161,7 +166,8 @@ pub const BlockingTasksSet = struct {
                 const free_items = &self.free_items;
                 free_items.append_node(node);
                 if (free_items.len == 1) {
-                    self.blocking_tasks_queue.append_node(self.node);
+                    self.busy_blocking_tasks_queue.unlink_node(self.node);
+                    self.available_blocking_tasks_queue.append_node(self.node);
                 }
             },
         }
@@ -184,7 +190,8 @@ pub const BlockingTasksSet = struct {
         const quarantine_items = &self.quarantine_items;
         if (quarantine_items.len > 0) {
             if (free_items.len == 0) {
-                self.blocking_tasks_queue.append_node(self.node);
+                self.busy_blocking_tasks_queue.unlink_node(self.node);
+                self.available_blocking_tasks_queue.append_node(self.node);
             }
 
             free_items.extend(&self.quarantine_items);
@@ -248,16 +255,19 @@ pub const BlockingOperationData = union(BlockingOperation) {
 
 inline fn get_blocking_tasks_set(
     allocator: std.mem.Allocator, epoll_fd: std.posix.fd_t,
-    blocking_tasks_queue: *BlockingTasksSetLinkedList
+    available_blocking_tasks_queue: *BlockingTasksSetLinkedList,
+    busy_blocking_tasks_queue: *BlockingTasksSetLinkedList
 ) !*BlockingTasksSet {
-    if (blocking_tasks_queue.first) |node| {
+    if (available_blocking_tasks_queue.first) |node| {
         return node.data;
     }
 
-    const new_node = try blocking_tasks_queue.create_new_node(undefined);
-    errdefer blocking_tasks_queue.release_node(new_node);
+    const new_node = try available_blocking_tasks_queue.create_new_node(undefined);
+    errdefer available_blocking_tasks_queue.release_node(new_node);
 
-    const new_set = try BlockingTasksSet.init(allocator, blocking_tasks_queue, new_node);
+    const new_set = try BlockingTasksSet.init(
+        allocator, available_blocking_tasks_queue, busy_blocking_tasks_queue, new_node
+    );
     errdefer new_set.deinit(false);
 
     var epoll_event: std.os.linux.epoll_event = .{
@@ -267,8 +277,8 @@ inline fn get_blocking_tasks_set(
         }
     };
 
-    blocking_tasks_queue.append_node(new_node);
-    errdefer _ = blocking_tasks_queue.pop_node() catch unreachable;
+    available_blocking_tasks_queue.append_node(new_node);
+    errdefer _ = available_blocking_tasks_queue.pop_node() catch unreachable;
 
     try std.posix.epoll_ctl(epoll_fd, std.os.linux.EPOLL.CTL_ADD, new_set.eventfd, &epoll_event);
     return new_set;
@@ -284,10 +294,11 @@ pub fn queue(self: *Loop, event: BlockingOperationData) !usize {
         return try Cancel.perform(event.Cancel);
     }
 
-    const blocking_tasks_queue = &self.blocking_tasks_queue;
     const epoll_fd = self.blocking_tasks_epoll_fd;
     const blocking_tasks_set = try get_blocking_tasks_set(
-        self.allocator, epoll_fd, blocking_tasks_queue
+        self.allocator, epoll_fd, &self.available_blocking_tasks_queue,
+        &self.busy_blocking_tasks_queue
+
     );
     errdefer {
         if (blocking_tasks_set.tasks_data.len == 0) {

@@ -182,6 +182,7 @@ pub const BlockingTasksSet = struct {
             else => 1
         };
 
+        task_data.callback_data = null;
         self.quarantine_indices[self.quarantine_count] = task_data.index;
         self.quarantine_count += 1;
         self.quarantine_events_count[qc_index] += 1;
@@ -190,10 +191,6 @@ pub const BlockingTasksSet = struct {
     pub fn clear_quarantine(self: *BlockingTasksSet) void {
         const quarantine_count = self.quarantine_count;
         if (quarantine_count == 0) return;
-
-        for (self.quarantine_indices[0..quarantine_count]) |index| {
-            self.task_data_pool[index].callback_data = null;
-        }
 
         const free_count = self.free_count;
         @memcpy(

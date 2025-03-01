@@ -183,7 +183,7 @@ inline fn fetch_completed_tasks(
         const err: std.os.linux.E = @call(.always_inline, std.os.linux.io_uring_cqe.err, .{cqe});
 
         const blocking_task_data: *Loop.Scheduling.IO.BlockingTaskData = @ptrFromInt(user_data);
-        blocking_tasks_set.push_in_quarantine(blocking_task_data);
+        defer blocking_tasks_set.push_in_quarantine(blocking_task_data);
 
         var callback = blocking_task_data.callback_data orelse continue;
 

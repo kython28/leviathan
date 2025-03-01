@@ -4,10 +4,10 @@ const CallbackManager = @import("../../../callback_manager.zig");
 const IO = @import("main.zig");
 
 pub fn perform(task_id: usize) !usize {
-    const task_data_node: IO.BlockingTaskDataLinkedList.Node = @ptrFromInt(task_id);
-    const task_data = task_data_node.data;
+    const task_data: *IO.BlockingTaskData = @ptrFromInt(task_id);
 
-    const set = task_data.set; // Cancel requests must be in same IOUring ring
+    const set_address = task_id - @offsetOf(IO.BlockingTasksSet, "task_data_pool") - task_data.index;
+    const set: *IO.BlockingTasksSet = @ptrFromInt(set_address); // Cancel requests must be in same IOUring ring
 
     const data_ptr = try set.push(.Cancel, null);
     errdefer set.pop(data_ptr);

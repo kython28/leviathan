@@ -65,7 +65,7 @@ pub fn init(self: *Loop, allocator: std.mem.Allocator, rtq_min_capacity: usize) 
         rtq_min_capacity, MaxCallbacks
     );
 
-    const blocking_ready_tasks = try allocator.alloc(std.os.linux.io_uring_cqe, Scheduling.IO.TotalItems);
+    const blocking_ready_tasks = try allocator.alloc(std.os.linux.io_uring_cqe, Scheduling.IO.TotalTasksItems * 2);
     errdefer allocator.free(blocking_ready_tasks);
 
     const blocking_ready_epoll_events = try allocator.alloc(std.os.linux.epoll_event, switch (builtin.mode) {

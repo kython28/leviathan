@@ -182,10 +182,8 @@ inline fn fetch_completed_tasks(
         const user_data = cqe.user_data;
         const err: std.os.linux.E = @call(.always_inline, std.os.linux.io_uring_cqe.err, .{cqe});
 
-        const blocking_task_data_node: Loop.Scheduling.IO.BlockingTaskDataLinkedList.Node = @ptrFromInt(user_data);
-
-        const blocking_task_data = blocking_task_data_node.data;
-        blocking_tasks_set.push_in_quarantine(blocking_task_data_node);
+        const blocking_task_data: *Loop.Scheduling.IO.BlockingTaskData = @ptrFromInt(user_data);
+        blocking_tasks_set.push_in_quarantine(blocking_task_data);
 
         var callback = blocking_task_data.callback_data orelse continue;
 
@@ -295,7 +293,7 @@ pub fn start(self: *Loop) !void {
         try poll_blocking_events(self, mutex, wait_for_blocking_events, ready_tasks_queue, &quanrantine_blocking_tasks);
         defer {
             for (quanrantine_blocking_tasks.items) |set| {
-                if (set.tasks_data.len == 0) {
+                if (set.empty()) {
                     Loop.Scheduling.IO.remove_tasks_set(self.blocking_tasks_epoll_fd, set);
                 }else{
                     set.clear_quarantine();

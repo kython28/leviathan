@@ -4,7 +4,6 @@ const builtin = @import("builtin");
 const utils =  @import("utils");
 
 pub const BlockingTasksSetLinkedList = utils.LinkedList(*BlockingTasksSet);
-pub const BlockingTaskDataLinkedList = utils.LinkedList(BlockingTaskData);
 
 const CallbackManger = @import("../../../callback_manager.zig");
 const Loop = @import("../../main.zig");
@@ -17,11 +16,11 @@ pub const Socket = @import("socket.zig");
 
 pub const BlockingTaskData = struct {
     callback_data: ?CallbackManger.Callback,
-    set: *BlockingTasksSet, // Cancel helper
-    operation: BlockingOperation
+    operation: BlockingOperation,
+    index: u16,
 };
 
-pub const TotalItems = switch (builtin.mode) {
+pub const TotalTasksItems = switch (builtin.mode) {
     .Debug => 4,
     else => 8192
 };
@@ -30,14 +29,19 @@ pub const BlockingTasksSet = struct {
     allocator: std.mem.Allocator,
     ring: std.os.linux.IoUring,
 
-    tasks_data: BlockingTaskDataLinkedList,
-    free_items: BlockingTaskDataLinkedList,
-    free_cancel_items: BlockingTaskDataLinkedList,
-
-    quarantine_items: BlockingTaskDataLinkedList,
-    quarantine_cancel_items: BlockingTaskDataLinkedList,
-
     eventfd: std.posix.fd_t,
+
+    task_data_pool: [TotalTasksItems * 2]BlockingTaskData,
+
+    quarantine_indices: [TotalTasksItems * 2]u16,
+    free_indices: [TotalTasksItems * 2]u16,
+
+    quarantine_count: u16,
+    free_count: u16,
+
+    normal_events_count: u16,
+    cancel_events_count: u16,
+    quarantine_events_count: [2]u16,
 
     available_blocking_tasks_queue: *BlockingTasksSetLinkedList,
     busy_blocking_tasks_queue: *BlockingTasksSetLinkedList,
@@ -47,182 +51,186 @@ pub const BlockingTasksSet = struct {
         allocator: std.mem.Allocator, available_blocking_tasks_queue: *BlockingTasksSetLinkedList,
         busy_blocking_tasks_queue: *BlockingTasksSetLinkedList, node: BlockingTasksSetLinkedList.Node
     ) !*BlockingTasksSet {
-        const set = allocator.create(BlockingTasksSet) catch unreachable;
+        const set: *BlockingTasksSet = try allocator.create(BlockingTasksSet);
         errdefer allocator.destroy(set);
 
         const eventfd = try std.posix.eventfd(0, std.os.linux.EFD.NONBLOCK|std.os.linux.EFD.CLOEXEC);
         errdefer std.posix.close(eventfd);
 
-        set.* = BlockingTasksSet{
-            .allocator = allocator,
-            .ring = try std.os.linux.IoUring.init(TotalItems * 2, 0),
-            .tasks_data = BlockingTaskDataLinkedList.init(allocator),
-
-            .free_items = BlockingTaskDataLinkedList.init(allocator),
-            .free_cancel_items = BlockingTaskDataLinkedList.init(allocator),
-
-            .quarantine_items = BlockingTaskDataLinkedList.init(allocator),
-            .quarantine_cancel_items = BlockingTaskDataLinkedList.init(allocator),
-
-            .node = node,
-            .available_blocking_tasks_queue = available_blocking_tasks_queue,
-            .busy_blocking_tasks_queue = busy_blocking_tasks_queue,
-            .eventfd = eventfd
-        };
+        set.allocator = allocator;
+        set.ring = try std.os.linux.IoUring.init(TotalTasksItems * 2, 0);
         errdefer set.ring.deinit();
+
+        set.eventfd = eventfd;
+
+        set.quarantine_count = 0;
+        set.free_count = @intCast(TotalTasksItems * 2);
+        set.normal_events_count = 0;
+        set.cancel_events_count = 0;
+        set.quarantine_events_count = @splat(0);
+
+        set.available_blocking_tasks_queue = available_blocking_tasks_queue;
+        set.busy_blocking_tasks_queue = busy_blocking_tasks_queue;
+        set.node = node;
 
         try set.ring.register_eventfd(eventfd);
 
-        const free_items = &set.free_items;
-        const free_cancel_items = &set.free_cancel_items;
-        errdefer {
-            free_items.clear();
-            free_cancel_items.clear();
+        var index: u16 = 0;
+        while (index < (TotalTasksItems * 2)) : (index += 1) {
+            set.task_data_pool[index] = .{
+                .callback_data = null,
+                .index = index,
+                .operation = undefined
+            };
+
+            set.free_indices[index] = index;
         }
 
-        for (0..TotalItems) |_| {
-            try free_items.append(.{
-                .callback_data = null,
-                .set = set,
-                .operation = undefined
-            });
-
-            try free_cancel_items.append(.{
-                .callback_data = null,
-                .set = set,
-                .operation = undefined
-            });
-        }
-
-        node.data = set;
         return set;
     }
 
     pub fn deinit(self: *BlockingTasksSet, comptime can_release_node: bool) void {
-        if (self.tasks_data.len > 0) {
+        if (!self.empty()) {
             @panic("Tasks set is not empty");
         }
 
         if (can_release_node) {
             const node = self.node;
             const available_blocking_tasks_queue = self.available_blocking_tasks_queue;
-            if (self.free_items.len > 0) {
+            if (self.free_count > 0) {
                 available_blocking_tasks_queue.unlink_node(node);
-            }else if (self.quarantine_items.len > 0) {
+            }else if (self.quarantine_count > 0) {
                 self.busy_blocking_tasks_queue.unlink_node(node);
             }
 
             available_blocking_tasks_queue.release_node(node);
         }
 
-        self.free_items.clear();
-        self.free_cancel_items.clear();
-
-        self.quarantine_cancel_items.clear();
-        self.quarantine_items.clear();
-
         self.ring.deinit();
         std.posix.close(self.eventfd);
         self.allocator.destroy(self);
     }
 
+    pub inline fn empty(self: *const BlockingTasksSet) bool {
+        return (self.free_count == (TotalTasksItems * 2));
+    }
+
     pub fn push(
         self: *BlockingTasksSet, operation: BlockingOperation,
         data: ?CallbackManger.Callback
-    ) !BlockingTaskDataLinkedList.Node {
-        const free_items = switch (operation) {
-            .Cancel => &self.free_cancel_items,
-            else => &self.free_items
+    ) !*BlockingTaskData {
+        var items_count = switch (operation) {
+            .Cancel => self.cancel_events_count,
+            else => self.normal_events_count,
         };
 
-        const free_items_len = free_items.len;
-        if (free_items_len == 0) {
+        if (items_count == TotalTasksItems) {
             return error.NoFreeItems;
         }
+        items_count += 1;
 
-        const node = try free_items.popleft_node();
-        node.data = .{
-            .callback_data = data,
-            .set = self,
-            .operation = operation
-        };
-        self.tasks_data.append_node(node);
+        switch (operation) {
+            .Cancel => {
+                self.cancel_events_count = items_count;
+            },
+            else => {
+                if (items_count == TotalTasksItems) {
+                    self.available_blocking_tasks_queue.unlink_node(self.node);
+                    self.busy_blocking_tasks_queue.append_node(self.node);
+                }
 
-        if (operation != .Cancel and free_items_len == 1) {
-            self.available_blocking_tasks_queue.unlink_node(self.node);
-            self.busy_blocking_tasks_queue.append_node(self.node);
+                self.normal_events_count = items_count;
+            }
         }
 
-        return node;
+        const count = self.free_count - 1;
+        const index = self.free_indices[count];
+        self.free_count = count;
+
+        const data_slot = &self.task_data_pool[index];
+        data_slot.callback_data = data;
+        data_slot.operation = operation;
+
+        return data_slot;
     }
 
-    pub fn pop(self: *BlockingTasksSet, node: BlockingTaskDataLinkedList.Node) void {
-        const tasks_data = &self.tasks_data;
-        tasks_data.unlink_node(node);
+    pub fn pop(self: *BlockingTasksSet, task_data: *BlockingTaskData) void {
+        task_data.callback_data = null;
+        self.free_indices[self.free_count] = task_data.index;
+        self.free_count += 1;
 
-        switch (node.data.operation) {
-            .Cancel => self.free_cancel_items.append_node(node),
+        switch (task_data.operation) {
+            .Cancel => {
+                self.cancel_events_count -= 1;
+            },
             else => {
-                const free_items = &self.free_items;
-                free_items.append_node(node);
-                if (free_items.len == 1) {
+                const count = self.normal_events_count;
+                if (count == TotalTasksItems) {
                     self.busy_blocking_tasks_queue.unlink_node(self.node);
                     self.available_blocking_tasks_queue.append_node(self.node);
                 }
-            },
+
+                self.normal_events_count = count - 1;
+            }
         }
     }
 
-    pub inline fn push_in_quarantine(self: *BlockingTasksSet, node: BlockingTaskDataLinkedList.Node) void {
-        const tasks_data = &self.tasks_data;
-        tasks_data.unlink_node(node);
-
-        const free_items = switch (node.data.operation) {
-            .Cancel => &self.quarantine_cancel_items,
-            else => &self.quarantine_items
+    pub inline fn push_in_quarantine(self: *BlockingTasksSet, task_data: *BlockingTaskData) void {
+        const qc_index: usize = switch (task_data.operation) {
+            .Cancel => 0,
+            else => 1
         };
 
-        free_items.append_node(node);
+        self.quarantine_indices[self.quarantine_count] = task_data.index;
+        self.quarantine_count += 1;
+        self.quarantine_events_count[qc_index] += 1;
     }
 
-    pub inline fn clear_quarantine(self: *BlockingTasksSet) void {
-        const free_items = &self.free_items;
-        const quarantine_items = &self.quarantine_items;
-        if (quarantine_items.len > 0) {
-            if (free_items.len == 0) {
-                self.busy_blocking_tasks_queue.unlink_node(self.node);
-                self.available_blocking_tasks_queue.append_node(self.node);
-            }
+    pub fn clear_quarantine(self: *BlockingTasksSet) void {
+        const quarantine_count = self.quarantine_count;
+        if (quarantine_count == 0) return;
 
-            free_items.extend(&self.quarantine_items);
+        for (self.quarantine_indices[0..quarantine_count]) |index| {
+            self.task_data_pool[index].callback_data = null;
         }
 
-        self.free_cancel_items.extend(&self.quarantine_cancel_items);
+        const free_count = self.free_count;
+        @memcpy(
+            self.free_indices[free_count..(free_count + quarantine_count)],
+            self.quarantine_indices[0..quarantine_count]
+        );
+
+        self.quarantine_count = 0;
+
+        self.free_count += quarantine_count;
+
+        self.cancel_events_count -= self.quarantine_events_count[0];
+
+        const count = self.normal_events_count;
+        self.normal_events_count = count - self.quarantine_events_count[1];
+
+        if (count == TotalTasksItems) {
+            self.busy_blocking_tasks_queue.unlink_node(self.node);
+            self.available_blocking_tasks_queue.append_node(self.node);
+        }
     }
 
     pub fn cancel_all(self: *BlockingTasksSet, loop: *Loop) !void {
-        const allocator = self.allocator;
-        var node = self.tasks_data.first;
-
-        errdefer {
-            self.tasks_data.first = node;
-            if (node) |n| {
-                n.prev = null;
-            }
-        }
-
-        while (node) |n| {
-            node = n.next;
-            defer allocator.destroy(n);
-
-            var task_data = n.data;
-            if (task_data.callback_data) |*callback| {
+        for (&self.task_data_pool, &self.free_indices) |*task, *f_index| {
+            if (task.callback_data) |*callback| {
                 CallbackManger.cancel_callback(callback, true);
                 try Loop.Scheduling.Soon.dispatch(loop, callback.*);
-            }
+                task.callback_data = null;
+            } 
+
+            f_index.* = task.index;
         }
 
-        self.tasks_data = BlockingTaskDataLinkedList.init(allocator);
+        self.cancel_events_count = 0;
+        self.normal_events_count = 0;
+        self.quarantine_count = 0;
+        self.free_count = TotalTasksItems * 2;
+        self.quarantine_events_count = @splat(0);
     }
 };
 
@@ -301,7 +309,7 @@ pub fn queue(self: *Loop, event: BlockingOperationData) !usize {
 
     );
     errdefer {
-        if (blocking_tasks_set.tasks_data.len == 0) {
+        if (blocking_tasks_set.empty()) {
             remove_tasks_set(epoll_fd, blocking_tasks_set);
         }
     }

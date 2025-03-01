@@ -64,7 +64,7 @@ pub const BlockingTasksSet = struct {
         set.eventfd = eventfd;
 
         set.quarantine_count = 0;
-        set.free_count = @intCast(TotalTasksItems * 2);
+        set.free_count = TotalTasksItems * 2;
         set.normal_events_count = 0;
         set.cancel_events_count = 0;
         set.quarantine_events_count = @splat(0);
@@ -86,6 +86,7 @@ pub const BlockingTasksSet = struct {
             set.free_indices[index] = index;
         }
 
+        node.data = set;
         return set;
     }
 
@@ -206,13 +207,17 @@ pub const BlockingTasksSet = struct {
 
         self.cancel_events_count -= self.quarantine_events_count[0];
 
-        const count = self.normal_events_count;
-        self.normal_events_count = count - self.quarantine_events_count[1];
+        const q_count = self.quarantine_events_count[1];
+        if (q_count > 0) {
+            const count = self.normal_events_count;
+            self.normal_events_count = count - q_count;
 
-        if (count == TotalTasksItems) {
-            self.busy_blocking_tasks_queue.unlink_node(self.node);
-            self.available_blocking_tasks_queue.append_node(self.node);
+            if (count == TotalTasksItems) {
+                self.busy_blocking_tasks_queue.unlink_node(self.node);
+                self.available_blocking_tasks_queue.append_node(self.node);
+            }
         }
+        self.quarantine_events_count = @splat(0);
     }
 
     pub fn cancel_all(self: *BlockingTasksSet, loop: *Loop) !void {
@@ -293,6 +298,7 @@ inline fn get_blocking_tasks_set(
 }
 
 pub inline fn remove_tasks_set(epoll_fd: std.posix.fd_t, blocking_tasks_set: *BlockingTasksSet) void {
+    std.debug.dumpCurrentStackTrace(@returnAddress());
     std.posix.epoll_ctl(epoll_fd, std.os.linux.EPOLL.CTL_DEL, blocking_tasks_set.eventfd, null) catch unreachable;
     blocking_tasks_set.deinit(true);
 }

@@ -6,7 +6,7 @@ const IO = @import("main.zig");
 pub fn perform(task_id: usize) !usize {
     const task_data: *IO.BlockingTaskData = @ptrFromInt(task_id);
 
-    const set_address = task_id - @offsetOf(IO.BlockingTasksSet, "task_data_pool") - task_data.index;
+    const set_address = task_id - @offsetOf(IO.BlockingTasksSet, "task_data_pool") - task_data.index * @sizeOf(IO.BlockingTaskData);
     const set: *IO.BlockingTasksSet = @ptrFromInt(set_address); // Cancel requests must be in same IOUring ring
 
     const data_ptr = try set.push(.Cancel, null);

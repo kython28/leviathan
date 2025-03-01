@@ -76,7 +76,6 @@ pub fn LinkedList(comptime T: type) type {
             }
 
             self.len += 1;
-
         }
 
         pub fn append(self: *@This(), data: T) !void {

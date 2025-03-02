@@ -128,7 +128,7 @@ pub fn set_protocol(self: *StreamTransportObject, protocol: PyObject) !Stream.Pr
 
 fn stream_init_configuration(
     self: *StreamTransportObject, protocol: PyObject, loop: *LoopObject,
-    fd: u32, zero_copying: bool
+    fd: std.posix.fd_t, zero_copying: bool
 ) !void {
     self.loop = @ptrCast(python_c.py_newref(loop));
     errdefer python_c.py_decref_and_set_null(&self.loop);
@@ -141,7 +141,7 @@ fn stream_init_configuration(
 
     const write_transport_data = utils.get_data_ptr2(WriteTransport, "write_transport", self);
     try write_transport_data.init(
-        loop_data, @intCast(fd), &Write.write_operation_completed, @ptrCast(self),
+        loop_data, fd, &Write.write_operation_completed, @ptrCast(self),
         loop.exception_handler.?, &Lifecyle.connection_lost_callback,
         zero_copying
     );
@@ -149,7 +149,7 @@ fn stream_init_configuration(
 
     const read_transport_data = utils.get_data_ptr2(ReadTransport, "read_transport", self);
     try read_transport_data.init(
-        loop_data, @intCast(fd), &Read.read_operation_completed, @ptrCast(self),
+        loop_data, fd, &Read.read_operation_completed, @ptrCast(self),
         loop.exception_handler.?, &Lifecyle.connection_lost_callback,
         zero_copying
     );
@@ -175,12 +175,12 @@ fn stream_init_configuration(
     self.is_writing = true;
     self.is_reading = true;
     self.closed = false;
-    self.fd = @intCast(fd);
+    self.fd = fd;
 
     try Read.queue_read_operation(self, read_transport_data, protocol_type);
 }
 
-pub fn new_stream_transport(protocol: PyObject, loop: *LoopObject, fd: u32, zero_copying: bool) !*StreamTransportObject {
+pub fn new_stream_transport(protocol: PyObject, loop: *LoopObject, fd: std.posix.fd_t, zero_copying: bool) !*StreamTransportObject {
     const instance: *StreamTransportObject = @ptrCast(
         Stream.StreamType.tp_alloc.?(Stream.StreamType, 0) orelse return error.PythonError
     );

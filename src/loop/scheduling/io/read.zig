@@ -20,7 +20,7 @@ pub fn wait_ready(set: *IO.BlockingTasksSet, data: IO.WaitData) !usize {
     sqe.flags |= std.os.linux.IOSQE_ASYNC;
     const ret = try ring.submit();
     if (ret != 1) {
-        @panic("Unexpected number of submitted sqes");
+        return error.SQENotSubmitted;
     }
     return @intFromPtr(data_ptr);
 }
@@ -59,7 +59,7 @@ pub fn perform(set: *IO.BlockingTasksSet, data: PerformData) !usize {
     sqe.flags |= std.os.linux.IOSQE_ASYNC;
     const ret = try ring.submit();
     if (ret != 1) {
-        @panic("Unexpected number of submitted sqes");
+        return error.SQENotSubmitted;
     }
     return @intFromPtr(data_ptr);
 }

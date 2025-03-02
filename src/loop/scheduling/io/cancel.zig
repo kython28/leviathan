@@ -21,7 +21,7 @@ pub fn perform(task_id: usize) !usize {
 
     const ret = try ring.submit();
     if (ret != 1) {
-        @panic("Unexpected number of submitted sqes");
+        return error.SQENotSubmitted;
     }
     return @intFromPtr(data_ptr);
 }

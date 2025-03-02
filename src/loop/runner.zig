@@ -85,94 +85,7 @@ pub inline fn call_once(
     return ret;
 }
 
-inline fn check_io_uring_result(
-    operation: Loop.Scheduling.IO.BlockingOperation, callback: *CallbackManager.Callback,
-    result: std.os.linux.E, comptime can_cancel: bool
-) void {
-    switch (operation) {
-        .WaitTimer => |op| {
-            switch (result) {
-                .TIME => {},
-                .CANCELED => {
-                    if (can_cancel) {
-                        CallbackManager.cancel_callback(callback, null);
-                    }
-                },
-                .SUCCESS => unreachable, // Just to debug. This timeout isn't linked to any task
-                else => |code| {
-                    std.log.err("Unexpected errno ({}) while checking result for operation {}", .{code, op});
-                    unreachable;
-                }
-            }
-        },
-        .Cancel => unreachable, // Cancel operation doesn't have any callback
-        .PerformWriteV, .PerformWrite => |op| {
-            switch (result) {
-                .SUCCESS => {},
-                .CANCELED, .BADF, .FBIG, .INTR, .IO, .NOSPC, .INVAL, .CONNRESET,  // Expected errors
-                .PIPE, .NOBUFS, .NXIO, .ACCES, .NETDOWN, .NETUNREACH,
-                .SPIPE => {
-                    if (can_cancel) {
-                        CallbackManager.cancel_callback(callback, null);
-                    }
-                },
-                .AGAIN => unreachable, // This should not happen. Filtered by debugging porpuse
-                else => |code| {
-                    std.log.err("Unexpected errno ({}) while checking result for operation {}", .{code, op});
-                    unreachable;
-                }
-            }
-        },
-        .PerformRead => |op| {
-            switch (result) {
-                .SUCCESS => {},
-                .CANCELED, .BADF, .BADMSG, .INTR, .INVAL, .IO, .ISDIR,
-                .OVERFLOW, .SPIPE, .CONNRESET, .NOTCONN, .TIMEDOUT,
-                .NOBUFS, .NOMEM, .NXIO => {
-                    if (can_cancel) {
-                        CallbackManager.cancel_callback(callback, null);
-                    }
-                },
-                .AGAIN => unreachable, // This should not happen. Filtered by debugging porpuse
-                else => |code| {
-                    std.log.err("Unexpected errno ({}) while checking result for operation {}", .{code, op});
-                    unreachable;
-                }
-            }
-        },
-        .SocketShutdown => |op| {
-            switch (result) {
-                .SUCCESS => {},
-                .CANCELED, .INVAL, .NOTCONN, .NOTSOCK, .BADF, .NOBUFS => {
-                    if (can_cancel) {
-                        CallbackManager.cancel_callback(callback, null);
-                    }
-                },
-                .AGAIN => unreachable, // This should not happen. Filtered by debugging porpuse
-                else => |code| {
-                    std.log.err("Unexpected errno ({}) while checking result for operation {}", .{code, op});
-                    unreachable;
-                }
-            }
-        },
-        else => |op| {
-            switch (result) {
-                .SUCCESS => {},
-                .CANCELED, .BADF, .INTR => {
-                    if (can_cancel) {
-                        CallbackManager.cancel_callback(callback, null);
-                    }
-                },
-                else => |code| {
-                    std.log.err("Unexpected errno ({}) while checking result for operation {}", .{code, op});
-                    unreachable;
-                }
-            }
-        }
-    }
-}
-
-inline fn fetch_completed_tasks(
+fn fetch_completed_tasks(
     allocator: std.mem.Allocator, blocking_tasks_set: *Loop.Scheduling.IO.BlockingTasksSet,
     blocking_ready_tasks: []std.os.linux.io_uring_cqe, ready_queue: *CallbackManager.CallbacksSetsQueue
 ) !void {
@@ -189,12 +102,12 @@ inline fn fetch_completed_tasks(
 
         switch (callback) {
             .ZigGenericIO => |*data| {
-                check_io_uring_result(blocking_task_data.operation, &callback, err, false);
+                Loop.Scheduling.IO.check_io_uring_result(blocking_task_data.operation, &callback, err, false);
                 data.io_uring_res = cqe.res;
                 data.io_uring_err = err;
             },
             else => {
-                check_io_uring_result(blocking_task_data.operation, &callback, err, true);
+                Loop.Scheduling.IO.check_io_uring_result(blocking_task_data.operation, &callback, err, true);
             }
         }
 

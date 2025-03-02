@@ -36,17 +36,32 @@ inline fn set_fut_waiter(
 
 inline fn set_result(
     task: *Task.PythonTaskObject, future_data: *Future,
-    result: PyObject
+    result: PyObject, prev_exception: ?PyObject
 ) CallbackManager.ExecuteCallbacksReturn {
     if (task.must_cancel) {
         _ = Future.Python.Cancel.future_fast_cancel(&task.fut, future_data, task.fut.cancel_msg_py_object) catch |err| {
-            return utils.handle_zig_function_error(err, CallbackManager.ExecuteCallbacksReturn.Exception);
+            utils.handle_zig_function_error(err, {});
+
+            if (prev_exception) |p_exc| {
+                const exc = python_c.PyErr_Occurred() orelse return .Exception;
+                python_c.PyException_SetCause(exc, python_c.py_newref(p_exc));
+            }
+
+            return .Exception;
         };
         return .Continue;
     }else{
-        return execute_zig_function(
-            Future.Python.Result.future_fast_set_result, .{future_data, result}
-        );
+        Future.Python.Result.future_fast_set_result(future_data, result) catch |err| {
+            utils.handle_zig_function_error(err, {});
+
+            if (prev_exception) |p_exc| {
+                const exc = python_c.PyErr_Occurred() orelse return .Exception;
+                python_c.PyException_SetCause(exc, python_c.py_newref(p_exc));
+            }
+
+            return .Exception;
+        };
+        return .Continue;
     }
 }
 
@@ -92,16 +107,6 @@ fn create_new_py_exception_and_add_event(
     try Loop.Scheduling.Soon.dispatch(loop, callback);
     python_c.py_incref(@ptrCast(task));
 } 
-
-inline fn execute_zig_function(
-    comptime function: anytype, args: anytype
-) CallbackManager.ExecuteCallbacksReturn {
-    @call(.auto, function, args) catch |err| {
-        return utils.handle_zig_function_error(err, .Exception);
-    };
-
-    return .Continue;
-}
 
 inline fn cancel_future_object(
     task: *Task.PythonTaskObject, future: anytype
@@ -159,12 +164,14 @@ inline fn handle_legacy_future_object(
     ) orelse return .Exception;
 
     if (!python_c.type_check(asyncio_future_blocking, &python_c.PyBool_Type)) {
-        return execute_zig_function(
-            create_new_py_exception_and_add_event, .{
-                loop_data, allocator, "Task {s} got bad yield: {s}\x00",
-                task, asyncio_future_blocking
-            }
-        );
+        create_new_py_exception_and_add_event(
+            loop_data, allocator, "Task {s} got bad yield: {s}\x00",
+            task, asyncio_future_blocking
+        ) catch |err| {
+            return utils.handle_zig_function_error(err, CallbackManager.ExecuteCallbacksReturn.Exception);
+        };
+
+        return .Continue;
     }
 
     if (python_c.Py_IsTrue(asyncio_future_blocking) != 0) {
@@ -194,12 +201,14 @@ inline fn handle_legacy_future_object(
         return .Continue;
     }
 
-    return execute_zig_function(
-        create_new_py_exception_and_add_event, .{
-            loop_data, allocator, "Yield was used instead of yield from in Task {s} with Future {s}\x00",
-            task, future
-        }
-    );
+    create_new_py_exception_and_add_event(
+        loop_data, allocator, "Yield was used instead of yield from in Task {s} with Future {s}\x00",
+        task, future
+    ) catch |err| {
+        return utils.handle_zig_function_error(err, CallbackManager.ExecuteCallbacksReturn.Exception);
+    };
+
+    return .Continue;
 }
 
 inline fn handle_leviathan_future_object(
@@ -213,22 +222,22 @@ inline fn handle_leviathan_future_object(
 
     const py_loop: *Loop.Python.LoopObject = @ptrCast(future.py_loop.?);
     if (loop_data != utils.get_data_ptr(Loop, py_loop)) {
-        return execute_zig_function(
-            create_new_py_exception_and_add_event, .{
-                loop_data, allocator, "Task {s} and Future {s} are not in the same loop\x00",
-                task, @as(PyObject, @ptrCast(future))
-            }
-        );
+        create_new_py_exception_and_add_event(
+            loop_data, allocator, "Task {s} and Future {s} are not in the same loop\x00",
+            task, @as(PyObject, @ptrCast(future))
+        ) catch |err| {
+            return utils.handle_zig_function_error(err, .Exception);
+        };
     }
 
     if (future.blocking > 0) {
         if (@intFromPtr(future) == @intFromPtr(task)) {
-            return execute_zig_function(
-                create_new_py_exception_and_add_event, .{
-                    loop_data, allocator, "Task {s} and Future {s} are the same object. Task cannot await on itself\x00",
-                    task, @as(PyObject, @ptrCast(future))
-                }
-            );
+            create_new_py_exception_and_add_event(
+                loop_data, allocator, "Task {s} and Future {s} are the same object. Task cannot await on itself\x00",
+                task, @as(PyObject, @ptrCast(future))
+            ) catch |err| {
+                return utils.handle_zig_function_error(err, .Exception);
+            };
         }
 
         const callback: CallbackManager.Callback = .{
@@ -238,29 +247,29 @@ inline fn handle_leviathan_future_object(
             }
         };
 
-        const ret = execute_zig_function(
-            Future.Callback.add_done_callback, .{future_data, callback}
-        );
-        if (ret == .Continue) {
-            python_c.py_incref(@ptrCast(task));
+        Future.Callback.add_done_callback(future_data, callback) catch |err| {
+            return utils.handle_zig_function_error(err, .Exception);
+        };
 
-            set_fut_waiter(task, @ptrCast(future));
-            future.blocking = 0;
+        python_c.py_incref(@ptrCast(task));
 
-            if (task.must_cancel) {
-                return cancel_future_object(task, future);
-            }
+        set_fut_waiter(task, @ptrCast(future));
+        future.blocking = 0;
+
+        if (task.must_cancel) {
+            return cancel_future_object(task, future);
         }
 
-        return ret;
+        return .Continue;
     }
 
-    return execute_zig_function(
-        create_new_py_exception_and_add_event, .{
-            loop_data, allocator, "Yield was used instead of yield from in Task {s} with Future {s}\x00",
-            task, @as(PyObject, @ptrCast(future))
-        }
-    );
+    create_new_py_exception_and_add_event(
+        loop_data, allocator, "Yield was used instead of yield from in Task {s} with Future {s}\x00",
+        task, @as(PyObject, @ptrCast(future))
+    ) catch |err| {
+        return utils.handle_zig_function_error(err, .Exception);
+    };
+    return .Continue;
 }
 
 inline fn successfully_execution(
@@ -299,21 +308,32 @@ inline fn failed_execution(
 
     if (exc_match(exception, python_c.PyExc_StopIteration) > 0) {
         const stop_iteration: *python_c.PyStopIterationObject = @ptrCast(exception);
-        return set_result(task, future_data, stop_iteration.value orelse unreachable);
+        return set_result(task, future_data, stop_iteration.value orelse unreachable, exception);
     }
 
     const cancelled_error = utils.PythonImports.cancelled_error_exc;
     if (exc_match(exception, cancelled_error) > 0) {
         _ = Future.Python.Cancel.future_fast_cancel(fut, future_data, null) catch |err| {
-            return utils.handle_zig_function_error(err, CallbackManager.ExecuteCallbacksReturn.Exception);
+            utils.handle_zig_function_error(err, {});
+
+            const exc = python_c.PyErr_Occurred() orelse return .Exception;
+            python_c.PyException_SetCause(exc, python_c.py_newref(exception));
+
+            return .Exception;
         };
         return .Continue;
     }
 
+    Future.Python.Result.future_fast_set_exception(fut, future_data, exception) catch |err| {
+        utils.handle_zig_function_error(err, {});
+
+        const exc = python_c.PyErr_Occurred() orelse return .Exception;
+        python_c.PyException_SetCause(exc, python_c.py_newref(exception));
+
+        return .Exception;
+    };
+
     if (
-        utils.execute_zig_function(
-            Future.Python.Result.future_fast_set_exception, .{fut, future_data, exception}
-        ) < 0 or
         exc_match(exception, python_c.PyExc_SystemExit) > 0 or
         exc_match(exception, python_c.PyExc_KeyboardInterrupt) > 0
     ) {
@@ -441,7 +461,7 @@ pub fn step_run_and_handle_result(
         }
 
         break :blk switch (gen_ret) {
-            python_c.PYGEN_RETURN => set_result(task, future_data, coro_ret.?),
+            python_c.PYGEN_RETURN => set_result(task, future_data, coro_ret.?, null),
             python_c.PYGEN_ERROR => failed_execution(task, py_loop),
             else => {
                 if (coro_ret) |result| {

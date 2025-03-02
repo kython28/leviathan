@@ -74,7 +74,7 @@ pub fn future_exception(self: ?*PythonFutureObject, _: ?PyObject) callconv(.C) ?
     };
 }
 
-pub inline fn future_fast_set_exception(self: *PythonFutureObject, obj: *Future, exception: PyObject) !i8 {
+pub inline fn future_fast_set_exception(self: *PythonFutureObject, obj: *Future, exception: PyObject) !void {
     self.exception = python_c.py_newref(exception);
     errdefer python_c.py_decref_and_set_null(&self.exception);
 
@@ -82,7 +82,6 @@ pub inline fn future_fast_set_exception(self: *PythonFutureObject, obj: *Future,
     errdefer python_c.py_decref_and_set_null(&self.exception_tb);
 
     try Future.Callback.call_done_callbacks(obj, .FINISHED);
-    return 0;
 }
 
 inline fn z_future_set_exception(self: *PythonFutureObject, exception: PyObject) !PyObject {

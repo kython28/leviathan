@@ -52,17 +52,34 @@ const SocketConnectionData = struct {
 
 const SocketData = struct {
     connection_data: *SocketConnectionData,
-    socket_fd: u32
+    socket_fd: std.posix.fd_t
 };
 
 const TransportCreationData = struct {
     protocol_factory: PyObject,
     future: *FutureObject,
     loop: *LoopObject,
-    socket_fd: u32,
+    socket_fd: std.posix.fd_t,
     zero_copying: bool,
     fd_created: bool = true
 };
+
+fn set_future_exception(err: anyerror, future: *FutureObject) CallbackManager.ExecuteCallbacksReturn {
+    utils.handle_zig_function_error(err, {});
+    const exc = python_c.PyErr_GetRaisedException() orelse return .Exception;
+
+    const future_data = utils.get_data_ptr(Future, future);
+    Future.Python.Result.future_fast_set_exception(future, future_data, exc) catch |err2| {
+        utils.handle_zig_function_error(err2, {});
+
+        const exc2 = python_c.PyErr_Occurred() orelse return .Exception;
+        python_c.PyException_SetCause(exc2, exc);
+
+        return .Exception;
+    };
+
+    return .Continue;
+}
 
 fn interleave_address_list(allocator: std.mem.Allocator, address_list: []std.net.Address, interleave: usize) !void {
     const tmp_list = try allocator.alloc(std.net.Address, address_list.len * 2);
@@ -103,6 +120,32 @@ fn interleave_address_list(allocator: std.mem.Allocator, address_list: []std.net
     }
 }
 
+fn create_socket_and_submit_connect_req(address: *const std.net.Address, data: *SocketData, loop: *Loop) !usize {
+    const flags = std.posix.SOCK.STREAM | std.posix.SOCK.NONBLOCK | std.posix.SOCK.CLOEXEC;
+    const socket_fd = try std.posix.socket(address.any.family, flags, std.posix.IPPROTO.TCP);
+    errdefer std.posix.close(socket_fd);
+
+    data.socket_fd = socket_fd;
+    errdefer data.socket_fd = -1;
+
+    const task_id = try Loop.Scheduling.IO.queue(
+        loop, .{
+            .SocketConnect = .{
+                .address = address,
+                .socket_fd = socket_fd,
+                .callback = .{
+                    .ZigGenericIO = .{
+                        .callback = &socket_connected_callback,
+                        .data = data
+                    }
+                }
+            }
+        }
+    );
+
+    return task_id;
+}
+
 fn z_create_socket_connection(data: *SocketCreationData) !void {
     const py_host = data.py_host orelse {
         python_c.raise_python_value_error("Host is required");
@@ -120,17 +163,27 @@ fn z_create_socket_connection(data: *SocketCreationData) !void {
 
     const host = host_ptr[0..@intCast(host_ptr_lenght)];
     const port: u16 = blk: {
-        if (data.py_port) |v| {
-            const value = python_c.PyLong_AsInt(v);
-            if (value == -1) {
-                if (python_c.PyErr_Occurred()) |_| {
-                    return error.PythonError;
-                }
+        const py_port = data.py_port orelse break :blk 0;
+        const value = python_c.PyLong_AsInt(py_port);
+        if (value == -1) {
+            if (python_c.PyErr_Occurred()) |_| {
+                return error.PythonError;
             }
-
-            break :blk @intCast(value);
         }
-        break :blk 0;
+
+        break :blk @intCast(value);
+    };
+
+    const interleave: usize = blk: {
+        const py_interleave = data.py_interleave orelse break :blk 0;
+        const value = python_c.PyLong_AsUnsignedLongLong(py_interleave);
+        if (@as(c_longlong, @bitCast(value)) == -1) {
+            if (python_c.PyErr_Occurred()) |_| {
+                return error.PythonError;
+            }
+        }
+
+        break :blk @intCast(value);
     };
 
     const loop = data.loop;
@@ -143,9 +196,30 @@ fn z_create_socket_connection(data: *SocketCreationData) !void {
     const connection_data = try allocator.create(SocketConnectionData);
     errdefer allocator.destroy(connection_data);
 
-    // if (data.py_happy_eyeballs_delay) {
+    connection_data.creation_data = data;
+    connection_data.address_list = address_list;
+    connection_data.owned = false;
 
-    // }
+    if (interleave > 0) {
+        try interleave_address_list(allocator, address_list.addrs, interleave);
+    }
+
+    if (data.py_happy_eyeballs_delay) |py_delay| {
+        if (interleave == 0) {
+            try interleave_address_list(allocator, address_list.addrs, 1);
+        }
+
+        const delay = python_c.PyFloat_AsDouble(py_delay);
+        const eps = comptime std.math.floatEps(f64);
+        if (@abs(delay + 1.0) < eps) {
+            if (python_c.PyErr_Occurred()) |_| {
+                return error.PythonError;
+            }
+        }
+    }else{
+
+    }
+
     // connection_data.* = .{
     //     .address_list = address_list,
     //     .creation_data = data,
@@ -159,14 +233,24 @@ fn z_create_socket_connection(data: *SocketCreationData) !void {
 fn create_socket_connection(
     data: ?*anyopaque, status: CallbackManager.ExecuteCallbacksReturn
 ) CallbackManager.ExecuteCallbacksReturn {
-    const socket_creation_data_ptr: *SocketCreationData = @alignCast(@ptrCast(data.?));
-    defer python_c.deinitialize_object_fields(socket_creation_data_ptr, &.{});
+    const socket_creation_data: *SocketCreationData = @alignCast(@ptrCast(data.?));
+    defer python_c.deinitialize_object_fields(socket_creation_data, &.{});
 
     if (status != .Continue) return status;
 
-    z_create_socket_connection(socket_creation_data_ptr) catch |err| {
-        return utils.handle_zig_function_error(err, CallbackManager.ExecuteCallbacksReturn.Exception);
+    z_create_socket_connection(socket_creation_data) catch |err| {
+        return set_future_exception(err, socket_creation_data.future);
     };
+
+    return .Continue;
+}
+
+fn socket_connected_callback(
+    data: ?*anyopaque, io_uring_res: i32, io_uring_err: std.os.linux.E
+) CallbackManager.ExecuteCallbacksReturn {
+    _ = data;
+    _ = io_uring_res;
+    _ = io_uring_err;
 
     return .Continue;
 }
@@ -241,7 +325,7 @@ fn create_transport_and_set_future_result(
     if (status != .Continue) return status;
 
     z_create_transport_and_set_future_result(transport_creation_data) catch |err| {
-        return utils.handle_zig_function_error(err, CallbackManager.ExecuteCallbacksReturn.Exception);
+        return set_future_exception(err, transport_creation_data.future);
     };
 
     return .Continue;

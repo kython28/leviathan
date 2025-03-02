@@ -48,7 +48,7 @@ pub fn wait(set: *IO.BlockingTasksSet, data: WaitData) !usize {
 
     const ret = try ring.submit();
     if (ret != 1) {
-        @panic("Unexpected number of submitted sqes");
+        return error.SQENotSubmitted;
     }
 
     return @intFromPtr(data_ptr);

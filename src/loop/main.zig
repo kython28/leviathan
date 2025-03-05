@@ -182,6 +182,6 @@ pub const Runner = @import("runner.zig");
 pub const Scheduling = @import("scheduling/main.zig");
 pub const UnixSignals = @import("unix_signals.zig");
 pub const Python = @import("python/main.zig");
-pub const DNS = @import("dns/main.zig");
+// pub const DNS = @import("dns/main.zig");
 
 const Loop = @This();

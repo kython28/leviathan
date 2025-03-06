@@ -5,8 +5,8 @@
 
     .dependencies = .{
         .jdz_allocator = .{
-            .url = "https://github.com/kython28/jdz_allocator/archive/refs/tags/0.3.1.zip",
-            .hash = "12202c3d16421819738104245f9d4773eb52bf2eb8ae6af82dae06ecfabd7e5944db"
+            .url = "https://github.com/kython28/jdz_allocator/archive/refs/tags/0.3.2.zip",
+            .hash = "jdz_allocator-0.3.2-j0rNJZ6QAgD2CDWGwHKEy1kmyhbWrmIznQAgXLjtigS8"
         },
     },
     .paths = .{

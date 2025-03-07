@@ -7,7 +7,7 @@ const Future = @import("../main.zig");
 const Loop = @import("../../loop/main.zig");
 const PythonFutureObject = Future.Python.FutureObject;
 
-const CallbackManager = @import("../../callback_manager.zig");
+const CallbackManager = @import("callback_manager");
 
 const utils = @import("utils");
 

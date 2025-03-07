@@ -94,14 +94,22 @@ pub fn build(b: *std.Build) void {
     utils_module.addImport("python_c", python_c_module);
     utils_module.addImport("jdz_allocator", jdz_allocator_module);
 
+    const callback_manager_module = b.addModule("callback_manager", .{
+        .root_source_file = b.path("src/callback_manager.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    callback_manager_module.addImport("python_c", python_c_module);
+    callback_manager_module.addImport("utils", utils_module);
+
     const leviathan_module = b.addModule("leviathan", .{
         .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize
     });
     leviathan_module.addImport("python_c", python_c_module);
-    leviathan_module.addImport("jdz_allocator", jdz_allocator_module);
     leviathan_module.addImport("utils", utils_module);
+    leviathan_module.addImport("callback_manager", callback_manager_module);
 
     const modules_name = .{ "leviathan", "python_c", "jdz_allocator", "utils" };
     const modules = .{ leviathan_module, python_c_module, jdz_allocator_module, utils_module };

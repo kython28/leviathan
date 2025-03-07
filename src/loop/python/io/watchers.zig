@@ -5,7 +5,7 @@ const PyObject = *python_c.PyObject;
 
 const utils = @import("utils");
 
-const CallbackManager = @import("../../../callback_manager.zig");
+const CallbackManager = @import("callback_manager");
 const Handle = @import("../../../handle.zig");
 const Loop = @import("../../main.zig");
 
@@ -13,58 +13,13 @@ const LoopObject = Loop.Python.LoopObject;
 
 const Scheduling = @import("../scheduling.zig");
 
-
-fn loop_watchers_callback(
-    data: ?*anyopaque, _: i32, io_uring_err: std.os.linux.E
-) CallbackManager.ExecuteCallbacksReturn {
-    const watcher: *Loop.FDWatcher = @alignCast(@ptrCast(data.?));
+fn loop_watchers_cleanup_callback(ptr: ?*anyopaque) void {
+    const watcher: *Loop.FDWatcher = @alignCast(@ptrCast(ptr.?));
 
     const loop_data = watcher.loop_data;
     const allocator = loop_data.allocator;
-    const new_status = CallbackManager.run_callback(
-        allocator, watcher.callback, if (io_uring_err == .SUCCESS) .Continue else .Stop
-    );
 
     const fd = watcher.fd;
-    if (io_uring_err == .SUCCESS and new_status == .Continue and fd >= 0) {
-        const callback: CallbackManager.Callback = .{
-            .ZigGenericIO = .{
-                .callback = &loop_watchers_callback,
-                .data = watcher
-            }
-        };
-
-        const blocking_task_id = Loop.Scheduling.IO.queue(
-            loop_data, switch (watcher.event_type) {
-                std.c.POLL.IN => Loop.Scheduling.IO.BlockingOperationData{
-                    .WaitReadable = .{
-                        .fd = fd,
-                        .callback = callback
-                    },
-                },
-                std.c.POLL.OUT => Loop.Scheduling.IO.BlockingOperationData{
-                    .WaitWritable = .{
-                        .fd = fd,
-                        .callback = callback
-                    },
-                },
-                else => unreachable
-            }
-        ) catch |err| {
-            _ = switch (watcher.event_type) {
-                std.c.POLL.IN => loop_data.reader_watchers.delete(fd),
-                std.c.POLL.OUT => loop_data.writer_watchers.delete(fd),
-                else => unreachable
-            };
-            allocator.destroy(watcher);
-
-            return utils.handle_zig_function_error(err, CallbackManager.ExecuteCallbacksReturn.Exception);
-        };
-
-        watcher.blocking_task_id = blocking_task_id;
-        return .Continue;
-    }
-
     if (fd >= 0) {
         _ = switch (watcher.event_type) {
             std.c.POLL.IN => loop_data.reader_watchers.delete(fd),
@@ -72,8 +27,65 @@ fn loop_watchers_callback(
             else => unreachable
         };
     }
+
+    python_c.py_decref(@ptrCast(watcher.handle));
     allocator.destroy(watcher);
-    return new_status;
+}
+
+fn loop_watchers_callback(data: *const CallbackManager.CallbackData) !void {
+    const watcher: *Loop.FDWatcher = @alignCast(@ptrCast(data.user_data.?));
+
+    const fd = watcher.fd;
+    if (!data.cancelled and data.io_uring_err == .SUCCESS and fd >= 0) {
+        const loop_data = watcher.loop_data;
+        const handle = watcher.handle;
+        try Loop.Scheduling.Soon.dispatch(loop_data, CallbackManager.Callback{
+            .func = &Handle.callback_for_python_generic_callbacks,
+            .cleanup = &Handle.release_python_generic_callback,
+            .data = .{
+                .user_data = handle,
+                .exception_context = .{
+                    .module_ptr = @ptrCast(handle),
+                    .exc_message = Handle.ExceptionMessage,
+                    .module_name = Handle.ModuleName,
+                    .callback_ptr = handle.py_callback.?
+                }
+            }
+        });
+        python_c.py_incref(@ptrCast(handle));
+
+        const watcher_callback: CallbackManager.Callback = .{
+            .func = &loop_watchers_callback,
+            .cleanup = null,
+            .data = .{
+                .user_data = watcher,
+                .exception_context = null
+            }
+        };
+
+        const blocking_task_id = try Loop.Scheduling.IO.queue(
+            loop_data, switch (watcher.event_type) {
+                std.c.POLL.IN => Loop.Scheduling.IO.BlockingOperationData{
+                    .WaitReadable = .{
+                        .fd = fd,
+                        .callback = watcher_callback
+                    },
+                },
+                std.c.POLL.OUT => Loop.Scheduling.IO.BlockingOperationData{
+                    .WaitWritable = .{
+                        .fd = fd,
+                        .callback = watcher_callback
+                    },
+                },
+                else => unreachable
+            }
+        );
+
+        watcher.blocking_task_id = blocking_task_id;
+        return;
+    }
+
+    @call(.always_inline, loop_watchers_cleanup_callback, .{watcher});
 }
 
 inline fn z_loop_add_watcher(
@@ -114,9 +126,6 @@ inline fn z_loop_add_watcher(
         }
     }
 
-    const py_handle: *Handle.PythonHandleObject = try Handle.fast_new_handle(context, loop_data);
-    errdefer python_c.py_decref(@ptrCast(py_handle));
-
     const py_callback = python_c.py_newref(args[1].?);
     errdefer python_c.py_decref(py_callback);
 
@@ -124,6 +133,11 @@ inline fn z_loop_add_watcher(
         python_c.raise_python_runtime_error("Invalid callback\x00");
         return error.PythonError;
     }
+
+    const py_handle: *Handle.PythonHandleObject = try Handle.fast_new_handle(
+        context, loop_data, py_callback, callback_info, false
+    );
+    errdefer python_c.py_decref(@ptrCast(py_handle));
 
     const mutex = &loop_data.mutex;
     mutex.lock();
@@ -134,17 +148,7 @@ inline fn z_loop_add_watcher(
     }
 
     const watcher_data: Loop.FDWatcher = .{
-        .callback = .{
-            .PythonGeneric = .{
-                .args = callback_info,
-                .exception_handler = self.exception_handler.?,
-                .py_callback = py_callback,
-                .py_context = context,
-                .py_handle = py_handle,
-                .cancelled = &py_handle.cancelled,
-                .can_release = false
-            }
-        },
+        .handle = py_handle,
         .loop_data = loop_data,
         .event_type = switch (operation) {
             .WaitReadable => std.c.POLL.IN,
@@ -162,14 +166,11 @@ inline fn z_loop_add_watcher(
 
     const existing_watcher_ptr: ?*Loop.FDWatcher = watchers.get_value(fd, null);
     if (existing_watcher_ptr) |existing_watcher_data| {
-        var previous_callback = existing_watcher_data.callback;
-        CallbackManager.cancel_callback(&previous_callback, true);
+        const prev_handle = existing_watcher_data.handle;
+        python_c.py_decref(@ptrCast(prev_handle));
+        Handle.release_python_generic_callback(prev_handle);
 
-        try Loop.Scheduling.Soon._dispatch(
-            loop_data, previous_callback
-        );
-
-        existing_watcher_data.callback = watcher_data.callback;
+        existing_watcher_data.handle = watcher_data.handle;
         return python_c.get_py_none();
     }
 
@@ -189,10 +190,16 @@ inline fn z_loop_add_watcher(
     }
 
     const watcher_callback: CallbackManager.Callback = .{
-        .ZigGenericIO = .{
-            .callback = &loop_watchers_callback,
-            .data = watcher_data_ptr
+        .func = &loop_watchers_callback,
+        .cleanup = null,
+        .data = .{
+            .user_data = watcher_data_ptr,
+            .exception_context = null
         }
+        // .ZigGenericIO = .{
+        //     .callback = &loop_watchers_callback,
+        //     .data = watcher_data_ptr
+        // }
     };
 
     const blocking_task_id = try Loop.Scheduling.IO.queue(
@@ -274,9 +281,7 @@ inline fn z_loop_remove_watcher(
             @panic("Unexpected blocking task id");
         }
 
-        CallbackManager.cancel_callback(&existing_watcher_data.callback, true);
         existing_watcher_data.fd = -1;
-
         _ = try Loop.Scheduling.IO.queue(
             loop_data, Loop.Scheduling.IO.BlockingOperationData{
                 .Cancel = blocking_task_id

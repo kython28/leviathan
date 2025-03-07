@@ -1,152 +1,123 @@
 const std = @import("std");
-const builtin = @import("builtin");
 
 const python_c = @import("python_c");
 const PyObject = *python_c.PyObject;
 
-const CallbackManager = @import("callback_manager.zig");
+const CallbackManager = @import("callback_manager");
 const Loop = @import("loop/main.zig");
 const utils = @import("utils");
 
 pub const PythonHandleObject = extern struct {
     ob_base: python_c.PyObject,
+
     contextvars: ?PyObject,
     loop_data: ?*Loop,
+
+    py_callback: ?PyObject,
+    py_callback_args: ?[*]PyObject,
+    py_callback_len: usize,
+
     blocking_task_id: usize,
     cancelled: bool,
-    finished: bool
+    finished: bool,
+    thread_safe: bool,
 };
 
-pub const GenericCallbackData = struct {
-    args: ?[]PyObject,
-    exception_handler: PyObject,
-    py_callback: PyObject,
-    py_context: PyObject,
-    py_handle: *PythonHandleObject,
-    cancelled: *bool,
-    can_release: bool = true
-};
+pub const ExceptionMessage: [:0]const u8 = "An error ocurred while executing python callback";
+pub const ModuleName: [:0]const u8 = "handle";
 
-pub inline fn release_python_generic_callback(allocator: std.mem.Allocator, data: GenericCallbackData) void {
-    if (!data.can_release) return;
+pub fn release_python_generic_callback(ptr: ?*anyopaque) void {
+    const handle: *PythonHandleObject = @alignCast(@ptrCast(ptr.?));
 
-    if (data.args) |args| {
-        for (args) |arg| python_c.py_decref(arg);
-        allocator.free(args);
+    python_c.py_decref(@ptrCast(handle));
+}
+
+pub fn callback_for_python_generic_callbacks(data: *const CallbackManager.CallbackData) !void {
+    const handle: *PythonHandleObject = @alignCast(@ptrCast(data.user_data.?));
+
+    const thread_safe = handle.thread_safe;
+    if (thread_safe) {
+        @atomicStore(bool, &handle.finished, true, .release);
+    }else{
+        handle.finished = true;
     }
 
-    python_c.py_decref(data.py_callback); 
+    var cancelled: bool = data.cancelled;
+    if (!cancelled) {
+        if (thread_safe) {
+            cancelled = @atomicLoad(bool, &handle.cancelled, .acquire);
+        }else{
+            cancelled = handle.cancelled;
+        }
+    }
 
-    const handle = data.py_handle;
-    if (builtin.single_threaded) {
-        handle.finished = true;
+    if (cancelled) {
+        python_c.py_decref(@ptrCast(handle));
+        return;
+    }
+
+    const py_context = handle.contextvars.?;
+    if (python_c.PyContext_Enter(py_context) < 0) {
+        return error.PythonError;
+    }
+
+    var result: PyObject = undefined;
+    if (handle.py_callback_args) |args| {
+        result = python_c.PyObject_Vectorcall(
+            handle.py_callback.?, args, handle.py_callback_len, null
+        ) orelse return error.PythonError;
     }else{
-        @atomicStore(bool, &handle.finished, true, .monotonic);
+        result = python_c.PyObject_CallNoArgs(handle.py_callback.?)
+            orelse return error.PythonError;
+    }
+    python_c.py_decref(result);
+
+    if (python_c.PyContext_Exit(py_context) < 0) {
+        return error.PythonError;
     }
 
     python_c.py_decref(@ptrCast(handle));
 }
 
-pub fn callback_for_python_generic_callbacks(
-    allocator: std.mem.Allocator, data: GenericCallbackData
-) CallbackManager.ExecuteCallbacksReturn {
-    defer release_python_generic_callback(allocator, data);
-
-    if (builtin.single_threaded) {
-        if (data.cancelled.*) {
-            return .Continue;
-        }
-    }else{
-        if (@atomicLoad(bool, data.cancelled, .acquire)) {
-            return .Continue;
-        }
-    }
-
-    const py_context = data.py_context;
-    if (python_c.PyContext_Enter(py_context) < 0) {
-        return .Exception;
-    }
-
-    const result: ?PyObject = blk: {
-        if (data.args) |args| {
-            break :blk python_c.PyObject_Vectorcall(
-                data.py_callback, args.ptr, @intCast(args.len), null
-            );
-        }else{
-            break :blk python_c.PyObject_CallNoArgs(data.py_callback);
-        }
-    };
-
-    if (python_c.PyContext_Exit(py_context) < 0) {
-        python_c.py_xdecref(result);
-        return .Exception;
-    }
-
-    if (result) |value| {
-        python_c.py_decref(value);
-    }else{
-        if (
-            python_c.PyErr_ExceptionMatches(python_c.PyExc_SystemExit) > 0 or
-            python_c.PyErr_ExceptionMatches(python_c.PyExc_KeyboardInterrupt) > 0
-        ) {
-            return .Exception;
-        }
-
-        const exception: PyObject = python_c.PyErr_GetRaisedException()
-            orelse return .Exception;
-        defer python_c.py_decref(exception);
-
-        const exc_message: PyObject = python_c.PyUnicode_FromString("Exception ocurred executing callback\x00")
-            orelse return .Exception;
-        defer python_c.py_decref(exc_message);
-
-        var args: [4]PyObject = undefined;
-        args[0] = exception;
-        args[1] = exc_message;
-        args[2] = data.py_callback;
-        args[3] = @ptrCast(data.py_handle);
-
-        const message_kname: PyObject = python_c.PyUnicode_FromString("message\x00")
-            orelse return .Exception;
-        defer python_c.py_decref(message_kname);
-
-        const callback_kname: PyObject = python_c.PyUnicode_FromString("callback\x00")
-            orelse return .Exception;
-        defer python_c.py_decref(callback_kname);
-
-        const handle_kname: PyObject = python_c.PyUnicode_FromString("handle\x00")
-            orelse return .Exception;
-        defer python_c.py_decref(handle_kname);
-
-        const knames: PyObject = python_c.PyTuple_Pack(3, message_kname, callback_kname, handle_kname)
-            orelse return .Exception;
-        defer python_c.py_decref(knames);
-
-        const exc_handler_ret: PyObject = python_c.PyObject_Vectorcall(data.exception_handler, &args, 1, knames)
-            orelse return .Exception;
-        python_c.py_decref(exc_handler_ret);
-    }
-
-    return .Continue;
-}
-
-pub inline fn fast_new_handle(contextvars: PyObject, loop_data: *Loop) !*PythonHandleObject {
+pub inline fn fast_new_handle(
+    contextvars: PyObject, loop_data: *Loop, py_callback: PyObject, args: ?[]PyObject,
+    thread_safe: bool
+) !*PythonHandleObject {
     const instance: *PythonHandleObject = @ptrCast(
         PythonHandleType.tp_alloc.?(&PythonHandleType, 0) orelse return error.PythonError
     );
 
     instance.contextvars = contextvars;
     instance.loop_data = loop_data;
+    instance.py_callback = py_callback;
+
+    if (args) |v| {
+        instance.py_callback_args = v.ptr;
+        instance.py_callback_len = v.len;
+    }
+
     instance.blocking_task_id = 0;
     instance.cancelled = false;
     instance.finished = false;
+    instance.thread_safe = thread_safe;
 
     return instance;
 }
 
 fn handle_dealloc(self: ?*PythonHandleObject) callconv(.C) void {
     const instance = self.?;
-    python_c.py_xdecref(instance.contextvars);
+    python_c.py_decref_and_set_null(&instance.contextvars);
+    python_c.py_decref_and_set_null(&instance.py_callback);
+
+    const args_len = instance.py_callback_len;
+    if (instance.py_callback_args) |args_ptr| {
+        const allocator = instance.loop_data.?.allocator;
+        const args = args_ptr[0..args_len];
+
+        for (args) |arg| python_c.py_decref(arg);
+
+        allocator.free(args);
+    }
 
     const @"type": *python_c.PyTypeObject = python_c.get_type(@ptrCast(instance));
     @"type".tp_free.?(@ptrCast(instance));
@@ -175,6 +146,8 @@ inline fn z_handle_init(
     }
 
     self.contextvars = python_c.py_newref(py_context.?);
+    self.cancelled = false;
+    self.thread_safe = false;
 
     return 0;
 }
@@ -188,17 +161,18 @@ fn handle_get_context(self: ?*PythonHandleObject, _: ?PyObject) callconv(.C) ?Py
 }
 
 pub inline fn fast_handle_cancel(self: *PythonHandleObject) !void {
-    const finished = switch (builtin.single_threaded) {
-        true => self.finished,
-        false => @atomicLoad(bool, &self.finished, .acquire)
+    const thread_safe = self.thread_safe;
+    const finished = switch (thread_safe) {
+        false => self.finished,
+        true => @atomicLoad(bool, &self.finished, .acquire)
     };
     if (finished) {
         return;
     }
 
-    const cancelled = switch (builtin.single_threaded) {
-        true => self.cancelled,
-        false => @atomicLoad(bool, &self.cancelled, .acquire)
+    const cancelled = switch (thread_safe) {
+        false => self.cancelled,
+        true => @atomicLoad(bool, &self.cancelled, .acquire)
     };
 
     if (!cancelled) {
@@ -215,10 +189,10 @@ pub inline fn fast_handle_cancel(self: *PythonHandleObject) !void {
             });
         }
 
-        if (builtin.single_threaded) {
-            self.cancelled = true;
-        }else{
+        if (thread_safe) {
             @atomicStore(bool, &self.cancelled, true, .release);
+        }else{
+            self.cancelled = true;
         }
     }
 }
@@ -232,9 +206,10 @@ fn handle_cancel(self: ?*PythonHandleObject, _: ?PyObject) callconv(.C) ?PyObjec
 }
 
 fn handle_cancelled(self: ?*PythonHandleObject, _: ?PyObject) callconv(.C) ?PyObject {
-    const cancelled = switch (builtin.single_threaded) {
-        true => self.?.cancelled,
-        false => @atomicLoad(bool, &self.?.cancelled, .acquire)
+    const instance = self.?;
+    const cancelled = switch (instance.thread_safe) {
+        false => instance.cancelled,
+        true => @atomicLoad(bool, &instance.cancelled, .acquire)
     };
 
     return python_c.PyBool_FromLong(@intCast(@intFromBool(cancelled)));

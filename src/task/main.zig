@@ -107,6 +107,9 @@ const PythonTaskMembers: []const python_c.PyMemberDef = &[_]python_c.PyMemberDef
     }
 };
 
+pub const ExceptionMessage: [:0]const u8 = "Error while executing coroutine";
+pub const ModuleName: [:0]const u8 = "task";
+
 pub const PythonTaskObject = extern struct {
     fut: Future.Python.FutureObject,
 
@@ -117,6 +120,8 @@ pub const PythonTaskObject = extern struct {
 
     wake_up_task_callback: ?PyObject,
     fut_waiter: ?PyObject,
+
+    exception: ?PyObject,
 
     weakref_list: ?PyObject,
 

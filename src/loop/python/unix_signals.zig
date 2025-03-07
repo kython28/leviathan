@@ -3,7 +3,7 @@ const PyObject = *python_c.PyObject;
 
 const utils = @import("utils");
 
-const CallbackManager = @import("../../callback_manager.zig");
+const CallbackManager = @import("callback_manager");
 const Handle = @import("../../handle.zig");
 const Loop = @import("../main.zig");
 const LoopObject = Loop.Python.LoopObject;

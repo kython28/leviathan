@@ -3,7 +3,7 @@ const PyObject = *python_c.PyObject;
 
 const utils = @import("utils");
 
-const CallbackManager = @import("../callback_manager.zig");
+const CallbackManager = @import("callback_manager");
 const Future = @import("../future/main.zig");
 const Loop = @import("../loop/main.zig");
 const Task = @import("main.zig");
@@ -45,9 +45,17 @@ inline fn task_schedule_coro(self: *PythonTaskObject, loop: *LoopObject) !void {
 
     const loop_data = utils.get_data_ptr(Loop, loop);
 
-    const callback: CallbackManager.Callback = .{
-        .PythonTask = .{
-            .task = self
+    const callback = CallbackManager.Callback{
+        .func = &callbacks.execute_task_send,
+        .cleanup = &callbacks.cleanup_task,
+        .data = .{
+            .user_data = self,
+            .exception_context = .{
+                .callback_ptr = self.coro.?,
+                .exc_message = Task.ExceptionMessage,
+                .module_name = Task.ModuleName,
+                .module_ptr = @ptrCast(self)
+            }
         }
     };
 

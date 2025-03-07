@@ -8,7 +8,7 @@ const LoopObject = Loop.Python.LoopObject;
 
 const Hooks = @import("hooks.zig");
 
-const CallbackManager = @import("../../callback_manager.zig");
+const CallbackManager = @import("callback_manager");
 
 const std = @import("std");
 

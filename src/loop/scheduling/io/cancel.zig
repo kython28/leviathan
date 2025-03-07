@@ -1,6 +1,6 @@
 const std = @import("std");
 
-const CallbackManager = @import("../../../callback_manager.zig");
+const CallbackManager = @import("callback_manager");
 const IO = @import("main.zig");
 
 pub fn perform(task_id: usize) !usize {

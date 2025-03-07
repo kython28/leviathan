@@ -2,7 +2,6 @@ const std = @import("std");
 const builtin = @import("builtin");
 
 const Loop = @import("../loop/main.zig");
-const CallbackManager = @import("../callback_manager.zig");
 
 const lock = @import("../utils/lock.zig");
 
@@ -15,7 +14,7 @@ status: FutureStatus = .PENDING,
 
 callbacks_arena: std.heap.ArenaAllocator,
 callbacks_arena_allocator: std.mem.Allocator = undefined,
-callbacks_queue: CallbackManager.CallbacksSetsQueue = undefined,
+callbacks_queue: Callback.CallbacksSetData = undefined,
 loop: *Loop,
 
 released: bool = false,
@@ -28,17 +27,11 @@ pub fn init(self: *Future, loop: *Loop) void {
     };
 
     self.callbacks_arena_allocator = self.callbacks_arena.allocator();
-    self.callbacks_queue = .{
-        .queue = CallbackManager.CallbacksSetLinkedList.init(self.callbacks_arena_allocator),
-        .last_set = null
-    };
+    self.callbacks_queue = Callback.CallbacksSetData.init(self.callbacks_arena_allocator);
 }
 
 pub inline fn release(self: *Future) void {
-    if (self.status == .PENDING) {
-        _ = CallbackManager.execute_callbacks(self.loop.allocator, &self.callbacks_queue, .Stop, false);
-    }
-
+    Callback.release_callbacks_queue(&self.callbacks_queue);
     self.callbacks_arena.deinit();
     self.released = true;
 }

@@ -1,4 +1,4 @@
-pub const CallbackManager = @import("callback_manager.zig");
+pub const CallbackManager = @import("callback_manager");
 
 pub const Future = @import("future/main.zig");
 pub const Task = @import("task/main.zig");

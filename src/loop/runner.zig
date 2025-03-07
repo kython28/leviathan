@@ -1,5 +1,5 @@
 const Loop = @import("main.zig");
-const CallbackManager = @import("../callback_manager.zig");
+const CallbackManager = @import("callback_manager");
 
 const BlockingTasksSetLinkedList = Loop.Scheduling.IO.BlockingTasksSetLinkedList;
 const CallbacksSetLinkedList = CallbackManager.CallbacksSetLinkedList;
@@ -70,19 +70,88 @@ pub fn prune_callbacks_sets(
     }
 }
 
+fn exception_handler(
+    err: anyerror, py_exception_handler: ?*anyopaque,
+    context: ?CallbackManager.CallbackExceptionContext
+) !void {
+    utils.handle_zig_function_error(err, {});
+    const exception = python_c.PyErr_GetRaisedException() orelse return error.PythonError;
+
+    if (
+        python_c.PyErr_GivenExceptionMatches(exception, python_c.PyExc_SystemExit) > 0 or
+        python_c.PyErr_GivenExceptionMatches(exception, python_c.PyExc_KeyboardInterrupt) > 0
+    ) {
+        python_c.PyErr_SetRaisedException(exception);
+        return;
+    }
+
+    const message_kname: PyObject = python_c.PyUnicode_FromString("message\x00")
+        orelse return error.PythonError;
+    defer python_c.py_decref(message_kname);
+
+    const callback_kname: PyObject = python_c.PyUnicode_FromString("callback\x00")
+        orelse return error.PythonError;
+    defer python_c.py_decref(callback_kname);
+
+    var args: [4]PyObject = undefined;
+    args[0] = exception;
+
+    var knames_len: python_c.Py_ssize_t = 1;
+    var module_kname: ?PyObject = null;
+    var exc_message: PyObject = undefined;
+    defer {
+        python_c.py_xdecref(module_kname);
+        python_c.py_decref(exc_message);
+    }
+
+    if (context) |ctx| {
+        module_kname = python_c.PyUnicode_FromString(ctx.module_name)
+            orelse return error.PythonError;
+
+        exc_message = python_c.PyUnicode_FromString(ctx.exc_message)
+            orelse return error.PythonError;
+
+        args[2] = ctx.module_ptr;
+        if (ctx.callback_ptr) |c_ptr| {
+            args[3] = c_ptr;
+            knames_len = 3;
+        }else{
+            knames_len = 2;
+        }
+    }else{
+        exc_message = python_c.PyUnicode_FromString("Exception ocurred executing an event\x00")
+            orelse return error.PythonError;
+    }
+
+    args[1] = exc_message;
+
+    const knames: PyObject = python_c.PyTuple_Pack(
+        knames_len, message_kname, module_kname, callback_kname
+    ) orelse return error.PythonError;
+    defer python_c.py_decref(knames);
+
+    const exc_handler_ret: PyObject = python_c.PyObject_Vectorcall(
+        @alignCast(@ptrCast(py_exception_handler.?)), &args, 1, knames
+    ) orelse return error.PythonError;
+    python_c.py_decref(exc_handler_ret);
+}
+
 pub inline fn call_once(
     allocator: std.mem.Allocator, ready_queue: *CallbackManager.CallbacksSetsQueue,
     max_number_of_callbacks_set_ptr: *usize, ready_tasks_queue_min_bytes_capacity: usize,
-) CallbackManager.ExecuteCallbacksReturn {
-    const ret = CallbackManager.execute_callbacks(allocator, ready_queue, .Continue, true);
-    if (ret == .None) {
+    py_exception_handler: PyObject
+) usize {
+    const chunks_executed = CallbackManager.execute_callbacks(
+        ready_queue, &exception_handler, py_exception_handler
+    );
+    if (chunks_executed == 0) {
         prune_callbacks_sets(
             allocator, ready_queue, max_number_of_callbacks_set_ptr,
             ready_tasks_queue_min_bytes_capacity
         );
     }
 
-    return ret;
+    return chunks_executed;
 }
 
 fn fetch_completed_tasks(
@@ -98,18 +167,11 @@ fn fetch_completed_tasks(
         const blocking_task_data: *Loop.Scheduling.IO.BlockingTaskData = @ptrFromInt(user_data);
         defer blocking_tasks_set.push_in_quarantine(blocking_task_data);
 
-        var callback = blocking_task_data.callback_data orelse continue;
+        Loop.Scheduling.IO.check_io_uring_result(blocking_task_data.operation, err);
 
-        switch (callback) {
-            .ZigGenericIO => |*data| {
-                Loop.Scheduling.IO.check_io_uring_result(blocking_task_data.operation, &callback, err, false);
-                data.io_uring_res = cqe.res;
-                data.io_uring_err = err;
-            },
-            else => {
-                Loop.Scheduling.IO.check_io_uring_result(blocking_task_data.operation, &callback, err, true);
-            }
-        }
+        var callback = blocking_task_data.callback_data orelse continue;
+        callback.data.io_uring_err = err;
+        callback.data.io_uring_res = cqe.res;
 
         _ = try CallbackManager.append_new_callback(
             allocator, ready_queue, callback, Loop.MaxCallbacks
@@ -162,7 +224,7 @@ fn poll_blocking_events(
     }
 }
 
-pub fn start(self: *Loop) !void {
+pub fn start(self: *Loop, py_exception_handler: PyObject) !void {
     const mutex = &self.mutex;
     mutex.lock();
     defer mutex.unlock();
@@ -225,7 +287,7 @@ pub fn start(self: *Loop) !void {
         wait_for_blocking_events = switch (
             call_once(
                 allocator, ready_tasks_queue, &max_callbacks_set_per_queue[old_index],
-                ready_tasks_queue_min_bytes_capacity,
+                ready_tasks_queue_min_bytes_capacity, py_exception_handler
             )
         ) {
             .Continue => false,

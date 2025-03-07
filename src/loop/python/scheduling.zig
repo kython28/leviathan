@@ -3,7 +3,7 @@ const PyObject = *python_c.PyObject;
 
 const utils = @import("utils");
 
-const CallbackManager = @import("../../callback_manager.zig");
+const CallbackManager = @import("callback_manager");
 const Loop = @import("../main.zig");
 const Handle = @import("../../handle.zig");
 const TimerHandle = @import("../../timer_handle.zig");
@@ -35,7 +35,7 @@ pub inline fn get_callback_info(allocator: std.mem.Allocator, args: []?PyObject)
 
 inline fn z_loop_call_soon(
     self: *LoopObject, args: []?PyObject,
-    knames: ?PyObject
+    knames: ?PyObject, comptime thread_safe: bool
 ) !*Handle.PythonHandleObject {
     if (args.len == 0) {
         python_c.raise_python_value_error("Invalid number of arguments\x00");
@@ -76,9 +76,6 @@ inline fn z_loop_call_soon(
         }
     }
 
-    const py_handle: *Handle.PythonHandleObject = try Handle.fast_new_handle(context.?, loop_data);
-    errdefer python_c.py_decref(@ptrCast(py_handle));
-
     const py_callback = python_c.py_newref(args[0].?);
     errdefer python_c.py_decref(py_callback);
 
@@ -86,6 +83,11 @@ inline fn z_loop_call_soon(
         python_c.raise_python_type_error("Invalid callback\x00");
         return error.PythonError;
     }
+
+    const py_handle: *Handle.PythonHandleObject = try Handle.fast_new_handle(
+        context.?, loop_data, py_callback, callback_info, thread_safe
+    );
+    errdefer python_c.py_decref(@ptrCast(py_handle));
 
     const mutex = &loop_data.mutex;
     mutex.lock();
@@ -96,15 +98,26 @@ inline fn z_loop_call_soon(
         return error.PythonError;
     }
 
-    const callback: CallbackManager.Callback = .{
-        .PythonGeneric = .{
-            .args = callback_info,
-            .exception_handler = self.exception_handler.?,
-            .py_callback = py_callback,
-            .py_context = context.?,
-            .py_handle = py_handle,
-            .cancelled = &py_handle.cancelled
+    const callback = CallbackManager.Callback{
+        .func = &Handle.callback_for_python_generic_callbacks,
+        .cleanup = &Handle.release_python_generic_callback,
+        .data = .{
+            .user_data = py_handle,
+            .exception_context = .{
+                .callback_ptr = py_callback,
+                .module_name = Handle.ModuleName,
+                .exc_message = Handle.ExceptionMessage,
+                .module_ptr = @ptrCast(py_handle)
+            }
         }
+        // .PythonGeneric = .{
+        //     .args = callback_info,
+        //     .exception_handler = self.exception_handler.?,
+        //     .py_callback = py_callback,
+        //     .py_context = context.?,
+        //     .py_handle = py_handle,
+        //     .cancelled = &py_handle.cancelled
+        // }
     };
     try Loop.Scheduling.Soon._dispatch(loop_data, callback);
     return python_c.py_newref(py_handle);
@@ -114,7 +127,8 @@ pub fn loop_call_soon(
     self: ?*LoopObject, args: ?[*]?PyObject, nargs: isize, knames: ?PyObject
 ) callconv(.C) ?*Handle.PythonHandleObject {
     return utils.execute_zig_function(z_loop_call_soon, .{
-        self.?, args.?[0..@as(usize, @intCast(nargs))], knames
+        self.?, args.?[0..@as(usize, @intCast(nargs))], knames,
+        false
     });
 }
 
@@ -122,7 +136,8 @@ pub fn loop_call_soon_threadsafe(
     self: ?*LoopObject, args: ?[*]?PyObject, nargs: isize, knames: ?PyObject
 ) callconv(.C) ?*Handle.PythonHandleObject {
     return utils.execute_zig_function(z_loop_call_soon, .{
-        self.?, args.?[0..@as(usize, @intCast(nargs))], knames
+        self.?, args.?[0..@as(usize, @intCast(nargs))], knames,
+        true
     });
 }
 
@@ -215,15 +230,26 @@ inline fn z_loop_delayed_call(
         return error.PythonError;
     }
 
-    const callback: CallbackManager.Callback = .{
-        .PythonGeneric = .{
-            .args = callback_info,
-            .exception_handler = self.exception_handler.?,
-            .py_callback = py_callback,
-            .py_context = context.?,
-            .py_handle = @ptrCast(py_timer_handle),
-            .cancelled = &py_timer_handle.handle.cancelled
+    const callback = CallbackManager.Callback{
+        .func = &Handle.callback_for_python_generic_callbacks,
+        .cleanup = &Handle.release_python_generic_callback,
+        .data = .{
+            .user_data = py_timer_handle,
+            .exception_context = .{
+                .module_ptr = @ptrCast(py_timer_handle),
+                .exc_message = Handle.ExceptionMessage,
+                .module_name = Handle.ModuleName,
+                .callback_ptr = @ptrCast(py_timer_handle)
+            }
         }
+        // .PythonGeneric = .{
+        //     .args = callback_info,
+        //     .exception_handler = self.exception_handler.?,
+        //     .py_callback = py_callback,
+        //     .py_context = context.?,
+        //     .py_handle = @ptrCast(py_timer_handle),
+        //     .cancelled = &py_timer_handle.handle.cancelled
+        // }
     };
     py_timer_handle.handle.blocking_task_id = try Loop.Scheduling.IO.queue(loop_data, .{
         .WaitTimer = .{

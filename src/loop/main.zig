@@ -1,15 +1,17 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
-const CallbackManager = @import("../callback_manager.zig");
+const CallbackManager = @import("callback_manager");
 const python_c = @import("python_c");
+
+const Handle = @import("../handle.zig");
 
 
 const CallbacksSetLinkedList = CallbackManager.CallbacksSetLinkedList;
 const BlockingTasksSetLinkedList = Scheduling.IO.BlockingTasksSetLinkedList;
 
 pub const FDWatcher = struct {
-    callback: CallbackManager.Callback,
+    handle: *Handle.PythonHandleObject,
     loop_data: *Loop,
     blocking_task_id: usize = 0,
     event_type: u32,
@@ -153,12 +155,7 @@ pub fn release(self: *Loop) void {
     self.unix_signals.deinit() catch unreachable;
 
     for (&self.ready_tasks_queues) |*ready_tasks_queue| {
-        _  = CallbackManager.execute_callbacks(allocator, ready_tasks_queue, .Stop, false);
-        const queue = &ready_tasks_queue.queue;
-        for (0..queue.len) |_| {
-             const set: CallbackManager.CallbacksSet = queue.pop() catch unreachable;
-             CallbackManager.release_set(allocator, set);
-        }
+        CallbackManager.release_sets_queue(allocator, ready_tasks_queue);
     }
 
     self.reader_watchers.deinit() catch unreachable;

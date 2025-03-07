@@ -1,6 +1,6 @@
 const Loop = @import("../main.zig");
 
-const CallbackManager = @import("../../callback_manager.zig");
+const CallbackManager = @import("callback_manager");
 
 const std = @import("std");
 const builtin = @import("builtin");

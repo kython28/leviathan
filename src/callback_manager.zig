@@ -1,62 +1,52 @@
-const std = @import("std");
 const builtin = @import("builtin");
+const std = @import("std");
 
 const python_c = @import("python_c");
-
-const Future = @import("future/main.zig");
-const Task = @import("task/main.zig");
-const Handle = @import("handle.zig");
+const PyObject = *python_c.PyObject;
 
 const utils = @import("utils");
 
 pub const CallbacksSetLinkedList = utils.LinkedList(CallbacksSet);
 
-pub const ExecuteCallbacksReturn = enum {
-    Stop,
-    Exception,
-    Continue,
-    None
+pub const CallbackExceptionContext = struct {
+    module_name: [:0]const u8,
+    module_ptr: *python_c.PyObject,
+
+    callback_ptr: ?PyObject,
+    exc_message: [:0]const u8
 };
 
-pub const CallbackType = enum {
-    ZigGeneric, ZigGenericIO, PythonGeneric, PythonFutureCallbacksSet, PythonFuture, PythonTask
-};
+pub const ExceptionHandler = *const fn (anyerror, ?*anyopaque, ?CallbackExceptionContext) anyerror!void;
 
-const ZigGenericCallback = *const fn (?*anyopaque, status: ExecuteCallbacksReturn) ExecuteCallbacksReturn;
-pub const ZigGenericCallbackData = struct {
-    callback: ZigGenericCallback,
-    data: ?*anyopaque,
-    can_execute: bool = true,
-};
-
-const ZigGenericIOCallback = *const fn (
-    ?*anyopaque, i32, std.os.linux.E
-) ExecuteCallbacksReturn;
-pub const ZigGenericIOCallbackData = struct {
-    callback: ZigGenericIOCallback,
-    data: ?*anyopaque,
-
+pub const CallbackData = struct {
     io_uring_res: i32 = 0,
     io_uring_err: std.os.linux.E = .SUCCESS,
+
+    user_data: ?*anyopaque,
+
+    exception_context: ?CallbackExceptionContext,
+    cancelled: bool = false,
 };
 
-pub const Callback = union(CallbackType) {
-    ZigGeneric: ZigGenericCallbackData,
-    ZigGenericIO: ZigGenericIOCallbackData,
-    PythonGeneric: Handle.GenericCallbackData,
-    PythonFutureCallbacksSet: Future.Callback.CallbacksSetData,
-    PythonFuture: Future.Callback.Data,
-    PythonTask: Task.Callback.Data
+pub const GenericCallback = *const fn (data: *const CallbackData) anyerror!void;
+pub const GenericCleanUpCallback = *const fn (user_data: ?*anyopaque) void;
+
+pub const Callback = struct {
+    func: GenericCallback,
+    cleanup: ?GenericCleanUpCallback,
+    data: CallbackData
 };
 
 pub const CallbacksSet = struct {
     callbacks: []Callback,
     callbacks_num: usize = 0,
+    offset: usize = 0,
 };
 
 pub const CallbacksSetsQueue = struct {
     queue: CallbacksSetLinkedList,
     last_set: ?CallbacksSetLinkedList.Node = null,
+    first_set: ?CallbacksSetLinkedList.Node = null
 };
 
 pub inline fn get_max_callbacks_sets(rtq_min_capacity: usize, callbacks_set_length: usize) usize {
@@ -82,60 +72,7 @@ pub inline fn release_set(allocator: std.mem.Allocator, set: CallbacksSet) void 
     allocator.free(set.callbacks);
 }
 
-pub inline fn cancel_callback(callback: *Callback, can_release: ?bool) void {
-    const type_info = @typeInfo(CallbackType);
-    const tag = @intFromEnum(callback.*);
-    inline for (type_info.@"enum".fields) |field| {
-        if (field.value == tag) {
-            const data = &@field(callback, field.name);
-            const data_type = @TypeOf(data.*);
-            if (@hasField(data_type, "can_execute")) { // Any other event
-                data.can_execute = false;
-            }else if (@hasField(data_type, "cancelled")) { // Handle
-                if (builtin.single_threaded) {
-                    data.cancelled.* = true;
-                }else{
-                    @atomicStore(bool, data.cancelled, true, .monotonic);
-                }
-            }else if (@hasField(data_type, "io_uring_err")) {
-                data.io_uring_err = std.os.linux.E.CANCELED;
-            }
-
-            if (@hasField(data_type, "can_release")) {
-                if (can_release) |_can_release| {
-                    data.can_release = _can_release;
-                }
-            }
-        }
-    }
-}
-
-pub inline fn is_callback_cancelled(callback: Callback) bool {
-    const type_info = @typeInfo(CallbackType);
-    const tag = @intFromEnum(callback);
-    inline for (type_info.@"enum".fields) |field| {
-        if (field.value == tag) {
-            const data = &@field(callback, field.name);
-            const data_type = @TypeOf(data.*);
-            if (@hasField(data_type, "can_execute")) { // Any other event
-                return !data.can_execute;
-            }else if (@hasField(data_type, "cancelled")) { // Handle
-                if (builtin.single_threaded) {
-                    data.cancelled.* = true;
-                    return !data.cancelled.*;
-                }else{
-                    return @atomicLoad(bool, data.cancelled, .acquire);
-                }
-            }else{
-                @compileError(
-                    "Invalid callback type: callback must have either 'can_execute' or 'cancelled' field"
-                );
-            }
-        }
-    }
-}
-
-pub inline fn append_new_callback(
+pub fn append_new_callback(
     allocator: std.mem.Allocator, sets_queue: *CallbacksSetsQueue, callback: Callback,
     max_callbacks: usize
 ) !*Callback {
@@ -164,104 +101,97 @@ pub inline fn append_new_callback(
     callbacks.callbacks[0] = callback;
 
     try sets_queue.queue.append(callbacks);
+    if (sets_queue.first_set == null) {
+        sets_queue.first_set = sets_queue.queue.first;
+    }
     sets_queue.last_set = sets_queue.queue.last;
 
     return &callbacks.callbacks[0];
 }
 
-pub inline fn run_callback(
-    allocator: std.mem.Allocator, callback: Callback, status: ExecuteCallbacksReturn
-) ExecuteCallbacksReturn {
-    return switch (status) {
-        .Continue => switch (callback) {
-            .ZigGeneric => |data| blk: {
-                if (data.can_execute) {
-                    break :blk data.callback(data.data, status);
-                }else{
-                    break :blk switch (data.callback(data.data, .Stop)) {
-                        .Exception => .Exception,
-                        else => .Continue
-                    };
-                }
-            },
-            .ZigGenericIO => |data| data.callback(data.data, data.io_uring_res, data.io_uring_err),
-            .PythonGeneric => |data| Handle.callback_for_python_generic_callbacks(allocator, data),
-            .PythonFutureCallbacksSet => |data| Future.Callback.run_python_future_set_callbacks(
-                allocator, data, status
-            ),
-            .PythonFuture => |data| Future.Callback.callback_for_python_future_callbacks(data),
-            .PythonTask => |data| Task.Callback.step_run_and_handle_result(data.task, data.exc_value),
-        },
-        else => blk: {
-            const ret: ExecuteCallbacksReturn = switch (callback) {
-                .ZigGeneric => |data| data.callback(data.data, .Stop),
-                .ZigGenericIO => |data| data.callback(
-                    data.data, -@as(i32, @intCast(@intFromEnum(std.os.linux.E.CANCELED))), std.os.linux.E.CANCELED
-                ),
-                .PythonGeneric => |data| {
-                    Handle.release_python_generic_callback(allocator, data);
-                    break :blk .Continue;
-                },
-                .PythonFutureCallbacksSet => |data| Future.Callback.run_python_future_set_callbacks(
-                    allocator, data, .Stop
-                ),
-                .PythonFuture => |data| {
-                    Future.Callback.release_python_future_callback(data);
-                    break :blk .Continue;
-                },
-                .PythonTask => |data| blk2: {
-                    data.task.must_cancel = true;
-                    break :blk2 Task.Callback.step_run_and_handle_result(data.task, data.exc_value);
-                }
-            };
+pub fn release_sets_queue(
+    allocator: std.mem.Allocator, sets_queue: *CallbacksSetsQueue,
+) void {
+    var _node: ?CallbacksSetLinkedList.Node = sets_queue.first_set orelse return;
+    var _node2: ?CallbacksSetLinkedList.Node = sets_queue.queue.first.?;
 
-            if (ret == .Exception) {
-                @panic("Unexpected exception status. Can't exists exception status while releasing resources.");
-            }
+    while (_node2 != _node) {
+        const node = _node2.?;
+        _node2 = node.next;
+        allocator.destroy(node);
+    }
 
-            break :blk .Continue;
+    while (_node) |node| {
+        _node = node.next;
+        const callbacks_set: CallbacksSet = node.data;
+        const callbacks_num = callbacks_set.callbacks_num;
+
+        for (callbacks_set.callbacks[callbacks_set.offset..callbacks_num]) |*callback| {
+            callback.data.cancelled = true;
+            callback.func(&callback.data) catch unreachable;
         }
-    };
+
+        release_set(allocator, callbacks_set);
+        allocator.destroy(node);
+    }
 }
 
 pub fn execute_callbacks(
-    allocator: std.mem.Allocator, sets_queue: *CallbacksSetsQueue, _exec_status: ExecuteCallbacksReturn,
-    comptime can_restart: bool
-) ExecuteCallbacksReturn {
+    sets_queue: *CallbacksSetsQueue,
+    comptime exception_handler: ?ExceptionHandler,
+    exception_handler_data: ?*anyopaque
+) !usize {
     const queue = &sets_queue.queue;
-    var _node: ?CallbacksSetLinkedList.Node = queue.first orelse return .None;
+    var _node: ?CallbacksSetLinkedList.Node = sets_queue.first_set orelse return 0;
     defer {
-        if (can_restart) {
+        if (sets_queue.first_set == queue.first) {
             sets_queue.last_set = queue.first;
         }
     }
 
-    var status: ExecuteCallbacksReturn = _exec_status;
     var chunks_executed: usize = 0;
     while (_node) |node| : (chunks_executed += 1) {
         _node = node.next;
         const callbacks_set: CallbacksSet = node.data;
         const callbacks_num = callbacks_set.callbacks_num;
         if (callbacks_num == 0) {
-            if (chunks_executed == 0) {
-                return .None;
-            }
-            return status;
+            break;
         }
 
-        for (callbacks_set.callbacks[0..callbacks_num]) |callback| {
-            switch (run_callback(allocator, callback, status)) {
-                .Continue => {},
-                .Stop, .Exception => |v| {
-                    status = v;
-                },
-                else => unreachable
-            }
+        for (callbacks_set.callbacks[callbacks_set.offset..callbacks_num]) |*callback| {
+            callback.func(&callback.data) catch |err| {
+                defer {
+                    if (callback.cleanup) |cleanup| {
+                        cleanup(callback.data.user_data);
+                    }
+                }
+
+                const new_offset = (
+                    @intFromPtr(callback) - @intFromPtr(callbacks_set.callbacks.ptr)
+                ) / @sizeOf(Callback) + 1;
+
+                if (exception_handler) |handler| {
+                    handler(err, exception_handler_data, callback.data.exception_context) catch |err2| {
+                        sets_queue.first_set = node;
+                        node.data.offset = new_offset;
+                        return err2;
+                    };
+
+                    continue;
+                }
+
+                sets_queue.first_set = node;
+                node.data.offset = new_offset;
+                return err;
+            };
         }
+
         node.data.callbacks_num = 0;
+        node.data.offset = 0;
     }
 
-    return status;
+    sets_queue.first_set = queue.first;
+    return chunks_executed;
 }
 
 
@@ -273,48 +203,16 @@ test "Creating a new callback set" {
     try std.testing.expectEqual(10, callback_set.callbacks.len);
 }
 
-fn test_callback(
-    data: ?*anyopaque, status: ExecuteCallbacksReturn
-) ExecuteCallbacksReturn {
-    if (status != .Continue) return status;
+fn test_callback(data: *const CallbackData) !void {
+    if (data.cancelled) return;
 
-    const executed_ptr: *usize = @alignCast(@ptrCast(data.?));
+    const executed_ptr: *usize = @alignCast(@ptrCast(data.user_data.?));
     executed_ptr.* += 1;
-    return status;
+    return;
 }
 
-fn test_callback2(
-    _: ?*anyopaque, _: ExecuteCallbacksReturn
-) ExecuteCallbacksReturn {
-    return .Exception;
-}
-
-test "Run callback" {
-    var executed: usize = 0;
-
-    const ret = run_callback(
-        std.testing.allocator, .{
-            .ZigGeneric = .{
-                .data = &executed,
-                .callback = &test_callback
-            }
-        }, .Continue
-    );
-    try std.testing.expectEqual(.Continue, ret);
-    try std.testing.expectEqual(1, executed);
-
-    executed = 0;
-    const ret2 = run_callback(
-        std.testing.allocator, .{
-            .ZigGeneric = .{
-                .data = &executed,
-                .callback = &test_callback,
-                .can_execute = false
-            }
-        }, .Continue
-    );
-    try std.testing.expectEqual(.Continue, ret2);
-    try std.testing.expectEqual(0, executed);
+fn test_callback2(_: *const CallbackData) !void {
+    return error.Test;
 }
 
 test "Append multiple sets" {
@@ -380,13 +278,13 @@ test "Append new callback to set queue and execute it" {
     try std.testing.expectEqual(ret, &callbacks_set.callbacks[0]);
     try std.testing.expectEqual(10, callbacks_set.callbacks.len);
 
-    _ = execute_callbacks(std.testing.allocator, &set_queue, .Continue, false);
+    _ = execute_callbacks(&set_queue, false, null);
     try std.testing.expectEqual(1, executed);
     try std.testing.expectEqual(0, callbacks_set.callbacks_num);
 
     callbacks_set.callbacks_num = 1;
     executed = 0;
-    _ = execute_callbacks(std.testing.allocator, &set_queue, .Continue, true);
+    _ = execute_callbacks(&set_queue, true, null);
     try std.testing.expectEqual(1, executed);
     try std.testing.expectEqual(0, callbacks_set.callbacks_num);
     try std.testing.expectEqual(set_queue.queue.first, set_queue.last_set);
@@ -417,7 +315,7 @@ test "Append and cancel callbacks" {
         }
     }
 
-    _ = execute_callbacks(std.testing.allocator, &set_queue, .Continue, false);
+    _ = execute_callbacks(&set_queue, false, null);
     try std.testing.expectEqual(35, executed);
 }
 
@@ -448,10 +346,10 @@ test "Append and stopping with exception" {
         }, 10);
 
         if (i % 2 == 0) {
-            callback.ZigGeneric.can_execute = false;
+            callback.data.cancelled = false;
         }
     }
 
-    _ = execute_callbacks(std.testing.allocator, &set_queue, .Continue, false);
-    try std.testing.expectEqual(17, executed);
+    _ = execute_callbacks(&set_queue, false, null);
+    try std.testing.expectEqual(34, executed);
 }

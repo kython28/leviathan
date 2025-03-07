@@ -4,7 +4,7 @@ const python_c = @import("python_c");
 const PyObject = *python_c.PyObject;
 
 const Loop = @import("../loop/main.zig");
-const CallbackManager = @import("../callback_manager.zig");
+const CallbackManager = @import("callback_manager");
 const utils = @import("utils");
 
 const BuffersArrayList = std.ArrayList(std.posix.iovec_const);

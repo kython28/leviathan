@@ -17,16 +17,26 @@ pub const PythonTimerHandleObject = extern struct {
 pub inline fn fast_new_timer_handle(
     time: std.posix.timespec,
     contextvars: PyObject,
-    loop_data: *Loop
+    loop_data: *Loop,
+    py_callback: PyObject,
+    args: ?[]PyObject,
 ) !*PythonTimerHandleObject {
     const instance: *PythonTimerHandleObject = @ptrCast(
         PythonTimerHandleType.tp_alloc.?(&PythonTimerHandleType, 0) orelse return error.PythonError
     );
     instance.handle.contextvars = contextvars;
     instance.handle.loop_data = loop_data;
+    instance.handle.py_callback = py_callback;
+
+    if (args) |v| {
+        instance.handle.py_callback_args = v.ptr;
+        instance.handle.py_callback_len = v.len;
+    }
+
     instance.handle.cancelled = false;
     instance.handle.finished = false;
     instance.when = time;
+
 
     return instance;
 }

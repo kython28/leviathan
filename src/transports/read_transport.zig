@@ -17,6 +17,9 @@ pub const MAX_READ = switch (builtin.mode) {
 
 const ConnectionLostCallback = *const fn (PyObject, PyObject) anyerror!void;
 
+const ExceptionMessage: [:0]const u8 = "Failed to complete read operation on transport";
+const ModuleName: [:0]const u8 = "transport";
+
 loop: *Loop,
 parent_transport: PyObject,
 exception_handler: PyObject,
@@ -26,7 +29,7 @@ connection_lost_callback: ?ConnectionLostCallback,
 read_completed_callback: ReadCompletedCallback,
 buffer: []u8,
 
-buffer_being_read: []u8,
+buffer_to_read: []u8,
 
 fd: std.posix.fd_t,
 
@@ -58,7 +61,7 @@ pub fn init(
 
         .read_completed_callback = callback,
         .buffer = buffer,
-        .buffer_being_read = undefined,
+        .buffer_to_read = undefined,
 
         .zero_copying = zero_copying,
 
@@ -97,15 +100,21 @@ pub fn deinit(self: *ReadTransport) void {
     self.initialized = false;
 }
 
-fn read_operation_completed(
-    data: ?*anyopaque, io_uring_res: i32, io_uring_err: std.os.linux.E
-) CallbackManager.ExecuteCallbacksReturn {
-    const self: *ReadTransport = @alignCast(@ptrCast(data.?));
+fn cleanup_resources_callback(ptr: ?*anyopaque) void {
+    const self: *ReadTransport = @alignCast(@ptrCast(ptr.?));
+    python_c.py_decref(self.parent_transport);
+
     self.blocking_task_id = 0;
     self.cancelling = false;
+}
 
-    const parent_transport = self.parent_transport;
-    defer python_c.py_decref(parent_transport);
+fn read_operation_completed(data: *const CallbackManager.CallbackData) !void {
+    const self: *ReadTransport = @alignCast(@ptrCast(data.user_data.?));
+    const io_uring_err = data.io_uring_err;
+    const io_uring_res = data.io_uring_res;
+
+    self.blocking_task_id = 0;
+    self.cancelling = false;
 
     var bytes_read: usize = 0;
     if (io_uring_err == .SUCCESS) {
@@ -113,9 +122,8 @@ fn read_operation_completed(
     }
 
     var exception: PyObject = undefined;
-    var exc_message: PyObject = undefined;
+    const ret = self.read_completed_callback(self, self.buffer_to_read[0..bytes_read], io_uring_err);
 
-    const ret = self.read_completed_callback(self, self.buffer_being_read[0..bytes_read], io_uring_err);
     if (ret) |_| {
         const is_closing = self.is_closing;
         if (io_uring_err == .SUCCESS or io_uring_err == .CANCELED or is_closing) {
@@ -123,92 +131,59 @@ fn read_operation_completed(
                 self.closed = true;
             }
 
-            return .Continue;
+            return;
         }
 
-        exc_message = python_c.PyUnicode_FromString("Exception ocurred while reading\x00")
-            orelse return .Exception;
-
         exception = python_c.PyObject_CallFunction(
-            python_c.PyExc_OSError, "LO\x00", @as(c_long, @intFromEnum(io_uring_err)), exc_message
-        ) orelse {
-            python_c.py_decref(exc_message);
-            return .Exception;
-        };
+            python_c.PyExc_OSError, "Ls\x00", @as(c_long, @intFromEnum(io_uring_err)), "Read operation failed\x00"
+        ) orelse return error.PythonError;
     }else |err| {
-        // TODO: Optimize this
         utils.handle_zig_function_error(err, {});
-
-        exception = python_c.PyErr_GetRaisedException()
-            orelse return .Exception;
-
-        exc_message = python_c.PyUnicode_FromString("Exception ocurred while handling the read data\x00")
-            orelse {
-                python_c.py_decref(exception);
-                return .Exception;
-            };
+        exception = python_c.PyErr_GetRaisedException() orelse return error.PythonError;
     }
-    defer python_c.py_decref(exc_message);
-    defer python_c.py_decref(exception);
 
     defer {
         self.is_closing = true;
         self.closed = true;
+        python_c.py_decref(exception);
     }
 
-
+    const parent_transport = self.parent_transport;
     if (self.connection_lost_callback) |callback| {
-        callback(parent_transport, exception) catch |err| {
-            return utils.handle_zig_function_error(err, CallbackManager.ExecuteCallbacksReturn.Exception);
-        };
+        try callback(parent_transport, exception);
     }
-
-    var args: [3]PyObject = undefined;
-    args[0] = exception;
-    args[1] = exc_message;
-    args[2] = parent_transport;
-
-    const message_kname: PyObject = python_c.PyUnicode_FromString("message\x00")
-        orelse return .Exception;
-    defer python_c.py_decref(message_kname);
-
-    const transport_kname: PyObject = python_c.PyUnicode_FromString("transport\x00")
-        orelse return .Exception;
-    defer python_c.py_decref(transport_kname);
-
-    const knames: PyObject = python_c.PyTuple_Pack(2, message_kname, transport_kname)
-        orelse return .Exception;
-    defer python_c.py_decref(knames);
-
-    const exc_handler_ret: PyObject = python_c.PyObject_Vectorcall(self.exception_handler, &args, 1, knames)
-        orelse return .Exception;
-    python_c.py_decref(exc_handler_ret);
-
-    return .Continue;
+    python_c.py_decref(parent_transport);
 }
 
 pub inline fn perform(self: *ReadTransport, buffer: ?[]u8) !void {
-    const buffer_being_read = buffer orelse self.buffer;
+    const buffer_to_read = buffer orelse self.buffer;
 
     self.blocking_task_id = try Loop.Scheduling.IO.queue(
         self.loop, .{
             .PerformRead = .{
                 .callback = .{
-                    .ZigGenericIO = .{
-                        .callback = &read_operation_completed,
-                        .data = self
+                    .func = &read_operation_completed,
+                    .cleanup = &cleanup_resources_callback,
+                    .data = .{
+                        .user_data = self,
+                        .exception_context = .{
+                            .callback_ptr = null,
+                            .exc_message = ExceptionMessage,
+                            .module_name = ModuleName,
+                            .module_ptr = self.parent_transport
+                        }
                     }
                 },
                 .fd = self.fd,
                 .data = .{
-                    .buffer = buffer_being_read
+                    .buffer = buffer_to_read
                 },
                 .zero_copy = self.zero_copying
             }
         }
     );
 
-    self.buffer_being_read = buffer_being_read;
+    self.buffer_to_read = buffer_to_read;
     python_c.py_incref(self.parent_transport);
 }
 

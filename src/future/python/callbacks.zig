@@ -4,6 +4,7 @@ const python_c = @import("python_c");
 const PyObject = *python_c.PyObject;
 
 const Future = @import("../main.zig");
+const Handle = @import("../../handle.zig");
 const Loop = @import("../../loop/main.zig");
 const PythonFutureObject = Future.Python.FutureObject;
 
@@ -20,54 +21,86 @@ inline fn z_future_add_done_callback(
         return error.PythonError;
     }
 
+    const future_data = utils.get_data_ptr(Future, self);
+
     var context: ?PyObject = null;
     try python_c.parse_vector_call_kwargs(
         knames, args.ptr + args.len,
         &.{"context\x00"},
         &.{&context},
     );
-    errdefer python_c.py_xdecref(context);
 
-    const py_loop: *Loop.Python.LoopObject = @ptrCast(self.py_loop.?);
-    if (context) |py_ctx| {
-        if (python_c.is_none(py_ctx)) {
-            context = python_c.PyContext_CopyCurrent()
-                orelse return error.PythonError;
-            python_c.py_decref(py_ctx);
-        }else if (!python_c.is_type(py_ctx, &python_c.PyContext_Type)) {
-            python_c.raise_python_type_error("Invalid context\x00");
+    var callback: PyObject = undefined;
+    {
+        errdefer python_c.py_xdecref(context);
+
+        if (context) |py_ctx| {
+            if (python_c.is_none(py_ctx)) {
+                context = python_c.PyContext_CopyCurrent()
+                    orelse return error.PythonError;
+                python_c.py_decref(py_ctx);
+            }else if (!python_c.is_type(py_ctx, &python_c.PyContext_Type)) {
+                python_c.raise_python_type_error("Invalid context\x00");
+                return error.PythonError;
+            }
+        }else {
+            context = python_c.PyContext_CopyCurrent() orelse return error.PythonError;
+        }
+
+        callback = python_c.py_newref(args[0].?);
+        errdefer python_c.py_decref(callback);
+
+        if (python_c.PyCallable_Check(callback) <= 0) {
+            python_c.raise_python_type_error("Invalid callback\x00");
             return error.PythonError;
         }
-    }else {
-        context = python_c.PyContext_CopyCurrent() orelse return error.PythonError;
     }
-
-    const future_data = utils.get_data_ptr(Future, self);
-    const callback = python_c.py_newref(args[0].?);
-    errdefer python_c.py_decref(callback);
-
-    if (python_c.PyCallable_Check(callback) <= 0) {
-        python_c.raise_python_type_error("Invalid callback\x00");
-        return error.PythonError;
-    }
-
-    var callback_data: CallbackManager.Callback = .{
-        .PythonFuture = .{
-            .py_future = @ptrCast(self),
-            .py_callback = callback,
-            .py_context = context.?,
-            .exception_handler = py_loop.exception_handler.?,
-        }
-    };
 
     switch (future_data.status) {
-        .PENDING => try Future.Callback.add_done_callback(future_data, callback_data),
+        .PENDING => Future.Callback.add_done_callback(future_data, .{
+            .PythonGeneric = .{
+                .callback = callback,
+                .context = context.?
+            }
+        }) catch |err| {
+            python_c.py_decref(context.?);
+            python_c.py_decref(callback);
+            return err;
+        },
         else => {
-            python_c.py_incref(@ptrCast(self));
-            errdefer python_c.py_decref(@ptrCast(self));
+            const loop_data = future_data.loop;
+            const callback_args = loop_data.allocator.alloc(PyObject, 1) catch |err| {
+                python_c.py_decref(context.?);
+                python_c.py_decref(callback);
+                return err;
+            };
+            errdefer loop_data.allocator.free(callback_args);
 
-            callback_data.PythonFuture.dec_future = true;
-            try Loop.Scheduling.Soon.dispatch(future_data.loop, callback_data);
+            callback_args[0] = @ptrCast(self);
+
+            const handle = Handle.fast_new_handle(
+                context.?, loop_data, callback, callback_args, false
+            ) catch |err| {
+                python_c.py_decref(context.?);
+                python_c.py_decref(callback);
+                return err;
+            };
+
+            try Loop.Scheduling.Soon.dispatch(future_data.loop, CallbackManager.Callback{
+                .func = &Handle.callback_for_python_generic_callbacks,
+                .cleanup = &Handle.release_python_generic_callback,
+                .data = .{
+                    .user_data = handle,
+                    .exception_context = .{
+                        .callback_ptr = callback,
+                        .module_name = Handle.ModuleName,
+                        .exc_message = Handle.ExceptionMessage,
+                        .module_ptr = @ptrCast(handle)
+                    }
+                }
+            });
+
+            python_c.py_incref(@ptrCast(self));
         }
     }
 

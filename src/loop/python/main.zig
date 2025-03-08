@@ -138,12 +138,12 @@ const PythonLoopMethods: []const python_c.PyMethodDef = &[_]python_c.PyMethodDef
     },
     // --------------------- Watchers ---------------------
     //
-    python_c.PyMethodDef{
-        .ml_name = "create_connection\x00",
-        .ml_meth = @ptrCast(&Network.Client.CreateConnection.loop_create_connection),
-        .ml_doc = "Open a streaming transport connection to a given address specified by host and port.\x00",
-        .ml_flags = python_c.METH_FASTCALL | python_c.METH_KEYWORDS
-    },
+    // python_c.PyMethodDef{
+    //     .ml_name = "create_connection\x00",
+    //     .ml_meth = @ptrCast(&Network.Client.CreateConnection.loop_create_connection),
+    //     .ml_doc = "Open a streaming transport connection to a given address specified by host and port.\x00",
+    //     .ml_flags = python_c.METH_FASTCALL | python_c.METH_KEYWORDS
+    // },
     // python_c.PyMethodDef{
     //     .ml_name = "remove_writer\x00",
     //     .ml_meth = @ptrCast(&Watchers.loop_remove_writer),

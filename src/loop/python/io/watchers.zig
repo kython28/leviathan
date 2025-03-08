@@ -111,32 +111,36 @@ inline fn z_loop_add_watcher(
         return error.PythonError;
     }
 
-    const context: PyObject = python_c.PyContext_CopyCurrent()
-        orelse return error.PythonError;
-    errdefer python_c.py_decref(context);
-
     const allocator = loop_data.allocator;
-    const callback_info = try Scheduling.get_callback_info(allocator, args[2..]);
-    errdefer {
-        if (callback_info) |_args| {
-            for (_args) |arg| {
-                python_c.py_decref(@ptrCast(arg));
+
+    var py_handle: *Handle.PythonHandleObject = undefined;
+    {
+        const context = python_c.PyContext_CopyCurrent()
+            orelse return error.PythonError;
+        errdefer python_c.py_decref(context);
+
+        const callback_info = try Scheduling.get_callback_info(allocator, args[2..]);
+        errdefer {
+            if (callback_info) |_args| {
+                for (_args) |arg| {
+                    python_c.py_decref(@ptrCast(arg));
+                }
+                allocator.free(_args);
             }
-            allocator.free(_args);
         }
+
+        const py_callback = python_c.py_newref(args[1].?);
+        errdefer python_c.py_decref(py_callback);
+
+        if (python_c.PyCallable_Check(py_callback) <= 0) {
+            python_c.raise_python_runtime_error("Invalid callback\x00");
+            return error.PythonError;
+        }
+
+        py_handle = try Handle.fast_new_handle(
+            context, loop_data, py_callback, callback_info, false
+        );
     }
-
-    const py_callback = python_c.py_newref(args[1].?);
-    errdefer python_c.py_decref(py_callback);
-
-    if (python_c.PyCallable_Check(py_callback) <= 0) {
-        python_c.raise_python_runtime_error("Invalid callback\x00");
-        return error.PythonError;
-    }
-
-    const py_handle: *Handle.PythonHandleObject = try Handle.fast_new_handle(
-        context, loop_data, py_callback, callback_info, false
-    );
     errdefer python_c.py_decref(@ptrCast(py_handle));
 
     const mutex = &loop_data.mutex;

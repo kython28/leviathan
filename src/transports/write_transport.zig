@@ -13,6 +13,9 @@ const PyBuffersArrayList = std.ArrayList(python_c.Py_buffer);
 pub const WriteCompletedCallback = *const fn (*WriteTransport, usize, usize, std.os.linux.E) anyerror!void;
 const ConnectionLostCallback = *const fn (PyObject, PyObject) anyerror!void;
 
+const ExceptionMessage: [:0]const u8 = "Failed to complete write operation on transport";
+const ModuleName: [:0]const u8 = "transport";
+
 loop: *Loop,
 parent_transport: PyObject,
 exception_handler: PyObject,
@@ -162,9 +165,16 @@ inline fn queue_remaining_data(self: *WriteTransport, data_written: usize) !void
         self.loop, .{
             .PerformWriteV = .{
                 .callback = .{
-                    .ZigGenericIO = .{
-                        .callback = &write_operation_completed,
-                        .data = self
+                    .func = &write_operation_completed,
+                    .cleanup = &cleanup_resources_callback,
+                    .data = .{
+                        .user_data = self,
+                        .exception_context = .{
+                            .callback_ptr = null,
+                            .exc_message = ExceptionMessage,
+                            .module_name = ModuleName,
+                            .module_ptr = self.parent_transport
+                        }
                     }
                 },
                 .fd = self.fd,
@@ -177,17 +187,21 @@ inline fn queue_remaining_data(self: *WriteTransport, data_written: usize) !void
     python_c.py_incref(self.parent_transport);
 }
 
-fn write_operation_completed(
-    data: ?*anyopaque, io_uring_res: i32, io_uring_err: std.os.linux.E
-) CallbackManager.ExecuteCallbacksReturn {
-    const self: *WriteTransport = @alignCast(@ptrCast(data.?));
+fn cleanup_resources_callback(ptr: ?*anyopaque) void {
+    const self: *WriteTransport = @alignCast(@ptrCast(ptr.?));
+    python_c.py_decref(self.parent_transport);
+
+    self.blocking_task_id = 0;
+}
+
+fn write_operation_completed(data: *const CallbackManager.CallbackData) !void {
+    const self: *WriteTransport = @alignCast(@ptrCast(data.user_data.?));
+    const io_uring_res = data.io_uring_res;
+    const io_uring_err = data.io_uring_err;
+
     self.blocking_task_id = 0;
 
-    const parent_transport = self.parent_transport;
-    defer python_c.py_decref(parent_transport);
-
     var exception: PyObject = undefined;
-    var exc_message: PyObject = undefined;
 
     var data_written: usize = 0;
     var remaining_data = self.buffer_size;
@@ -198,10 +212,8 @@ fn write_operation_completed(
         self.busy_buffers_data_written = data_written;
 
         if (data_written < self.busy_buffers_size) {
-            queue_remaining_data(self, @intCast(io_uring_res)) catch |err| {
-                return utils.handle_zig_function_error(err, CallbackManager.ExecuteCallbacksReturn.Exception);
-            };
-            return .Continue;
+            try queue_remaining_data(self, @intCast(io_uring_res));
+            return;
         }
     }
 
@@ -214,96 +226,49 @@ fn write_operation_completed(
     const ret = self.write_completed_callback(self, data_written, remaining_data, io_uring_err);
     if (ret) |_| {
         switch (io_uring_err) {
-            .SUCCESS => blk: {
+            .SUCCESS => {
                 if (self.is_closing) {
                     self.closed = true;
                 }else{
-                    self.queue_buffers_and_swap() catch |err| {
-                        // TODO: Optimize this
-                        utils.handle_zig_function_error(err, {});
-
-                        exception = python_c.PyErr_GetRaisedException()
-                            orelse return .Exception;
-
-                        exc_message = python_c.PyUnicode_FromString("Exception ocurred while queueing up data\x00")
-                            orelse {
-                                python_c.py_decref(exception);
-                                return .Exception;
-                            };
-                        break :blk;
-                    };
+                    try self.queue_buffers_and_swap();
                 }
 
-                return .Continue;
+                return;
             },
             .CANCELED => {
                 self.closed = true;
-                return .Continue;
+                return;
             },
             else => {
                 if (self.is_closing) {
                     self.closed = true;
-                    return .Continue;
+                    return;
                 }
 
-                exc_message = python_c.PyUnicode_FromString("Exception ocurred trying to write\x00")
-                    orelse return .Exception;
-
                 exception = python_c.PyObject_CallFunction(
-                    python_c.PyExc_OSError, "LO\x00", @as(c_long, @intFromEnum(io_uring_err)), exc_message
-                ) orelse return .Exception;
+                    python_c.PyExc_OSError, "Ls\x00", @as(c_long, @intFromEnum(io_uring_err)),
+                    "Write operation failed\x00"
+                ) orelse return error.PythonError;
             }
         }
     }else |err| {
-        // TODO: Optimize this
         utils.handle_zig_function_error(err, {});
-
         exception = python_c.PyErr_GetRaisedException()
-            orelse return .Exception;
-
-        exc_message = python_c.PyUnicode_FromString("Exception ocurred while handling the written data\x00")
-            orelse {
-                python_c.py_decref(exception);
-                return .Exception;
-            };
+            orelse return error.PythonError;
     }
-    defer python_c.py_decref(exc_message);
-    defer python_c.py_decref(exception);
 
     defer {
         self.is_closing = true;
         self.closed = true;
+        python_c.py_decref(exception);
     }
 
-
+    const parent_transport = self.parent_transport;
     if (self.connection_lost_callback) |callback| {
-        callback(parent_transport, exception) catch |err| {
-            return utils.handle_zig_function_error(err, CallbackManager.ExecuteCallbacksReturn.Exception);
-        };
+        try callback(parent_transport, exception);
     }
 
-    var args: [3]PyObject = undefined;
-    args[0] = exception;
-    args[1] = exc_message;
-    args[2] = parent_transport;
-
-    const message_kname: PyObject = python_c.PyUnicode_FromString("message\x00")
-        orelse return .Exception;
-    defer python_c.py_decref(message_kname);
-
-    const transport_kname: PyObject = python_c.PyUnicode_FromString("transport\x00")
-        orelse return .Exception;
-    defer python_c.py_decref(transport_kname);
-
-    const knames: PyObject = python_c.PyTuple_Pack(2, message_kname, transport_kname)
-        orelse return .Exception;
-    defer python_c.py_decref(knames);
-
-    const exc_handler_ret: PyObject = python_c.PyObject_Vectorcall(self.exception_handler, &args, 1, knames)
-        orelse return .Exception;
-    python_c.py_decref(exc_handler_ret);
-
-    return .Continue;
+    python_c.py_decref(parent_transport);
 }
 
 pub fn queue_buffers_and_swap(self: *WriteTransport) !void {
@@ -324,9 +289,16 @@ pub fn queue_buffers_and_swap(self: *WriteTransport) !void {
         self.loop, .{
             .PerformWriteV = .{
                 .callback = .{
-                    .ZigGenericIO = .{
-                        .callback = &write_operation_completed,
-                        .data = self
+                    .func = &write_operation_completed,
+                    .cleanup = &cleanup_resources_callback,
+                    .data = .{
+                        .user_data = self,
+                        .exception_context = .{
+                            .callback_ptr = null,
+                            .exc_message = ExceptionMessage,
+                            .module_name = ModuleName,
+                            .module_ptr = self.parent_transport
+                        }
                     }
                 },
                 .fd = self.fd,

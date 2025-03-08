@@ -48,45 +48,51 @@ inline fn z_loop_call_soon(
         &.{"context\x00"},
         &.{&context},
     );
-    errdefer python_c.py_xdecref(context);
-
-    if (context) |py_ctx| {
-        if (python_c.is_none(py_ctx)) {
-            context = python_c.PyContext_CopyCurrent()
-                orelse return error.PythonError;
-            python_c.py_decref(py_ctx);
-        }else if (!python_c.is_type(py_ctx, &python_c.PyContext_Type)) {
-            python_c.raise_python_type_error("Invalid context\x00");
-            return error.PythonError;
-        }
-    }else{
-        context = python_c.PyContext_CopyCurrent() orelse return error.PythonError;
-    }
 
     const loop_data = utils.get_data_ptr(Loop, self);
-    const allocator = loop_data.allocator;
 
-    const callback_info = try get_callback_info(allocator, args[1..]);
-    errdefer {
-        if (callback_info) |_args| {
-            for (_args) |arg| {
-                python_c.py_decref(@ptrCast(arg));
+    var py_handle: *Handle.PythonHandleObject = undefined;
+    var py_callback: PyObject = undefined;
+    {
+        errdefer python_c.py_xdecref(context);
+
+        if (context) |py_ctx| {
+            if (python_c.is_none(py_ctx)) {
+                context = python_c.PyContext_CopyCurrent()
+                    orelse return error.PythonError;
+                python_c.py_decref(py_ctx);
+            }else if (!python_c.is_type(py_ctx, &python_c.PyContext_Type)) {
+                python_c.raise_python_type_error("Invalid context\x00");
+                return error.PythonError;
             }
-            allocator.free(_args);
+        }else{
+            context = python_c.PyContext_CopyCurrent() orelse return error.PythonError;
         }
+
+        const allocator = loop_data.allocator;
+
+        const callback_info = try get_callback_info(allocator, args[1..]);
+        errdefer {
+            if (callback_info) |_args| {
+                for (_args) |arg| {
+                    python_c.py_decref(@ptrCast(arg));
+                }
+                allocator.free(_args);
+            }
+        }
+
+        py_callback = python_c.py_newref(args[0].?);
+        errdefer python_c.py_decref(py_callback);
+
+        if (python_c.PyCallable_Check(py_callback) <= 0) {
+            python_c.raise_python_type_error("Invalid callback\x00");
+            return error.PythonError;
+        }
+
+        py_handle = try Handle.fast_new_handle(
+            context.?, loop_data, py_callback, callback_info, thread_safe
+        );
     }
-
-    const py_callback = python_c.py_newref(args[0].?);
-    errdefer python_c.py_decref(py_callback);
-
-    if (python_c.PyCallable_Check(py_callback) <= 0) {
-        python_c.raise_python_type_error("Invalid callback\x00");
-        return error.PythonError;
-    }
-
-    const py_handle: *Handle.PythonHandleObject = try Handle.fast_new_handle(
-        context.?, loop_data, py_callback, callback_info, thread_safe
-    );
     errdefer python_c.py_decref(@ptrCast(py_handle));
 
     const mutex = &loop_data.mutex;
@@ -156,35 +162,38 @@ inline fn z_loop_delayed_call(
         &.{"context\x00"},
         &.{&context},
     );
-    errdefer python_c.py_xdecref(context);
-
-    if (context) |py_ctx| {
-        if (python_c.is_none(py_ctx)) {
-            context = python_c.PyContext_CopyCurrent()
-                orelse return error.PythonError;
-            python_c.py_decref(py_ctx);
-        }else if (!python_c.is_type(py_ctx, &python_c.PyContext_Type)) {
-            python_c.raise_python_type_error("Invalid context\x00");
-            return error.PythonError;
-        }
-    }else{
-        context = python_c.PyContext_CopyCurrent() orelse return error.PythonError;
-    }
 
     const loop_data = utils.get_data_ptr(Loop, self);
-    const allocator = loop_data.allocator;
+    var py_timer_handle: *TimerHandle.PythonTimerHandleObject = undefined;
+    var time: std.posix.timespec = undefined;
+    {
+        errdefer python_c.py_xdecref(context);
 
-    const callback_info = try get_callback_info(allocator, args[2..]);
-    errdefer {
-        if (callback_info) |_args| {
-            for (_args) |arg| {
-                python_c.py_decref(@ptrCast(arg));
+        if (context) |py_ctx| {
+            if (python_c.is_none(py_ctx)) {
+                context = python_c.PyContext_CopyCurrent()
+                    orelse return error.PythonError;
+                python_c.py_decref(py_ctx);
+            }else if (!python_c.is_type(py_ctx, &python_c.PyContext_Type)) {
+                python_c.raise_python_type_error("Invalid context\x00");
+                return error.PythonError;
             }
-            allocator.free(_args);
+        }else{
+            context = python_c.PyContext_CopyCurrent() orelse return error.PythonError;
         }
-    }
 
-    const time: std.posix.timespec = blk: {
+        const allocator = loop_data.allocator;
+
+        const callback_info = try get_callback_info(allocator, args[2..]);
+        errdefer {
+            if (callback_info) |_args| {
+                for (_args) |arg| {
+                    python_c.py_decref(@ptrCast(arg));
+                }
+                allocator.free(_args);
+            }
+        }
+
         const ts: f64 = python_c.PyFloat_AsDouble(args[0].?);
         if (ts < 0.0) {
             python_c.raise_python_value_error("Invalid value received in the first parameter\x00");
@@ -193,33 +202,32 @@ inline fn z_loop_delayed_call(
 
         if (is_absolute) {
             const when_sec = @trunc(ts);
-            break :blk .{
+            time = .{
                 .sec = @intFromFloat(when_sec),
                 .nsec = @as(@FieldType(std.posix.timespec, "nsec"), @intFromFloat((ts - when_sec) * std.time.ns_per_s))
             };
         }else{
-            var _time = try std.posix.clock_gettime(.MONOTONIC);
+            time = try std.posix.clock_gettime(.MONOTONIC);
             const delay_sec = @trunc(ts);
 
-            _time.sec += @intFromFloat(delay_sec);
-            _time.nsec += @as(@FieldType(std.posix.timespec, "nsec"), @intFromFloat((ts - delay_sec) * std.time.ns_per_s));
-
-            break :blk _time;
+            time.sec += @intFromFloat(delay_sec);
+            time.nsec += @as(@FieldType(std.posix.timespec, "nsec"), @intFromFloat((ts - delay_sec) * std.time.ns_per_s));
         }
-    };
 
-    const py_timer_handle: *TimerHandle.PythonTimerHandleObject = try TimerHandle.fast_new_timer_handle(
-        time, context.?, loop_data
-    );
+        const py_callback = python_c.py_newref(args[1].?);
+        errdefer python_c.py_decref(py_callback);
+
+        if (python_c.PyCallable_Check(py_callback) <= 0) {
+            python_c.raise_python_type_error("Invalid callback\x00");
+            return error.PythonError;
+        }
+
+        py_timer_handle = try TimerHandle.fast_new_timer_handle(
+            time, context.?, loop_data, py_callback, callback_info, 
+        );
+    }
     errdefer python_c.py_decref(@ptrCast(py_timer_handle));
 
-    const py_callback = python_c.py_newref(args[1].?);
-    errdefer python_c.py_decref(py_callback);
-
-    if (python_c.PyCallable_Check(py_callback) <= 0) {
-        python_c.raise_python_type_error("Invalid callback\x00");
-        return error.PythonError;
-    }
 
     const mutex = &loop_data.mutex;
     mutex.lock();

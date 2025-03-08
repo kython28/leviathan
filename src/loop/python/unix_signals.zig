@@ -33,30 +33,37 @@ inline fn z_loop_add_signal_handler(
         return error.PythonError;
     }
 
-    const context: PyObject = python_c.PyContext_CopyCurrent()
-        orelse return error.PythonError;
-    errdefer python_c.py_decref(context);
+    var context: PyObject = undefined;
+    var py_callback: PyObject = undefined;
+    var py_handle: *Handle.PythonHandleObject = undefined;
+    {
+        context = python_c.PyContext_CopyCurrent()
+            orelse return error.PythonError;
+        errdefer python_c.py_decref(context);
 
-    const allocator = loop_data.allocator;
-    const callback_info = try Scheduling.get_callback_info(allocator, args[2..]);
-    errdefer {
-        if (callback_info) |_args| {
-            for (_args) |arg| {
-                python_c.py_decref(@ptrCast(arg));
+        const allocator = loop_data.allocator;
+        const callback_info = try Scheduling.get_callback_info(allocator, args[2..]);
+        errdefer {
+            if (callback_info) |_args| {
+                for (_args) |arg| {
+                    python_c.py_decref(@ptrCast(arg));
+                }
+                allocator.free(_args);
             }
-            allocator.free(_args);
         }
+
+        py_callback = python_c.py_newref(args[1].?);
+        errdefer python_c.py_decref(py_callback);
+
+        if (python_c.PyCallable_Check(py_callback) <= 0) {
+            python_c.raise_python_runtime_error("Invalid callback\x00");
+            return error.PythonError;
+        }
+        py_handle = try Handle.fast_new_handle(
+            context, loop_data, py_callback, callback_info, false
+        );
     }
-    const py_handle: *Handle.PythonHandleObject = try Handle.fast_new_handle(context, loop_data);
     errdefer python_c.py_decref(@ptrCast(py_handle));
-
-    const py_callback = python_c.py_newref(args[1].?);
-    errdefer python_c.py_decref(py_callback);
-
-    if (python_c.PyCallable_Check(py_callback) <= 0) {
-        python_c.raise_python_runtime_error("Invalid callback\x00");
-        return error.PythonError;
-    }
 
     const mutex = &loop_data.mutex;
     mutex.lock();
@@ -66,19 +73,19 @@ inline fn z_loop_add_signal_handler(
         return error.PythonError;
     }
 
-    const callback: CallbackManager.Callback = .{
-        .PythonGeneric = .{
-            .args = callback_info,
-            .exception_handler = self.exception_handler.?,
-            .py_callback = py_callback,
-            .py_context = context,
-            .py_handle = py_handle,
-            .cancelled = &py_handle.cancelled,
-            .can_release = false
+    try loop_data.unix_signals.link(@intCast(sig), CallbackManager.Callback{
+        .func = &Handle.callback_for_python_generic_callbacks,
+        .cleanup = &Handle.release_python_generic_callback,
+        .data = .{
+            .user_data = py_handle,
+            .exception_context = .{
+                .callback_ptr = py_callback,
+                .module_name = Handle.ModuleName,
+                .exc_message = Handle.ExceptionMessage,
+                .module_ptr = @ptrCast(py_handle)
+            }
         }
-    };
-
-    try loop_data.unix_signals.link(@intCast(sig), callback);
+    });
 
     return python_c.get_py_none();
 }

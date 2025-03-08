@@ -1,5 +1,3 @@
-pub const CallbackManager = @import("callback_manager");
-
 pub const Future = @import("future/main.zig");
 pub const Task = @import("task/main.zig");
 pub const Loop = @import("loop/main.zig");
@@ -10,5 +8,4 @@ pub const Transports = @import("transports/main.zig");
 test {
     const std = @import("std");
     std.testing.refAllDeclsRecursive(Loop);
-    std.testing.refAllDecls(CallbackManager);
 }

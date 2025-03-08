@@ -201,6 +201,8 @@ fn write_operation_completed(data: *const CallbackManager.CallbackData) !void {
 
     self.blocking_task_id = 0;
 
+    const parent_transport = self.parent_transport;
+
     var exception: PyObject = undefined;
 
     var data_written: usize = 0;
@@ -213,6 +215,7 @@ fn write_operation_completed(data: *const CallbackManager.CallbackData) !void {
 
         if (data_written < self.busy_buffers_size) {
             try queue_remaining_data(self, @intCast(io_uring_res));
+            python_c.py_decref(parent_transport);
             return;
         }
     }
@@ -233,15 +236,18 @@ fn write_operation_completed(data: *const CallbackManager.CallbackData) !void {
                     try self.queue_buffers_and_swap();
                 }
 
+                python_c.py_decref(parent_transport);
                 return;
             },
             .CANCELED => {
+                python_c.py_decref(parent_transport);
                 self.closed = true;
                 return;
             },
             else => {
                 if (self.is_closing) {
                     self.closed = true;
+                    python_c.py_decref(parent_transport);
                     return;
                 }
 
@@ -260,15 +266,14 @@ fn write_operation_completed(data: *const CallbackManager.CallbackData) !void {
     defer {
         self.is_closing = true;
         self.closed = true;
-        python_c.py_decref(exception);
+        python_c.PyErr_SetRaisedException(exception);
     }
 
-    const parent_transport = self.parent_transport;
     if (self.connection_lost_callback) |callback| {
         try callback(parent_transport, exception);
     }
 
-    python_c.py_decref(parent_transport);
+    return error.PythonError;
 }
 
 pub fn queue_buffers_and_swap(self: *WriteTransport) !void {

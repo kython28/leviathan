@@ -124,6 +124,8 @@ fn read_operation_completed(data: *const CallbackManager.CallbackData) !void {
     var exception: PyObject = undefined;
     const ret = self.read_completed_callback(self, self.buffer_to_read[0..bytes_read], io_uring_err);
 
+    const parent_transport = self.parent_transport;
+
     if (ret) |_| {
         const is_closing = self.is_closing;
         if (io_uring_err == .SUCCESS or io_uring_err == .CANCELED or is_closing) {
@@ -131,6 +133,7 @@ fn read_operation_completed(data: *const CallbackManager.CallbackData) !void {
                 self.closed = true;
             }
 
+            python_c.py_decref(parent_transport);
             return;
         }
 
@@ -145,14 +148,14 @@ fn read_operation_completed(data: *const CallbackManager.CallbackData) !void {
     defer {
         self.is_closing = true;
         self.closed = true;
-        python_c.py_decref(exception);
+        python_c.PyErr_SetRaisedException(exception);
     }
 
-    const parent_transport = self.parent_transport;
     if (self.connection_lost_callback) |callback| {
         try callback(parent_transport, exception);
     }
-    python_c.py_decref(parent_transport);
+
+    return error.PythonError;
 }
 
 pub inline fn perform(self: *ReadTransport, buffer: ?[]u8) !void {

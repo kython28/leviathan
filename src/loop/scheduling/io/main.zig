@@ -374,7 +374,6 @@ inline fn get_blocking_tasks_set(
 }
 
 pub inline fn remove_tasks_set(epoll_fd: std.posix.fd_t, blocking_tasks_set: *BlockingTasksSet) void {
-    std.debug.dumpCurrentStackTrace(@returnAddress());
     std.posix.epoll_ctl(epoll_fd, std.os.linux.EPOLL.CTL_DEL, blocking_tasks_set.eventfd, null) catch unreachable;
     blocking_tasks_set.deinit(true);
 }

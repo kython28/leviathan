@@ -82,7 +82,7 @@ fn exception_handler(
         python_c.PyErr_GivenExceptionMatches(exception, python_c.PyExc_KeyboardInterrupt) > 0
     ) {
         python_c.PyErr_SetRaisedException(exception);
-        return;
+        return error.PythonError;
     }
 
     const message_kname: PyObject = python_c.PyUnicode_FromString("message\x00")
@@ -142,7 +142,7 @@ pub inline fn call_once(
     py_exception_handler: PyObject
 ) !usize {
     const chunks_executed = try CallbackManager.execute_callbacks(
-        ready_queue, &exception_handler, py_exception_handler
+        ready_queue, if (builtin.is_test) null else &exception_handler, py_exception_handler
     );
     if (chunks_executed == 0) {
         prune_callbacks_sets(
@@ -167,11 +167,11 @@ fn fetch_completed_tasks(
         const blocking_task_data: *Loop.Scheduling.IO.BlockingTaskData = @ptrFromInt(user_data);
         defer blocking_tasks_set.push_in_quarantine(blocking_task_data);
 
-        Loop.Scheduling.IO.check_io_uring_result(blocking_task_data.operation, err);
-
         var callback = blocking_task_data.callback_data orelse continue;
         callback.data.io_uring_err = err;
         callback.data.io_uring_res = cqe.res;
+
+        Loop.Scheduling.IO.check_io_uring_result(blocking_task_data.operation, err);
 
         _ = try CallbackManager.append_new_callback(
             allocator, ready_queue, callback, Loop.MaxCallbacks
@@ -264,7 +264,6 @@ pub fn start(self: *Loop, py_exception_handler: PyObject) !void {
         const old_index = ready_tasks_queue_index;
         const ready_tasks_queue = &ready_tasks_queues[old_index];
 
-
         try poll_blocking_events(self, mutex, wait_for_blocking_events, ready_tasks_queue, &quanrantine_blocking_tasks);
         defer {
             for (quanrantine_blocking_tasks.items) |set| {
@@ -310,9 +309,11 @@ test "Prune sets when maximum is 1" {
     var number: usize = 0;
     for (0..3) |_| {
         _ = try CallbackManager.append_new_callback(allocator, &ready_tasks, .{
-            .ZigGeneric = .{
-                .data = &number,
-                .callback = undefined
+            .func = undefined,
+            .cleanup = null,
+            .data = .{
+                .user_data = &number,
+                .exception_context = null
             }
         }, 1);
     }
@@ -341,9 +342,11 @@ test "Prune sets when maximum is more than 1" {
     var number: usize = 0;
     for (0..20) |_| {
         _ = try CallbackManager.append_new_callback(allocator, &ready_tasks, .{
-            .ZigGeneric = .{
-                .data = &number,
-                .callback = undefined
+            .func = undefined,
+            .cleanup = null,
+            .data = .{
+                .user_data = &number,
+                .exception_context = null
             }
         }, 2);
     }
@@ -378,9 +381,11 @@ test "Prune sets with high limit" {
     var number: usize = 0;
     for (0..20) |_| {
         _ = try CallbackManager.append_new_callback(allocator, &ready_tasks, .{
-            .ZigGeneric = .{
-                .data = &number,
-                .callback = undefined
+            .func = undefined,
+            .cleanup = null,
+            .data = .{
+                .user_data = &number,
+                .exception_context = null
             }
         }, 2);
     }
@@ -412,22 +417,22 @@ test "Running callbaks and prune" {
     }
 
     const test_callback = struct{
-        fn run(data: ?*anyopaque, status: CallbackManager.ExecuteCallbacksReturn) CallbackManager.ExecuteCallbacksReturn {
-            std.testing.expectEqual(CallbackManager.ExecuteCallbacksReturn.Continue, status) catch unreachable;
+        fn run(data: *const CallbackManager.CallbackData) !void {
+            try std.testing.expect(!data.cancelled);
 
-            const number: *usize = @alignCast(@ptrCast(data.?));
+            const number: *usize = @alignCast(@ptrCast(data.user_data.?));
             number.* += 1;
-
-            return .Continue;
         }
     }.run;
 
     var number: usize = 0;
     for (0..20) |_| {
         _ = try CallbackManager.append_new_callback(allocator, &ready_tasks, .{
-            .ZigGeneric = .{
-                .data = &number,
-                .callback = test_callback
+            .func = test_callback,
+            .cleanup = null,
+            .data = .{
+                .user_data = &number,
+                .exception_context = null
             }
         }, 2);
     }
@@ -438,13 +443,14 @@ test "Running callbaks and prune" {
         14*@sizeOf(CallbackManager.Callback), 2
     );
 
-    const ret = Loop.Runner.call_once(
-        allocator, &ready_tasks, &max_number_of_callbacks_set, 14*@sizeOf(CallbackManager.Callback)
+    const ret = try Loop.Runner.call_once(
+        allocator, &ready_tasks, &max_number_of_callbacks_set, 14*@sizeOf(CallbackManager.Callback),
+        undefined
     );
     Loop.Runner.prune_callbacks_sets(
         allocator, &ready_tasks, &max_number_of_callbacks_set, 14*@sizeOf(CallbackManager.Callback)
     );
 
-    try std.testing.expectEqual(ret, CallbackManager.ExecuteCallbacksReturn.Continue);
+    try std.testing.expect(ret > 0);
     try std.testing.expect(ready_tasks.queue.len <= max_number_of_callbacks_set);
 }

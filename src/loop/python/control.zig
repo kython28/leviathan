@@ -27,41 +27,29 @@ inline fn z_loop_run_forever(self: *LoopObject) !PyObject {
         return error.PythonError;
     }
 
-    var error_holder: ?anyerror = null;
     var py_exception: ?PyObject = null;
-
     Loop.Runner.start(loop_data, self.exception_handler.?) catch |err| {
-        error_holder = err;
-
-        if (err == error.PythonError) {
-            py_exception = python_c.PyErr_GetRaisedException() orelse unreachable;
-        }
+        utils.handle_zig_function_error(err, {});
+        py_exception = python_c.PyErr_GetRaisedException() orelse unreachable;
     };
 
-    if (python_c.PyObject_CallOneArg(set_running_loop, python_c.get_py_none())) |v| {
+    if (python_c.PyObject_CallOneArg(set_running_loop, python_c.get_py_none_without_incref())) |v| {
         python_c.py_decref(v);
     }else{
         const py_exc = python_c.PyErr_GetRaisedException() orelse unreachable;
         if (py_exception) |v| {
             python_c.PyException_SetCause(py_exc, v);
-        }else{
-            python_c.raise_python_runtime_error(@errorName(error_holder.?));
-            const exc: PyObject = python_c.PyErr_GetRaisedException() orelse unreachable;
-
-            error_holder = error.PythonError;
-            python_c.PyException_SetCause(py_exc, exc);
         }
+
         py_exception = py_exc;
     }
 
     Hooks.cleanup_asyncgen_hooks(self);
     if (py_exception) |v| {
         python_c.PyErr_SetRaisedException(v);
+        return error.PythonError;
     }
 
-    if (error_holder) |err| {
-        return err;
-    }
     return python_c.get_py_none();
 }
 

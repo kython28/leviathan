@@ -172,7 +172,6 @@ inline fn z_loop_add_watcher(
     if (existing_watcher_ptr) |existing_watcher_data| {
         const prev_handle = existing_watcher_data.handle;
         python_c.py_decref(@ptrCast(prev_handle));
-        Handle.release_python_generic_callback(prev_handle);
 
         existing_watcher_data.handle = watcher_data.handle;
         return python_c.get_py_none();

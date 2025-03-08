@@ -31,7 +31,9 @@ pub fn init(self: *Future, loop: *Loop) void {
 }
 
 pub inline fn release(self: *Future) void {
-    Callback.release_callbacks_queue(&self.callbacks_queue);
+    if (self.status == .PENDING) {
+        Callback.release_callbacks_queue(&self.callbacks_queue);
+    }
     self.callbacks_arena.deinit();
     self.released = true;
 }

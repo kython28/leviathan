@@ -161,9 +161,7 @@ inline fn handle_legacy_future_object(
         ) orelse return error.PythonError;
         defer python_c.py_decref(add_done_callback_func);
         
-        const wrapper = task.wake_up_task_callback orelse create_wake_up_task_callback(task) catch |err| {
-            return utils.handle_zig_function_error(err, error.PythonError);
-        };
+        const wrapper = task.wake_up_task_callback orelse try create_wake_up_task_callback(task);
 
         const ret: PyObject = python_c.PyObject_CallOneArg(add_done_callback_func, wrapper)
             orelse return error.PythonError;
@@ -543,12 +541,18 @@ fn wakeup_task(fut: ?*Future.Python.FutureObject, ptr: ?*anyopaque) !void {
     };
 
     if (leviathan_fut.exception) |exception| {
-        try _execute_task_throw(task, exception);
+        _execute_task_throw(task, exception) catch |err| {
+            python_c.py_decref(@ptrCast(task));
+            return err;
+        };
 
         return;
     }
 
-    try _execute_task_send(task);
+    _execute_task_send(task) catch |err| {
+        python_c.py_decref(@ptrCast(task));
+        return err;
+    };
 }
 
 fn py_wake_up(
@@ -568,11 +572,13 @@ fn py_wake_up(
         python_c.py_decref(result);
 
         _execute_task_send(instance) catch |err| {
+            python_c.py_decref(@ptrCast(instance));
             return utils.handle_zig_function_error(err, null);
         };
     }else{
         const exc_value = python_c.PyErr_GetRaisedException() orelse return null;
         _execute_task_throw(instance, exc_value) catch |err| {
+            python_c.py_decref(@ptrCast(instance));
             return utils.handle_zig_function_error(err, null);
         };
     }

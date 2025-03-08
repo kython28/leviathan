@@ -34,7 +34,6 @@ pub fn release_python_generic_callback(ptr: ?*anyopaque) void {
 
 pub fn callback_for_python_generic_callbacks(data: *const CallbackManager.CallbackData) !void {
     const handle: *PythonHandleObject = @alignCast(@ptrCast(data.user_data.?));
-
     const thread_safe = handle.thread_safe;
     if (thread_safe) {
         @atomicStore(bool, &handle.finished, true, .release);

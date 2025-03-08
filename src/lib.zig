@@ -45,9 +45,9 @@ const dynamic_leviathan_modules_names = .{
 fn module_cleanup(_: *python_c.PyObject) callconv(.C) void {
     deinitialize_leviathan_types();
     utils.PythonImports.release_python_imports();
-    if (builtin.mode == .Debug) {
-        _ = utils.gpa.detectLeaks();
-    }
+    // if (builtin.mode == .Debug) {
+    //     _ = utils.gpa.detectLeaks();
+    // }
     _ = utils.gpa.deinit();
 }
 

@@ -29,12 +29,29 @@ fn dummy_signal_handler(_: c_int) callconv(.C) void {
 }
 
 fn signal_handler(data: *const CallbackManager.CallbackData) !void {
-    if (data.cancelled) return;
+    const io_uring_err = data.io_uring_err;
+    if (data.cancelled or io_uring_err == .CANCELED) return;
 
     const loop: *Loop = @alignCast(@ptrCast(data.user_data.?));
+    if (io_uring_err != .SUCCESS) {
+        const exception = python_c.PyObject_CallFunction(
+            python_c.PyExc_OSError, "Ls\x00",
+            @as(c_long, @intFromEnum(io_uring_err)),
+            "IO error during signal handling\x00"
+        ) orelse return error.PythonError;
+
+        loop.mutex.lock();
+        loop.stopping = true;
+        loop.mutex.unlock();
+
+        python_c.PyErr_SetRaisedException(exception);
+        return error.PythonError;
+    }
 
     const sig = loop.unix_signals.signalfd_info.signo;
+
     const callback = loop.unix_signals.callbacks.get_value(@intCast(sig), null).?;
+    python_c.py_incref(@alignCast(@ptrCast(callback.data.user_data.?)));
 
     try Loop.Scheduling.Soon.dispatch(loop, callback);
 
@@ -42,24 +59,28 @@ fn signal_handler(data: *const CallbackManager.CallbackData) !void {
         .buffer = @as([*]u8, @ptrCast(&loop.unix_signals.signalfd_info))[0..@sizeOf(std.os.linux.signalfd_siginfo)],
     };
 
-    _ = try Loop.Scheduling.IO.queue(loop, Loop.Scheduling.IO.BlockingOperationData{
-        .PerformRead = .{
-            .fd = loop.unix_signals.fd,
-            .data = buffer_to_read,
-            .callback = CallbackManager.Callback{
-                .func = &signal_handler,
-                .cleanup = null,
-                .data = .{
-                    .exception_context = null,
-                    .user_data = loop,
+    loop.unix_signals.blocking_task_id = try Loop.Scheduling.IO.queue(
+        loop, Loop.Scheduling.IO.BlockingOperationData{
+            .PerformRead = .{
+                .fd = loop.unix_signals.fd,
+                .data = buffer_to_read,
+                .callback = CallbackManager.Callback{
+                    .func = &signal_handler,
+                    .cleanup = null,
+                    .data = .{
+                        .exception_context = null,
+                        .user_data = loop,
+                    },
                 },
-            },
-            .offset = 0
+                .offset = 0
+            }
         }
-    });
+    );
 }
 
-fn default_sigint_signal_callback(_: *const CallbackManager.CallbackData) !void {
+fn default_sigint_signal_callback(data: *const CallbackManager.CallbackData) !void {
+    if (data.cancelled) return;
+
     python_c.PyErr_SetNone(python_c.PyExc_KeyboardInterrupt);
     return error.PythonError;
 }
@@ -134,7 +155,7 @@ pub fn unlink(self: *UnixSignals, sig: u6) !void {
             .func = &default_sigint_signal_callback,
             .cleanup = null,
             .data = .{
-                .user_data = null,
+                .user_data = self.loop,
                 .exception_context = null
             }
         },
@@ -175,7 +196,7 @@ pub fn init(loop: *Loop) !void {
         .func = &default_sigint_signal_callback,
         .cleanup = null,
         .data = .{
-            .user_data = null,
+            .user_data = loop,
             .exception_context = null
         }
     });

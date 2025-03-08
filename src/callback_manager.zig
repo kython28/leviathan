@@ -150,7 +150,7 @@ pub fn execute_callbacks(
     }
 
     var chunks_executed: usize = 0;
-    while (_node) |node| : (chunks_executed += 1) {
+    while (_node) |node| {
         _node = node.next;
         const callbacks_set: CallbacksSet = node.data;
         const callbacks_num = callbacks_set.callbacks_num;
@@ -158,6 +158,7 @@ pub fn execute_callbacks(
             break;
         }
 
+        chunks_executed += 1;
         for (callbacks_set.callbacks[callbacks_set.offset..callbacks_num]) |*callback| {
             callback.func(&callback.data) catch |err| {
                 defer {

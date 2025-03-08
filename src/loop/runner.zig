@@ -140,8 +140,8 @@ pub inline fn call_once(
     allocator: std.mem.Allocator, ready_queue: *CallbackManager.CallbacksSetsQueue,
     max_number_of_callbacks_set_ptr: *usize, ready_tasks_queue_min_bytes_capacity: usize,
     py_exception_handler: PyObject
-) usize {
-    const chunks_executed = CallbackManager.execute_callbacks(
+) !usize {
+    const chunks_executed = try CallbackManager.execute_callbacks(
         ready_queue, &exception_handler, py_exception_handler
     );
     if (chunks_executed == 0) {
@@ -284,17 +284,12 @@ pub fn start(self: *Loop, py_exception_handler: PyObject) !void {
         mutex.unlock();
         defer mutex.lock();
 
-        wait_for_blocking_events = switch (
-            call_once(
-                allocator, ready_tasks_queue, &max_callbacks_set_per_queue[old_index],
-                ready_tasks_queue_min_bytes_capacity, py_exception_handler
-            )
-        ) {
-            .Continue => false,
-            .Stop => break,
-            .Exception => return error.PythonError,
-            .None => true,
-        };
+        const chunks_executed = try call_once(
+            allocator, ready_tasks_queue, &max_callbacks_set_per_queue[old_index],
+            ready_tasks_queue_min_bytes_capacity, py_exception_handler
+        );
+
+        wait_for_blocking_events = (chunks_executed == 0);
     }
 }
 

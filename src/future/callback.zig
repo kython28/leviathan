@@ -29,7 +29,7 @@ const PythonGenericData = struct {
 };
 
 const ZigGenericData = struct {
-    callback: *const fn (?*Future, ?*anyopaque) anyerror!void,
+    callback: *const fn (?*Future.Python.FutureObject, ?*anyopaque) anyerror!void,
     ptr: ?*anyopaque
 };
 
@@ -51,34 +51,86 @@ fn release_python_future_data(data: ?*anyopaque) void {
     python_c.py_decref(@ptrCast(py_future));
 }
 
+inline fn execute_python_callback(context: PyObject, callback: PyObject, future: PyObject) !void {
+    if (python_c.PyContext_Enter(context) < 0) {
+        return error.PythonError;
+    }
+
+    const result: ?PyObject = python_c.PyObject_CallOneArg(callback, future);
+
+    if (python_c.PyContext_Exit(context) < 0) {
+        return error.PythonError;
+    }
+
+    if (result) |v| {
+        python_c.py_decref(v);
+    }else{
+        return error.PythonError;
+    }
+}
+
 fn run_python_future_set_callbacks(data: *const CallbackManager.CallbackData) !void {
     const future: *Future = @alignCast(@ptrCast(data.user_data.?));
     const py_future = utils.get_parent_ptr(Future.Python.FutureObject, future);
 
-    for (future.callbacks_queue.items) |callback| {
+    const callbacks_items = future.callbacks_queue.items;
+    var exceptions_array = try std.ArrayList(?PyObject).initCapacity(
+        future.loop.allocator, callbacks_items.len
+    );
+    defer {
+        for (exceptions_array.items) |exc| {
+            python_c.py_xdecref(exc);
+        }
+
+        exceptions_array.deinit();
+    }
+
+    for (callbacks_items) |callback| {
         if (callback.cancelled) continue;
 
         switch (callback.data) {
             .PythonGeneric => |py_data| {
-                if (python_c.PyContext_Enter(py_data.context) < 0) {
-                    return error.PythonError;
-                }
+                execute_python_callback(py_data.context, py_data.callback, @ptrCast(py_future)) catch |err| {
+                    utils.handle_zig_function_error(err, {});
 
-                const result: ?PyObject = python_c.PyObject_CallOneArg(py_data.callback, @ptrCast(py_future));
-
-                if (python_c.PyContext_Exit(py_data.context) < 0) {
-                    return error.PythonError;
-                }
-
-                if (result) |v| {
-                    python_c.py_decref(v);
-                }else{
-                    return error.PythonError;
-                }
+                    const exc = python_c.PyErr_GetRaisedException() orelse return error.PythonError;
+                    exceptions_array.append(exc) catch unreachable;
+                };
             },
-            .ZigGeneric => |z_data| try z_data.callback(future, z_data.ptr)
+            .ZigGeneric => |z_data| {
+                z_data.callback(py_future, z_data.ptr) catch |err| {
+                    utils.handle_zig_function_error(err, {});
+
+                    const exc = python_c.PyErr_GetRaisedException() orelse return error.PythonError;
+                    exceptions_array.append(exc) catch unreachable;
+                };
+            }
         }
     }
+
+    const exceptions_len = exceptions_array.items.len;
+    if (exceptions_len > 0) {
+        const exc_tuple = python_c.PyTuple_New(@intCast(exceptions_len)) orelse return error.PythonError;
+        defer python_c.py_decref(exc_tuple);
+
+        for (0.., exceptions_array.items) |i, *exc| {
+            if (python_c.PyTuple_SetItem(exc_tuple, @intCast(i), exc.*) < 0) {
+                return error.PythonError;
+            }
+
+            exc.* = null;
+        }
+
+        const exception_message = python_c.PyUnicode_FromString("Multiple exceptions occurred while executing future callbacks\x00")
+            orelse return error.PythonError;
+        defer python_c.py_decref(exception_message);
+
+        const exc = python_c.PyObject_CallFunctionObjArgs(python_c.PyExc_BaseExceptionGroup, exception_message, exc_tuple)
+            orelse return error.PythonError;
+        python_c.PyErr_SetRaisedException(exc);
+        
+        return error.PythonError;
+    } 
 
     python_c.py_decref(@ptrCast(py_future));
 }
@@ -115,10 +167,12 @@ pub fn create_python_handle(self: *Future, callback_data: PyObject) !CallbackMan
     };
 }
 
-pub inline fn add_done_callback(self: *Future, callback: Data) !void {
+pub inline fn add_done_callback(self: *Future, callback_data: Data) !void {
     if (self.status != .PENDING) return error.FutureAlreadyFinished;
 
-    try self.callbacks_queue.append(callback);
+    try self.callbacks_queue.append(.{
+        .data = callback_data
+    });
 }
 
 pub fn remove_done_callback(self: *Future, callback_id: u64) usize {

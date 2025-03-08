@@ -30,7 +30,7 @@ inline fn z_loop_run_forever(self: *LoopObject) !PyObject {
     var error_holder: ?anyerror = null;
     var py_exception: ?PyObject = null;
 
-    Loop.Runner.start(loop_data) catch |err| {
+    Loop.Runner.start(loop_data, self.exception_handler.?) catch |err| {
         error_holder = err;
 
         if (err == error.PythonError) {

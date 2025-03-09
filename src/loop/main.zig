@@ -24,7 +24,7 @@ const WatchersBTree = utils.BTree(std.posix.fd_t, *FDWatcher, 11);
 const lock = @import("../utils/lock.zig");
 
 pub const MaxCallbacks = switch (builtin.mode) {
-    .Debug => 128,//4,
+    .Debug => 4,
     else => 128
 };
 
@@ -71,7 +71,7 @@ pub fn init(self: *Loop, allocator: std.mem.Allocator, rtq_min_capacity: usize) 
     errdefer allocator.free(blocking_ready_tasks);
 
     const blocking_ready_epoll_events = try allocator.alloc(std.os.linux.epoll_event, switch (builtin.mode) {
-        .Debug => 256,//8,
+        .Debug => 8,
         else => 256
     });
     errdefer allocator.free(blocking_ready_epoll_events);

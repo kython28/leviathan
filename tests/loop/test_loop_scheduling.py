@@ -315,3 +315,75 @@ def test_scheduling_with_context_propagation() -> None:
         assert mock_func.call_count == 3
     finally:
         loop.close()
+
+def test_scheduling_with_error_handling() -> None:
+    loop = Loop()
+    try:
+        # Different types of error-raising callbacks
+        def value_error_callback() -> None:
+            raise ValueError("Test value error")
+
+        def type_error_callback() -> None:
+            raise TypeError("Test type error")
+
+        def zero_division_callback() -> None:
+            x = 1 / 0  # Raises ZeroDivisionError
+
+        def index_error_callback() -> None:
+            lst: list[int] = []
+            _ = lst[0]  # Raises IndexError
+
+        # Mocked functions to track callback execution
+        mock_value_error = MagicMock(side_effect=value_error_callback)
+        mock_type_error = MagicMock(side_effect=type_error_callback)
+        mock_zero_division = MagicMock(side_effect=zero_division_callback)
+        mock_index_error = MagicMock(side_effect=index_error_callback)
+
+        # Schedule callbacks with various errors
+        loop.call_soon(mock_value_error)
+        loop.call_later(DELAY_TIME, mock_type_error)
+        loop.call_at(loop.time() + DELAY_TIME * 2, mock_zero_division)
+        loop.call_soon(mock_index_error)
+
+        # Stop the loop after a reasonable time
+        loop.call_later(DELAY_TIME * 3, loop.stop)
+        loop.run_forever()
+
+        # Verify that all callbacks were attempted
+        assert mock_value_error.call_count == 1
+        assert mock_type_error.call_count == 1
+        assert mock_zero_division.call_count == 1
+        assert mock_index_error.call_count == 1
+    finally:
+        loop.close()
+
+def test_scheduling_with_mixed_successful_and_error_callbacks() -> None:
+    loop = Loop()
+    try:
+        # Successful callback
+        def successful_callback(x: int) -> None:
+            assert x > 0
+
+        # Error-raising callbacks
+        def error_callback(x: int) -> None:
+            if x % 2 == 0:
+                raise ValueError(f"Error for even number {x}")
+
+        # Mocked functions
+        mock_successful = MagicMock(side_effect=successful_callback)
+        mock_error = MagicMock(side_effect=error_callback)
+
+        # Schedule mixed callbacks
+        for i in range(1, 6):
+            loop.call_soon(mock_successful, i)
+            loop.call_later(DELAY_TIME * i, mock_error, i)
+
+        # Stop the loop after a reasonable time
+        loop.call_later(DELAY_TIME * 6, loop.stop)
+        loop.run_forever()
+
+        # Verify callback execution
+        assert mock_successful.call_count == 5
+        assert mock_error.call_count == 5
+    finally:
+        loop.close()

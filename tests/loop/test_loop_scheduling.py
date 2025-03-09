@@ -328,6 +328,7 @@ def test_scheduling_with_error_handling() -> None:
 
         def zero_division_callback() -> None:
             x = 1 / 0  # Raises ZeroDivisionError
+            _ = x
 
         def index_error_callback() -> None:
             lst: list[int] = []

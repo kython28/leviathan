@@ -4,6 +4,7 @@ const builtin = @import("builtin");
 const Loop = @import("../main.zig");
 
 const Cache = @import("cache.zig");
+const Parsers = @import("parsers.zig");
 
 const DNSCacheEntries = switch (builtin.mode) {
     .Debug => 8,
@@ -12,16 +13,11 @@ const DNSCacheEntries = switch (builtin.mode) {
 
 const CACHE_MASK = DNSCacheEntries - 1;
 
-const Server = struct {
-    address: std.posix.sockaddr,
-    port: u16,
-};
-
 loop: *Loop,
 arena: std.heap.ArenaAllocator,
 allocator: std.mem.Allocator,
 
-servers: []Server,
+configuration: Parsers.Configuration,
 
 cache_entries: [DNSCacheEntries]Cache,
 parsed_hostname: [255]u8,
@@ -32,9 +28,11 @@ pub fn init(self: *DNS, loop: *Loop) !void {
     self.arena = std.heap.ArenaAllocator.init(loop.allocator);
     self.allocator = self.arena.allocator();
 
-    for (self.cache_entries) |*entry| {
+    for (&self.cache_entries) |*entry| {
         entry.init(self.allocator);
     }
+
+    try self.load_configuration(self.allocator);
 
     // TODO: Figure out if there is a better way
     const ret = std.posix.socket(std.posix.AF.INET6, std.posix.SOCK.STREAM, 0);
@@ -43,63 +41,6 @@ pub fn init(self: *DNS, loop: *Loop) !void {
         std.posix.close(sock);
     } else {
         self.ipv6_supported = false;
-    }
-}
-
-fn parse_configuration(self: *DNS, content: []const u8) !void {
-    const State = enum {
-        nameserver, search, comment, nothing
-    };
-
-    var current_state = State.nothing;
-    var index: usize = 0;
-    loop: while (index < content.len) {
-        switch (current_state) {
-            .nothing => {
-                while (index < content.len) {
-                    const chr = content[index];
-                    index += 1;
-                    if (chr == ';' or chr == '#') {
-                        current_state = .comment;
-                        continue :loop;
-                    }else if (chr < 'a' or chr > 'z') {
-                        continue :loop;
-                    }
-                }
-
-                const start = index;
-                while (index < content.len) {
-                    if (content[index] == ' ') {
-                        break;
-                    }
-                    index += 1;
-                }
-
-                if (index == content.len) break :loop;
-
-                const attr = content[start..(index - 1)];
-                if (std.mem.eql(u8, "nameserver", attr)) {
-                    current_state = .nameserver;
-                }else if (std.mem.eql(u8, "search", attr)) {
-                    current_state = .search;
-                }
-
-                continue :loop;
-            },
-            .comment => {
-                while (index < content.len) {
-                    const chr = content[index];
-                    index += 1;
-                    if (chr == '\n') {
-                        current_state = .nothing;
-                        continue :loop;
-                    }
-                }
-            },
-            .search => {
-
-            }
-        }
     }
 }
 
@@ -117,47 +58,11 @@ fn load_configuration(self: *DNS, allocator: std.mem.Allocator) !void {
 
     _ = try file.readAll(content);
 
-    try self.parse_configuration(content);
-}
-
-fn parse_hostname(self: *DNS, hostname: []const u8) ?[]const u8 {
-    if (hostname.len > 255) {
-        return null;
-    }
-
-    const parsed_hostname = try std.ascii.lowerString(&self.parsed_hostname, hostname);
-
-    if (std.mem.count(u8, parsed_hostname, ".") == 0) {
-        return null;
-    }
-
-    const iter = std.mem.splitScalar(u8, parsed_hostname, '|');
-    while (iter.next()) |label| {
-        if (label.len < 1 or label.len > 63) {
-            return null;
-        }
-
-        if (label[0] == '-' or label[label.len - 1] == '-') {
-            return null;
-        }
-
-        for (label) |c| {
-            if (!(
-                (c >= 'a' and c <= 'z') or
-                (c >= 'A' and c <= 'Z') or
-                (c >= '0' and c <= '9') or
-                (c == '-')
-            )) {
-                return null;
-            }
-        }
-    }
-
-    return parsed_hostname;
+    self.configuration = try Parsers.parse_resolv_configuration(allocator, content);
 }
 
 fn get_from_cache(self: *DNS, parsed_hostname: []const u8) ?[]const std.posix.sockaddr {
-    const h = std.hash.XxHash3.init(0);
+    var h = std.hash.XxHash3.init(0);
     h.update(parsed_hostname);
     const index = h.final();
 
@@ -165,7 +70,7 @@ fn get_from_cache(self: *DNS, parsed_hostname: []const u8) ?[]const std.posix.so
 }
 
 fn add_to_cache(self: *DNS, parsed_hostname: []const u8, address_list: []std.posix.sockaddr) !void {
-    const h = std.hash.XxHash3.init(0);
+    var h = std.hash.XxHash3.init(0);
     h.update(parsed_hostname);
     const index = h.final();
 
@@ -173,7 +78,8 @@ fn add_to_cache(self: *DNS, parsed_hostname: []const u8, address_list: []std.pos
 }
 
 pub fn lookup(self: *DNS, hostname: []const u8) ![]const std.posix.sockaddr {
-    const parsed_hostname = self.parse_hostname(hostname) orelse return error.InvalidDomain;
+    const parsed_hostname = Parsers.parse_hostname(&self.parsed_hostname, hostname) orelse
+        return error.InvalidDomain;
 
     if (self.get_from_cache(parsed_hostname)) |addr_info| {
         return addr_info;

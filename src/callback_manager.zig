@@ -216,6 +216,14 @@ fn test_callback2(_: *const CallbackData) !void {
     return error.Test;
 }
 
+fn test_exception_handler(err: anyerror, data: ?*anyopaque, _: ?CallbackExceptionContext) !void {
+    try std.testing.expectEqual(error.Test, err);
+
+
+    const executed_ptr: *usize = @alignCast(@ptrCast(data.?));
+    executed_ptr.* += 1;
+}
+
 test "Append multiple sets" {
     var set_queue = CallbacksSetsQueue{
         .queue = CallbacksSetLinkedList.init(std.testing.allocator)
@@ -229,10 +237,16 @@ test "Append multiple sets" {
 
     for (0..70) |_| {
         _ = try append_new_callback(std.testing.allocator, &set_queue, .{
-            .ZigGeneric = .{
-                .data = null,
-                .callback = &test_callback
+            .func = &test_callback,
+            .cleanup = null,
+            .data = .{
+                .user_data = null,
+                .exception_context = null
             }
+            // .ZigGeneric = .{
+            //     .data = null,
+            //     .callback = &test_callback
+            // }
         }, 10);
     }
 
@@ -262,14 +276,20 @@ test "Append new callback to set queue and execute it" {
     var executed: usize = 0;
 
     const ret = try append_new_callback(std.testing.allocator, &set_queue, .{
-        .ZigGeneric = .{
-            .data = &executed,
-            .callback = &test_callback
+        .func = &test_callback,
+        .cleanup = null,
+        .data = .{
+            .user_data = &executed,
+            .exception_context = null
         }
+        // .ZigGeneric = .{
+        //     .data = &executed,
+        //     .callback = &test_callback
+        // }
     }, 10);
 
-    try std.testing.expectEqual(&test_callback, ret.ZigGeneric.callback);
-    try std.testing.expectEqual(@intFromPtr(&executed), @intFromPtr(ret.ZigGeneric.data));
+    try std.testing.expectEqual(&test_callback, ret.func);
+    try std.testing.expectEqual(@intFromPtr(&executed), @intFromPtr(ret.data.user_data));
 
     try std.testing.expect(set_queue.last_set != null);
 
@@ -279,13 +299,13 @@ test "Append new callback to set queue and execute it" {
     try std.testing.expectEqual(ret, &callbacks_set.callbacks[0]);
     try std.testing.expectEqual(10, callbacks_set.callbacks.len);
 
-    _ = execute_callbacks(&set_queue, false, null);
+    _ = try execute_callbacks(&set_queue, null, null);
     try std.testing.expectEqual(1, executed);
     try std.testing.expectEqual(0, callbacks_set.callbacks_num);
 
     callbacks_set.callbacks_num = 1;
     executed = 0;
-    _ = execute_callbacks(&set_queue, true, null);
+    _ = try execute_callbacks(&set_queue, null, null);
     try std.testing.expectEqual(1, executed);
     try std.testing.expectEqual(0, callbacks_set.callbacks_num);
     try std.testing.expectEqual(set_queue.queue.first, set_queue.last_set);
@@ -305,18 +325,24 @@ test "Append and cancel callbacks" {
     var executed: usize = 0;
     for (0..70) |i| {
         const callback = try append_new_callback(std.testing.allocator, &set_queue, .{
-            .ZigGeneric = .{
-                .data = &executed,
-                .callback = &test_callback
+            .func = &test_callback,
+            .cleanup = null,
+            .data = .{
+                .user_data = &executed,
+                .exception_context = null
             }
+            // .ZigGeneric = .{
+            //     .data = &executed,
+            //     .callback = &test_callback
+            // }
         }, 10);
 
         if (i % 2 == 0) {
-            callback.ZigGeneric.can_execute = false;
+            callback.data.cancelled = true;
         }
     }
 
-    _ = execute_callbacks(&set_queue, false, null);
+    _ = try execute_callbacks(&set_queue, null, null);
     try std.testing.expectEqual(35, executed);
 }
 
@@ -332,17 +358,20 @@ test "Append and stopping with exception" {
     }
 
     var executed: usize = 0;
+    var executed2: usize = 0;
     for (0..70) |i| {
         const callback = try append_new_callback(std.testing.allocator, &set_queue, .{
-            .ZigGeneric = .{
-                .data = &executed,
-                .callback = blk: {
-                    if (i == 35) {
-                        break :blk &test_callback2;
-                    }else{
-                        break :blk &test_callback;
-                    }
+            .func = blk: {
+                if (i == 35) {
+                    break :blk &test_callback2;
+                }else{
+                    break :blk &test_callback;
                 }
+            },
+            .cleanup = null,
+            .data = .{
+                .user_data = &executed,
+                .exception_context = null
             }
         }, 10);
 
@@ -351,6 +380,7 @@ test "Append and stopping with exception" {
         }
     }
 
-    _ = execute_callbacks(&set_queue, false, null);
-    try std.testing.expectEqual(34, executed);
+    _ = try execute_callbacks(&set_queue, &test_exception_handler, &executed2);
+    try std.testing.expectEqual(69, executed);
+    try std.testing.expectEqual(1, executed2);
 }

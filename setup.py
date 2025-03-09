@@ -29,8 +29,6 @@ if not is_gil_enabled:
 
 
 class LeviathanBench(Command):
-    user_options: list[Any] = []
-
     def initialize_options(self) -> None:
         pass
 
@@ -60,8 +58,6 @@ class LeviathanBench(Command):
 
 
 class LeviathanTest(Command):
-    user_options: list[Any] = []
-
     def initialize_options(self) -> None:
         pass
 

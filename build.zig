@@ -155,7 +155,7 @@ pub fn build(b: *std.Build) void {
     callback_manager_unit_tests.root_module.addImport("utils", utils_module);
 
     const run_leviathan_module_unit_tests = b.addRunArtifact(leviathan_module_unit_tests);
-    const run_callback_manager_unit_tests = b.addRunArtifact(utils_unit_tests);
+    const run_callback_manager_unit_tests = b.addRunArtifact(callback_manager_unit_tests);
     const run_utils_unit_tests = b.addRunArtifact(utils_unit_tests);
 
     const test_step = b.step("test", "Run unit tests");

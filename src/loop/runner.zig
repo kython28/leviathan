@@ -61,13 +61,15 @@ pub fn prune_callbacks_sets(
         const callbacks_set: CallbackManager.CallbacksSet = node.data;
         node.prev = null;
         queue.first = node;
-        ready_tasks.last_set = node;
         queue.len = queue_len;
 
         max_number_of_callbacks_set_ptr.* = CallbackManager.get_max_callbacks_sets(
             ready_tasks_queue_min_bytes_capacity, callbacks_set.callbacks.len
         );
     }
+
+    ready_tasks.first_set = queue.first;
+    ready_tasks.last_set = queue.first;
 }
 
 fn exception_handler(
@@ -324,6 +326,8 @@ test "Prune sets when maximum is 1" {
     Loop.Runner.prune_callbacks_sets(allocator, &ready_tasks, &max_number_of_callbacks_set_ptr, 0);
 
     try std.testing.expectEqual(ready_tasks.queue.len, 1);
+    try std.testing.expectEqual(ready_tasks.first_set, ready_tasks.queue.first);
+    try std.testing.expectEqual(ready_tasks.last_set, ready_tasks.queue.first);
 }
 
 test "Prune sets when maximum is more than 1" {
@@ -362,6 +366,8 @@ test "Prune sets when maximum is more than 1" {
     );
 
     try std.testing.expectEqual(ready_tasks.queue.len, max_number_of_callbacks_set);
+    try std.testing.expectEqual(ready_tasks.first_set, ready_tasks.queue.first);
+    try std.testing.expectEqual(ready_tasks.last_set, ready_tasks.queue.first);
 }
 
 
@@ -401,6 +407,8 @@ test "Prune sets with high limit" {
     );
 
     try std.testing.expect(ready_tasks.queue.len < max_number_of_callbacks_set);
+    try std.testing.expectEqual(ready_tasks.first_set, ready_tasks.queue.first);
+    try std.testing.expectEqual(ready_tasks.last_set, ready_tasks.queue.last);
 }
 
 test "Running callbaks and prune" {
@@ -453,4 +461,6 @@ test "Running callbaks and prune" {
 
     try std.testing.expect(ret > 0);
     try std.testing.expect(ready_tasks.queue.len <= max_number_of_callbacks_set);
+    try std.testing.expectEqual(ready_tasks.first_set, ready_tasks.queue.first);
+    try std.testing.expectEqual(ready_tasks.last_set, ready_tasks.queue.first);
 }

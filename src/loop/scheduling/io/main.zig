@@ -21,7 +21,7 @@ pub const BlockingTaskData = struct {
 };
 
 pub const TotalTasksItems = switch (builtin.mode) {
-    .Debug => 4,
+    .Debug => 8192, // 4,
     else => 8192
 };
 

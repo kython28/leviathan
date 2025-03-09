@@ -42,7 +42,7 @@ M_INITIAL: int = 1024
 M_MULTIPLIER: int = 2
 
 LOOPS: List[Tuple[str, Callable[[], asyncio.AbstractEventLoop]]] = [
-    ("asyncio", asyncio.new_event_loop),
+    ("asyncio (default loop)", asyncio.new_event_loop),
     ("uvloop", uvloop.new_event_loop),
     ("leviathan", leviathan.Loop),
 ]

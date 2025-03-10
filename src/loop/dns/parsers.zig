@@ -6,40 +6,29 @@ pub const Configuration = struct {
     search: [][]u8,
 };
 
-pub fn parse_hostname(buf: []u8, hostname: []const u8) ?[]const u8 {
-    if (hostname.len > buf.len) {
-        return null;
-    }
-
-    const parsed_hostname = try std.ascii.lowerString(buf, hostname);
-
-    if (std.mem.count(u8, parsed_hostname, ".") == 0) {
-        return null;
-    }
-
-    const iter = std.mem.splitScalar(u8, parsed_hostname, '|');
+pub fn validate_hostname(hostname: []const u8) bool {
+    const iter = std.mem.splitScalar(u8, hostname, '.');
     while (iter.next()) |label| {
         if (label.len < 1 or label.len > 63) {
-            return null;
+            return false;
         }
 
         if (label[0] == '-' or label[label.len - 1] == '-') {
-            return null;
+            return false;
         }
 
         for (label) |c| {
             if (!(
                 (c >= 'a' and c <= 'z') or
-                (c >= 'A' and c <= 'Z') or
                 (c >= '0' and c <= '9') or
                 (c == '-')
             )) {
-                return null;
+                return false;
             }
         }
     }
 
-    return parsed_hostname;
+    return true;
 }
 
 pub fn parse_resolv_configuration(allocator: std.mem.Allocator, content: []const u8) !Configuration {
@@ -80,8 +69,8 @@ pub fn parse_resolv_configuration(allocator: std.mem.Allocator, content: []const
                     continue :loop;
                 }
 
-                const parsed_hostname = try parse_hostname(search_tmp_buf, word) orelse
-                    return error.InvalidConfiguration;
+                const parsed_hostname = try std.ascii.lowerString(search_tmp_buf, word);
+                if (!validate_hostname(parsed_hostname, true)) return error.InvalidConfiguration;
 
                 const host = try allocator.dupe(parsed_hostname);
                 errdefer allocator.free(host);

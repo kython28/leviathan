@@ -5,6 +5,7 @@ const Loop = @import("../main.zig");
 
 const Cache = @import("cache.zig");
 const Parsers = @import("parsers.zig");
+const Resolv = @import("resolv.zig");
 
 const DNSCacheEntries = switch (builtin.mode) {
     .Debug => 8,
@@ -20,7 +21,7 @@ allocator: std.mem.Allocator,
 configuration: Parsers.Configuration,
 
 cache_entries: [DNSCacheEntries]Cache,
-parsed_hostname: [255]u8,
+parsed_hostname_buf: [255]u8,
 
 ipv6_supported: bool,
 
@@ -61,31 +62,32 @@ fn load_configuration(self: *DNS, allocator: std.mem.Allocator) !void {
     self.configuration = try Parsers.parse_resolv_configuration(allocator, content);
 }
 
-fn get_from_cache(self: *DNS, parsed_hostname: []const u8) ?[]const std.posix.sockaddr {
+fn get_from_cache(self: *DNS, hostname: []const u8) ?[]const std.posix.sockaddr {
     var h = std.hash.XxHash3.init(0);
-    h.update(parsed_hostname);
+    h.update(hostname);
     const index = h.final();
 
-    return self.cache_entries[index & CACHE_MASK].get(parsed_hostname);
+    return self.cache_entries[index & CACHE_MASK].get(hostname);
 }
 
-fn add_to_cache(self: *DNS, parsed_hostname: []const u8, address_list: []std.posix.sockaddr) !void {
+fn add_to_cache(self: *DNS, hostname: []const u8, address_list: []std.posix.sockaddr) !void {
     var h = std.hash.XxHash3.init(0);
-    h.update(parsed_hostname);
+    h.update(hostname);
     const index = h.final();
 
-    try self.cache_entries[index & CACHE_MASK].add(parsed_hostname, address_list);
+    try self.cache_entries[index & CACHE_MASK].add(hostname, address_list);
 }
 
-pub fn lookup(self: *DNS, hostname: []const u8) ![]const std.posix.sockaddr {
-    const parsed_hostname = Parsers.parse_hostname(&self.parsed_hostname, hostname) orelse
-        return error.InvalidDomain;
+pub fn lookup(self: *DNS, hostname: []const u8) !?[]const std.posix.sockaddr {
+    const parsed_hostname = try std.ascii.lowerString(&self.parsed_hostname_buf, hostname);
 
     if (self.get_from_cache(parsed_hostname)) |addr_info| {
         return addr_info;
     }
 
+    try Resolv.resolv_hostname(hostname, self.configuration);
 
+    return null;
 }
 
 pub fn deinit(self: *DNS) void {

@@ -10,8 +10,6 @@ const LoopObject = Loop.Python.LoopObject;
 
 const Scheduling = @import("scheduling.zig");
 
-const std = @import("std");
-
 inline fn z_loop_add_signal_handler(
     self: *LoopObject, args: []?PyObject
 ) !PyObject {

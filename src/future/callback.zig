@@ -1,11 +1,9 @@
 const std = @import("std");
 
 const CallbackManager = @import("callback_manager");
-const Handle = @import("../handle.zig");
 const Loop = @import("../loop/main.zig");
 const Future = @import("main.zig");
 
-const CallbacksSetLinkedList = CallbackManager.CallbacksSetLinkedList;
 const utils = @import("utils");
 
 const python_c = @import("python_c");
@@ -45,7 +43,7 @@ pub const Callback = struct {
 
 pub const CallbacksSetData = std.ArrayList(Callback);
 
-fn release_python_future_data(data: ?*anyopaque) void {
+fn release_python_future_data(data: ?*anyopaque) !void {
     const future: *Future = @alignCast(@ptrCast(data.?));
     const py_future = utils.get_parent_ptr(Future.Python.FutureObject, future);
     python_c.py_decref(@ptrCast(py_future));
@@ -152,7 +150,9 @@ pub fn release_callbacks_queue(queue: *const CallbacksSetData) void {
                 python_c.py_decref(data.context);
             },
             .ZigGeneric => |data| {
-                data.callback(null, data.ptr) catch unreachable;
+                data.callback(null, data.ptr) catch |err| {
+                    std.debug.panic("Unexpected error while releasing future callbacks: {s}", .{@errorName(err)});
+                };
             }
         }
     }

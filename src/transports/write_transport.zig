@@ -187,7 +187,7 @@ inline fn queue_remaining_data(self: *WriteTransport, data_written: usize) !void
     python_c.py_incref(self.parent_transport);
 }
 
-fn cleanup_resources_callback(ptr: ?*anyopaque) void {
+fn cleanup_resources_callback(ptr: ?*anyopaque) !void {
     const self: *WriteTransport = @alignCast(@ptrCast(ptr.?));
     python_c.py_decref(self.parent_transport);
 

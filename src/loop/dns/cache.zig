@@ -18,15 +18,20 @@ pub fn init(self: *Cache, allocator: std.mem.Allocator) void {
     self.records_list = RecordLinkedList.init(allocator);
 }
 
-pub fn add(self: *Cache, hostname: []const u8, address_list: []std.posix.sockaddr) !void {
+pub fn add(self: *Cache, hostname: []const u8, address_list: []std.posix.sockaddr, ttl: u32) !void {
     const allocator = self.allocator;
     const new_hostname = try allocator.dupe(hostname);
     errdefer allocator.free(new_hostname);
 
+    var expire_at: i64 = std.math.maxInt(i64);
+    if (ttl < std.math.maxInt(u32)) {
+        expire_at = std.time.timestamp() + ttl;
+    }
+
     const new_record = Record{
         .hostname = new_hostname,
         .address_list = address_list,
-        .last_update = std.time.timestamp()
+        .expire_at = expire_at
     };
 
     try self.records_list.append(new_record);

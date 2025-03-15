@@ -70,12 +70,12 @@ fn get_from_cache(self: *DNS, hostname: []const u8) ?[]const std.posix.sockaddr 
     return self.cache_entries[index & CACHE_MASK].get(hostname);
 }
 
-fn add_to_cache(self: *DNS, hostname: []const u8, address_list: []std.posix.sockaddr) !void {
+pub fn add_to_cache(self: *DNS, hostname: []const u8, address_list: []std.posix.sockaddr, ttl: u32) !void {
     var h = std.hash.XxHash3.init(0);
     h.update(hostname);
     const index = h.final();
 
-    try self.cache_entries[index & CACHE_MASK].add(hostname, address_list);
+    try self.cache_entries[index & CACHE_MASK].add(hostname, address_list, ttl);
 }
 
 pub fn lookup(self: *DNS, hostname: []const u8) !?[]const std.posix.sockaddr {

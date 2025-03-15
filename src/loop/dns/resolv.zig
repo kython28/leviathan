@@ -47,26 +47,17 @@ const HostnamesArray = struct {
 };
 
 pub const UserCallback = struct {
-    callback: *const fn (?*anyopaque, ?std.posix.sockaddr) anyerror!void,
+    callback: *const fn (?*anyopaque, ?[]const std.posix.sockaddr) anyerror!void,
     user_data: ?*anyopaque
 };
 
-const ControlData = struct {
-    user_callback: UserCallback,
-    blocking_task_id: []usize,
-    tasks_finished: usize = 0,
-    resolved: bool = false,
-};
 
-const ResponseStep = enum {
-    ReadingHeader, ReadingResult
+const ResponseProcessingState = enum {
+    ProcessHeader, ProcessBody
 };
 
 const ServerQueryData = struct {
-    allocator: std.mem.Allocator,
-
     loop: *Loop,
-    dns: *DNS,
 
     address: *const std.posix.sockaddr,
     socket_fd: std.posix.fd_t,
@@ -74,7 +65,6 @@ const ServerQueryData = struct {
     hostnames_array: HostnamesArray,
 
     control_data: *ControlData,
-    task_id: *usize,
 
     payload: []u8,
     payload_len: usize,
@@ -83,44 +73,80 @@ const ServerQueryData = struct {
     response: []u8,
     response_bytes_received: usize,
     response_offset: usize = 0,
-    response_step: ResponseStep,
 
-    results: []std.posix.sockaddr,
-    result_offset: u16,
+    results: std.ArrayList(std.posix.sockaddr),
+    results_to_process: u16,
+
+    min_ttl: u32 = std.math.maxInt(u32),
 };
 
-fn acquire_and_execute_callback(control_data: *ControlData, result: ?std.posix.sockaddr) !void {
+const ControlData = struct {
+    allocator: std.mem.Allocator,
+    arena: std.heap.ArenaAllocator,
+
+    dns: *DNS,
+
+    user_callback: UserCallback,
+    user_callback_called: bool = false,
+
+
+    queries_data: []ServerQueryData,
+    tasks_finished: usize = 0,
+    resolved: bool = false,
+};
+
+fn acquire_and_execute_callback(
+    server_data: *ServerQueryData,
+    results: []const std.posix.sockaddr,
+    min_ttl: u32
+) !void {
+    const control_data = server_data.control_data;
     control_data.resolved = true;
 
+    for (control_data.queries_data) |*sd| {
+        const socket_fd = sd.socket_fd;
+        if (sd == server_data or socket_fd < 0) continue;
 
+        std.posix.close(socket_fd);
+        sd.socket_fd = -1;
+    }
+
+    const hostname_info = &server_data.hostnames_array.array[0];
+    try control_data.dns.add_to_cache(
+        hostname_info.hostname[0..hostname_info.original_hostname_len],
+        results, min_ttl
+    );
+
+    control_data.user_callback_called = true;
+    const user_callback = control_data.user_callback;
+    user_callback.callback(user_callback.user_data, results);
+
+    try release_server_query_resources(server_data);
 }
 
-fn release_server_query_resources(data: *ServerQueryData) !void {
-    const allocator = data.allocator;
+fn release_server_query_resources(data: ?*anyopaque) !void {
+    const server_data: *ServerQueryData = @alignCast(@ptrCast(data.?));
 
-    const control_data = data.control_data;
-    var user_callback: ?UserCallback = null;
+    const socket_fd = server_data.socket_fd;
+    if (socket_fd > 0) {
+        std.posix.close(socket_fd);
+        server_data.socket_fd = -1;
+    }
 
+    const control_data = server_data.control_data;
     control_data.tasks_finished += 1;
 
-    if (control_data.tasks_finished == control_data.blocking_task_id.len) {
-        if (!control_data.resolved) {
-            user_callback = control_data.user_callback;
-        }
-        allocator.free(control_data.blocking_task_id);
-        allocator.destroy(control_data);
-
-        allocator.free(data.hostnames_array.array);
+    if (control_data.tasks_finished < control_data.blocking_task_id.len) {
+        return;
     }
 
-    std.posix.close(data.socket_fd);
-    allocator.free(data.payload);
-    allocator.free(data.results);
-    allocator.destroy(data);
-
-    if (user_callback) |v| {
-        try v.callback(v.user_data, null);
+    if (!control_data.user_callback_called) {
+        const user_callback = control_data.user_callback;
+        try user_callback.callback(user_callback.user_data, null);
     }
+
+    control_data.arena.deinit();
+    control_data.allocator.destroy(control_data);
 }
 
 fn check_send_operation_result(data: *const CallbackManager.CallbackData) !void {
@@ -147,7 +173,7 @@ fn check_send_operation_result(data: *const CallbackManager.CallbackData) !void 
             .PerformRead = .{
                 .callback = .{
                     .func = &process_dns_response,
-                    .cleanup = null,
+                    .cleanup = &release_server_query_resources,
                     .data = .{
                         .user_data = server_data,
                         .exception_context = null
@@ -169,7 +195,7 @@ fn check_send_operation_result(data: *const CallbackManager.CallbackData) !void 
                         .user_data = server_data,
                         .exception_context = null
                     },
-                    .cleanup = null
+                    .cleanup = &release_server_query_resources
                 },
                 .data = server_data.payload[data_sent..payload_len],
                 .fd = server_data.socket_fd,
@@ -178,15 +204,10 @@ fn check_send_operation_result(data: *const CallbackManager.CallbackData) !void 
         };
     }
 
-    const new_task_id = Loop.Scheduling.IO.queue(server_data.loop, operation_data) catch |err| {
-        release_server_query_resources(server_data) catch |err2| return err2;
-        return err;
-    };
-
-    server_data.task_id.* = new_task_id;
+    _  = try Loop.Scheduling.IO.queue(server_data.loop, operation_data);
 }
 
-inline fn parse_result(data: []const u8) ?usize {
+fn parse_individual_dns_result(data: []const u8, result: *std.posix.sockaddr, new_result: *bool, ttl: *u32) ?usize {
     var offset: usize = 0;
     if (data[offset]&0xC0 == 0xC0) {
         offset += 2;
@@ -216,8 +237,27 @@ inline fn parse_result(data: []const u8) ?usize {
 
     if (r_class == 1) {
         switch (r_type) {
-            1 => {},
-            28 => {},
+            1 => {
+                const sockaddr_in: *std.posix.sockaddr.in = @ptrCast(result);
+                sockaddr_in.* = .{
+                    .addr = @as(*align(1) const u32, @ptrCast(data.ptr + offset)),
+                    .port = 0
+                };
+                new_result.* = true;
+                ttl.* = std.mem.bigToNative(u32, result_header.ttl);
+            },
+            28 => {
+                const sockaddr_in6: *std.posix.sockaddr.in6 = @ptrCast(result);
+                sockaddr_in6.* = std.posix.sockaddr.in6{
+                    .addr = undefined,
+                    .port = 0,
+                    .flowinfo = 0,
+                    .scope_id = 0
+                };
+                @memcpy(&sockaddr_in6.addr, data[offset..(offset + 16)]);
+                new_result.* = true;
+                ttl.* = std.mem.bigToNative(u32, result_header.ttl);
+            },
             else => {}
         }
     }
@@ -233,7 +273,7 @@ fn process_dns_response(data: *const CallbackManager.CallbackData) !void {
 
     const control_data = server_data.control_data;
     if (io_uring_err != .SUCCESS or control_data.resolved) {
-        try release_server_query_resources(server_data);
+        release_server_query_resources(server_data);
         return;
     }
 
@@ -245,35 +285,91 @@ fn process_dns_response(data: *const CallbackManager.CallbackData) !void {
     var hostnames_processed = server_data.hostnames_array.processed;
     defer server_data.hostnames_array.processed = hostnames_processed;
 
-    var response_step = server_data.response_step;
-    defer server_data.response_step = response_step;
+    const response = server_data.response;
 
-    const finished: bool = blk: while (hostnames_processed < hostnames_len) {
-        switch (response_step) {
-            .ReadingHeader => {
-                const diff = (data_received - offset);
-                if (diff < @sizeOf(Header)) {
-                    break :blk false;
-                }
+    var results_to_process: u16 = server_data.results_to_process;
+    defer server_data.results_to_process = results_to_process;
 
-                const header: *Header = server_data.response[offset..(offset + @sizeOf(Header))];
-                if (header.ancount == 0) {
-                    hostnames_processed += 1;
-                    offset += @sizeOf(Header);
-                    if (diff >= 2*@sizeOf(Header)) {
-                        continue :blk;
-                    }
-                    break :blk false;
-                }
+    var state: ResponseProcessingState = ResponseProcessingState.ProcessHeader;
+    if (results_to_process > 0) {
+        state = ResponseProcessingState.ProcessBody;
+    }
 
-                response_step = .ReadingResult;
-                continue :blk;
-            },
-            .ReadingResponse => {
-
+    loop: switch (state) {
+        .ProcessHeader => while (hostnames_processed < hostnames_len) {
+            const diff = (data_received - offset);
+            if (diff < @sizeOf(Header)) {
+                break;
             }
+
+            const header: *Header = response[offset..(offset + @sizeOf(Header))];
+            const results_len: u16 = std.mem.bigToNative(header.ancount);
+            offset += @sizeOf(Header);
+
+            // Check if there aren't results
+            if (results_len == 0) {
+                hostnames_processed += 1;
+                continue;
+            }
+
+            // Skip query domain
+            while (true) {
+                const length = response[offset];
+                if (length == 0) break;
+
+                offset += @intCast(length + 1);
+            }
+
+            offset += 5; // Skip some stuffs
+            results_to_process = results_len;
+            continue :loop ResponseProcessingState.ProcessBody;
+        },
+        .ProcessBody => while (results_to_process > 0) {
+            var result: std.posix.sockaddr = undefined;
+            var new_result: bool = true;
+            var ttl: u32 = std.math.maxInt(u32);
+
+            if (parse_individual_dns_result(response[offset..], &result, &new_result, &ttl)) |new_offset| {
+                offset = new_offset;
+                if (new_result) {
+                    try server_data.results.append(result);
+                    server_data.min_ttl = @min(server_data.min_ttl, ttl);
+                }
+
+                results_to_process -= 1;
+                continue;
+            }
+
+            break :loop;
+        } else {
+            hostnames_processed += 1;
+            continue :loop ResponseProcessingState.ProcessHeader;
         }
-    };
+    }
+
+    if (hostnames_processed < hostnames_len) {
+        server_data.task_id.* = try Loop.Scheduling.IO.queue(
+            server_data.loop, .{
+                .PerformRead = .{
+                    .data = .{
+                        .buffer = response[offset..],
+                    },
+                    .fd = server_data.socket_fd,
+                    .zero_copy = true,
+                    .callback = .{
+                        .func = &process_dns_response,
+                        .data = .{
+                            .user_data = server_data,
+                            .exception_context = null
+                        },
+                        .cleanup = &release_server_query_resources
+                    }
+                }
+            }
+        );
+        return;
+    }
+
 
 
 }
@@ -397,19 +493,38 @@ fn get_hostname_array(
 }
 
 pub fn resolv_hostname(
+    dns: *DNS,
     loop: *Loop,
     hostname: []const u8,
     user_callback: UserCallback,
     configuration: Parsers.Configuration
 ) !void {
     const allocator = loop.allocator;
-    const hostnames_array = try get_hostname_array(allocator, hostname, configuration.search);
-    errdefer allocator.free(hostnames_array.array);
 
     const control_data = try allocator.create(ControlData);
     errdefer allocator.destroy(control_data);
 
     control_data.* = .{
-        .user_callback = user_callback
+        .allocator = allocator,
+        .arena = std.heap.ArenaAllocator.init(allocator),
+        .dns = dns,
+        .user_callback = user_callback,
+        .queries_data = undefined
     };
+    errdefer control_data.arena.deinit();
+
+    const arena_allocator = control_data.arena.allocator();
+
+    const queries_data = try arena_allocator.alloc(ServerQueryData, configuration.servers.len);
+
+    const hostnames_array = try get_hostname_array(arena_allocator, hostname, configuration.search);
+    errdefer allocator.free(hostnames_array.array);
+
+    const ipv6_supported = dns.ipv6_supported;
+
+    var queries_sent: usize = 0;
+    for (configuration.servers) |*server| {
+        try send_queries_to_server(loop, ipv6_supported, arena_allocator, hostnames_array, server, control_data);
+        queries_sent += 1;
+    }
 }

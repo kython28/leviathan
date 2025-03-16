@@ -250,7 +250,8 @@ pub const BlockingOperation = enum {
 
 pub const WaitData = struct {
     callback: CallbackManager.Callback,
-    fd: std.os.linux.fd_t
+    fd: std.os.linux.fd_t,
+    timeout: ?std.os.linux.kernel_timespec = null
 };
 
 pub const BlockingOperationData = union(BlockingOperation) {

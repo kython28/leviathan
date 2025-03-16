@@ -117,7 +117,7 @@ fn read_operation_completed(data: *const CallbackManager.CallbackData) !void {
     self.cancelling = false;
 
     var bytes_read: usize = 0;
-    if (io_uring_err == .SUCCESS) {
+    if (io_uring_err == .SUCCESS and !data.cancelled) {
         bytes_read = @intCast(io_uring_res);
     }
 

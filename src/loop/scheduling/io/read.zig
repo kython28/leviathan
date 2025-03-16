@@ -8,6 +8,7 @@ pub const PerformData = struct {
     callback: CallbackManager.Callback,
     data: std.os.linux.IoUring.ReadBuffer,
     offset: usize = 0,
+    timeout: ?std.os.linux.kernel_timespec = null,
     zero_copy: bool = false
 };
 
@@ -18,8 +19,17 @@ pub fn wait_ready(set: *IO.BlockingTasksSet, data: IO.WaitData) !usize {
     const ring: *std.os.linux.IoUring = &set.ring;
     const sqe = try ring.poll_add(@intCast(@intFromPtr(data_ptr)), data.fd, std.c.POLL.IN);
     sqe.flags |= std.os.linux.IOSQE_ASYNC;
+
+    var expected_submission: u32 = 1;
+    if (data.timeout) |*timeout| {
+        sqe.flags |= std.os.linux.IOSQE_IO_LINK;
+        const timeout_sqe = try ring.link_timeout(0, timeout, 0);
+        timeout_sqe.flags |= std.os.linux.IOSQE_ASYNC;
+        expected_submission += 1;
+    }
+
     const ret = try ring.submit();
-    if (ret != 1) {
+    if (ret != expected_submission) {
         return error.SQENotSubmitted;
     }
     return @intFromPtr(data_ptr);
@@ -57,8 +67,17 @@ pub fn perform(set: *IO.BlockingTasksSet, data: PerformData) !usize {
         break :blk try ring.read(@intCast(@intFromPtr(data_ptr)), data.fd, data.data, data.offset);
     };
     sqe.flags |= std.os.linux.IOSQE_ASYNC;
+
+    var expected_submission: u32 = 1;
+    if (data.timeout) |*timeout| {
+        sqe.flags |= std.os.linux.IOSQE_IO_LINK;
+        const timeout_sqe = try ring.link_timeout(0, timeout, 0);
+        timeout_sqe.flags |= std.os.linux.IOSQE_ASYNC;
+        expected_submission += 1;
+    }
+
     const ret = try ring.submit();
-    if (ret != 1) {
+    if (ret != expected_submission) {
         return error.SQENotSubmitted;
     }
     return @intFromPtr(data_ptr);

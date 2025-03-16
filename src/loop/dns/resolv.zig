@@ -8,6 +8,11 @@ const DNS = @import("main.zig");
 
 // TODO: Implement EDNS0 and DNSSEC
 
+const TIMEOUT: std.os.linux.kernel_timespec = .{
+    .sec = 5,
+    .nsec = 0
+};
+
 const Header = packed struct {
     id: u16,
     flags: u16,
@@ -76,14 +81,14 @@ const ServerQueryData = struct {
     min_ttl: u32 = std.math.maxInt(u32),
 };
 
-const ControlData = struct {
+pub const ControlData = struct {
     allocator: std.mem.Allocator,
     arena: std.heap.ArenaAllocator,
 
     dns: *DNS,
 
-    user_callback: UserCallback,
-    user_callback_called: bool = false,
+    user_callbacks: std.ArrayList(UserCallback),
+    user_callbacks_called: bool = false,
 
     timeout_task_id: usize,
     timeout_executed: bool = false,
@@ -97,6 +102,7 @@ const ControlData = struct {
 fn acquire_and_execute_callback(server_data: *ServerQueryData) !void {
     const control_data = server_data.control_data;
     control_data.resolved = true;
+    errdefer control_data.resolved = false;
 
     for (control_data.queries_data) |*sd| {
         const socket_fd = sd.socket_fd;
@@ -106,17 +112,20 @@ fn acquire_and_execute_callback(server_data: *ServerQueryData) !void {
         sd.socket_fd = -1;
     }
 
-    const address_list = try server_data.results.toOwnedSlice();
+    const address_list = try control_data.allocator.dupe(server_data.results.items);
+    {
+        errdefer control_data.allocator.free(address_list);
 
-    const hostname_info = &server_data.hostnames_array.array[0];
-    try control_data.dns.add_to_cache(
-        hostname_info.hostname[0..hostname_info.original_hostname_len],
-        address_list, server_data.min_ttl
-    );
+        const hostname_info = &server_data.hostnames_array.array[0];
+        try control_data.dns.add_to_cache(
+            hostname_info.hostname[0..hostname_info.original_hostname_len],
+            address_list, server_data.min_ttl
+        );
+    }
 
-    control_data.user_callback_called = true;
-    const user_callback = control_data.user_callback;
-    user_callback.callback(user_callback.user_data, address_list);
+    control_data.user_callbacks_called = true;
+    const user_callback = control_data.user_callbacks;
+    try user_callback.callback(user_callback.user_data, address_list);
 
     try release_server_query_resources(server_data);
 }
@@ -137,45 +146,18 @@ fn release_server_query_resources(data: ?*anyopaque) !void {
         return;
     }
 
-    if (!control_data.user_callback_called) {
-        const user_callback = control_data.user_callback;
-        try user_callback.callback(user_callback.user_data, null);
-    }
-
-    if (control_data.timeout_executed) {
-        control_data.arena.deinit();
-        control_data.allocator.destroy(control_data);
-    }else{
-        _ = try Loop.Scheduling.IO.queue(
-            server_data.loop, .{
-                .Cancel = control_data.timeout_task_id
-            }
-        );
-    }
-}
-
-fn timeout(data: *const CallbackManager.CallbackData) !void {
-    const io_uring_err = data.io_uring_err;
-
-    const control_data: *ControlData = @alignCast(@ptrCast(data.user_data.?));
-    if (io_uring_err != .SUCCESS or control_data.resolved) {
-        control_data.timeout_executed = true;
-        return;
-    }
-
-    if (control_data.tasks_finished == control_data.queries_data.len) {
-        control_data.arena.deinit();
-        control_data.allocator.destroy(control_data);
-        return;
-    }
-
-    control_data.timeout_executed = true;
-    for (control_data.queries_data) |*server_data| {
-        if (server_data.socket_fd >= 0) {
-            std.posix.close(server_data.socket_fd);
-            server_data.socket_fd = -1;
+    if (!control_data.user_callbacks_called) {
+        for (control_data.user_callbacks.items) |*v| {
+            try v.callback(v.user_data, null);
         }
     }
+
+    control_data.arena.deinit();
+    control_data.allocator.destroy(control_data);
+}
+
+fn execute_user_callbacks(data: *const CallbackManager.CallbackData) !void {
+
 }
 
 fn check_send_operation_result(data: *const CallbackManager.CallbackData) !void {
@@ -185,7 +167,7 @@ fn check_send_operation_result(data: *const CallbackManager.CallbackData) !void 
     const server_data: *ServerQueryData = @alignCast(@ptrCast(data.user_data.?));
 
     const control_data = server_data.control_data;
-    if (io_uring_err != .SUCCESS or control_data.resolved) {
+    if (io_uring_err != .SUCCESS or control_data.resolved or data.cancelled) {
         try release_server_query_resources(server_data);
         return;
     }
@@ -216,6 +198,7 @@ fn check_send_operation_result(data: *const CallbackManager.CallbackData) !void 
                 },
                 .fd = server_data.socket_fd,
                 .zero_copy = true,
+                .timeout = TIMEOUT
             }
         };
     }else{
@@ -231,7 +214,8 @@ fn check_send_operation_result(data: *const CallbackManager.CallbackData) !void 
                 },
                 .data = server_data.payload[data_sent..payload_len],
                 .fd = server_data.socket_fd,
-                .zero_copy = true
+                .zero_copy = true,
+                .timeout = TIMEOUT
             }
         };
     }
@@ -304,8 +288,8 @@ fn process_dns_response(data: *const CallbackManager.CallbackData) !void {
     const server_data: *ServerQueryData = @alignCast(@ptrCast(data.user_data.?));
 
     const control_data = server_data.control_data;
-    if (io_uring_err != .SUCCESS or control_data.resolved) {
-        release_server_query_resources(server_data);
+    if (io_uring_err != .SUCCESS or control_data.resolved or data.cancelled) {
+        try release_server_query_resources(server_data);
         return;
     }
 
@@ -393,7 +377,8 @@ fn process_dns_response(data: *const CallbackManager.CallbackData) !void {
                             .exception_context = null
                         },
                         .cleanup = &release_server_query_resources
-                    }
+                    },
+                    .timeout = TIMEOUT
                 }
             }
         );
@@ -549,11 +534,16 @@ fn prepare_data(
         .allocator = allocator,
         .arena = std.heap.ArenaAllocator.init(allocator),
         .dns = dns,
-        .user_callback = user_callback,
+        .user_callbacks = std.ArrayList(UserCallback).init(allocator),
         .queries_data = undefined,
         .timeout_task_id = 0,
     };
-    errdefer control_data.arena.deinit();
+    errdefer {
+        control_data.user_callbacks.deinit();
+        control_data.arena.deinit();
+    }
+
+    try control_data.user_callbacks.append(user_callback);
 
     const arena_allocator = control_data.arena.allocator();
 
@@ -590,7 +580,7 @@ pub fn resolv(
     const control_data = try prepare_data(dns, hostname, user_callback, configuration);
 
     var queries_sent: usize = 0;
-    errdefer  {
+    errdefer {
         for (control_data.queries_data[0..queries_sent]) |*server_data| {
             std.posix.close(server_data.socket_fd);
             server_data.socket_fd = -1;
@@ -617,33 +607,12 @@ pub fn resolv(
                             .user_data = server_data,
                             .exception_context = null
                         }
-                    }
+                    },
+                    .timeout = TIMEOUT
                 }
             }
         );
 
         queries_sent += 1;
     }
-
-    const timeout_duration: std.os.linux.timespec = .{
-        .nsec = 0,
-        .sec = 5
-    };
-
-    control_data.timeout_task_id = try Loop.Scheduling.IO.queue(
-        loop, .{
-            .WaitTimer = .{
-                .delay_type = .Relative,
-                .duration = timeout_duration,
-                .callback = .{
-                    .func = &timeout,
-                    .cleanup = null,
-                    .data = .{
-                        .user_data = control_data,
-                        .exception_context = null
-                    }
-                }
-            }
-        }
-    );
 }

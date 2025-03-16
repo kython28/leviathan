@@ -1,7 +1,6 @@
 const Loop = @import("main.zig");
 const CallbackManager = @import("callback_manager");
 
-const BlockingTasksSetLinkedList = Loop.Scheduling.IO.BlockingTasksSetLinkedList;
 const CallbacksSetLinkedList = CallbackManager.CallbacksSetLinkedList;
 
 const Lock = @import("../utils/lock.zig").Mutex;

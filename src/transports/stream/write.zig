@@ -5,10 +5,6 @@ const PyObject = *python_c.PyObject;
 
 const utils = @import("utils");
 
-const Loop = @import("../../loop/main.zig");
-
-const Lifecyle = @import("lifecycle.zig");
-
 const Stream = @import("main.zig");
 const StreamTransportObject = Stream.StreamTransportObject;
 

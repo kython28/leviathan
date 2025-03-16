@@ -196,6 +196,11 @@ fn cleanup_resources_callback(ptr: ?*anyopaque) !void {
 
 fn write_operation_completed(data: *const CallbackManager.CallbackData) !void {
     const self: *WriteTransport = @alignCast(@ptrCast(data.user_data.?));
+    if (data.cancelled) {
+        try cleanup_resources_callback(self);
+        return;
+    }
+
     const io_uring_res = data.io_uring_res;
     const io_uring_err = data.io_uring_err;
 

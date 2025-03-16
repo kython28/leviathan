@@ -2,11 +2,21 @@ const std = @import("std");
 
 const utils = @import("utils");
 
+const Resolv = @import("resolv.zig");
+
+const ResolvedData = struct {
+    address_list: []std.posix.sockaddr,
+    expire_at: i64,
+};
+
+const RecordState = union(enum) {
+    Pending: *Resolv.ControlData,
+    Resolved: ResolvedData,
+};
 
 const Record = struct {
     hostname: []u8,
-    address_list: []std.posix.sockaddr,
-    expire_at: i64
+    state: RecordState,
 };
 
 const RecordLinkedList = utils.LinkedList(Record);

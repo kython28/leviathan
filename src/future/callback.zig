@@ -76,7 +76,13 @@ fn run_python_future_set_callbacks(data: *const CallbackManager.CallbackData) !v
     const future: *Future = @alignCast(@ptrCast(data.user_data.?));
     const py_future = utils.get_parent_ptr(Future.Python.FutureObject, future);
 
+    if (data.cancelled) {
+        release_callbacks_queue(&future.callbacks_queue);
+        python_c.py_decref(@ptrCast(py_future));
+        return;
+    }
     const callbacks_items = future.callbacks_queue.items;
+
     var exceptions_array = std.ArrayList(?PyObject).init(future.loop.allocator);
     defer {
         for (exceptions_array.items) |exc| {

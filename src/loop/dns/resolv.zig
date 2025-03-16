@@ -68,14 +68,10 @@ const ServerQueryData = struct {
 
     payload: []u8,
     payload_len: usize,
-    payload_bytes_sent: usize = 0,
-
-    response: []u8,
-    response_bytes_received: usize,
-    response_offset: usize = 0,
+    payload_offset: usize = 0,
 
     results: std.ArrayList(std.posix.sockaddr),
-    results_to_process: u16,
+    results_to_process: u16 = 0,
 
     min_ttl: u32 = std.math.maxInt(u32),
 };
@@ -89,17 +85,16 @@ const ControlData = struct {
     user_callback: UserCallback,
     user_callback_called: bool = false,
 
+    timeout_task_id: usize,
+    timeout_executed: bool = false,
+
 
     queries_data: []ServerQueryData,
     tasks_finished: usize = 0,
     resolved: bool = false,
 };
 
-fn acquire_and_execute_callback(
-    server_data: *ServerQueryData,
-    results: []const std.posix.sockaddr,
-    min_ttl: u32
-) !void {
+fn acquire_and_execute_callback(server_data: *ServerQueryData) !void {
     const control_data = server_data.control_data;
     control_data.resolved = true;
 
@@ -111,15 +106,17 @@ fn acquire_and_execute_callback(
         sd.socket_fd = -1;
     }
 
+    const address_list = try server_data.results.toOwnedSlice();
+
     const hostname_info = &server_data.hostnames_array.array[0];
     try control_data.dns.add_to_cache(
         hostname_info.hostname[0..hostname_info.original_hostname_len],
-        results, min_ttl
+        address_list, server_data.min_ttl
     );
 
     control_data.user_callback_called = true;
     const user_callback = control_data.user_callback;
-    user_callback.callback(user_callback.user_data, results);
+    user_callback.callback(user_callback.user_data, address_list);
 
     try release_server_query_resources(server_data);
 }
@@ -128,7 +125,7 @@ fn release_server_query_resources(data: ?*anyopaque) !void {
     const server_data: *ServerQueryData = @alignCast(@ptrCast(data.?));
 
     const socket_fd = server_data.socket_fd;
-    if (socket_fd > 0) {
+    if (socket_fd >= 0) {
         std.posix.close(socket_fd);
         server_data.socket_fd = -1;
     }
@@ -136,7 +133,7 @@ fn release_server_query_resources(data: ?*anyopaque) !void {
     const control_data = server_data.control_data;
     control_data.tasks_finished += 1;
 
-    if (control_data.tasks_finished < control_data.blocking_task_id.len) {
+    if (control_data.tasks_finished < control_data.queries_data.len) {
         return;
     }
 
@@ -145,8 +142,40 @@ fn release_server_query_resources(data: ?*anyopaque) !void {
         try user_callback.callback(user_callback.user_data, null);
     }
 
-    control_data.arena.deinit();
-    control_data.allocator.destroy(control_data);
+    if (control_data.timeout_executed) {
+        control_data.arena.deinit();
+        control_data.allocator.destroy(control_data);
+    }else{
+        _ = try Loop.Scheduling.IO.queue(
+            server_data.loop, .{
+                .Cancel = control_data.timeout_task_id
+            }
+        );
+    }
+}
+
+fn timeout(data: *const CallbackManager.CallbackData) !void {
+    const io_uring_err = data.io_uring_err;
+
+    const control_data: *ControlData = @alignCast(@ptrCast(data.user_data.?));
+    if (io_uring_err != .SUCCESS or control_data.resolved) {
+        control_data.timeout_executed = true;
+        return;
+    }
+
+    if (control_data.tasks_finished == control_data.queries_data.len) {
+        control_data.arena.deinit();
+        control_data.allocator.destroy(control_data);
+        return;
+    }
+
+    control_data.timeout_executed = true;
+    for (control_data.queries_data) |*server_data| {
+        if (server_data.socket_fd >= 0) {
+            std.posix.close(server_data.socket_fd);
+            server_data.socket_fd = -1;
+        }
+    }
 }
 
 fn check_send_operation_result(data: *const CallbackManager.CallbackData) !void {
@@ -161,14 +190,17 @@ fn check_send_operation_result(data: *const CallbackManager.CallbackData) !void 
         return;
     }
 
-    const data_sent = server_data.payload_bytes_sent + @as(usize, @intCast(io_uring_res));
-    server_data.payload_bytes_sent = data_sent;
+    const data_sent = server_data.payload_offset + @as(usize, @intCast(io_uring_res));
+    server_data.payload_offset = data_sent;
 
     const payload_len = server_data.payload_len;
 
     var operation_data: Loop.Scheduling.IO.BlockingOperationData = undefined;
 
     if (data_sent == payload_len) {
+        server_data.payload_offset = 0;
+        server_data.payload_len = 0;
+
         operation_data = .{
             .PerformRead = .{
                 .callback = .{
@@ -180,7 +212,7 @@ fn check_send_operation_result(data: *const CallbackManager.CallbackData) !void 
                     }
                 },
                 .data = .{
-                    .buffer = server_data.response
+                    .buffer = server_data.payload
                 },
                 .fd = server_data.socket_fd,
                 .zero_copy = true,
@@ -277,15 +309,17 @@ fn process_dns_response(data: *const CallbackManager.CallbackData) !void {
         return;
     }
 
-    const data_received = server_data.response_bytes_received + @as(usize, @intCast(io_uring_res));
-    var offset = server_data.response_offset;
+    const data_received = server_data.payload_len + @as(usize, @intCast(io_uring_res));
+    defer server_data.payload_len = data_received;
+
+    var offset = server_data.payload_offset;
+    defer server_data.payload_offset = offset;
 
     const hostnames_len = server_data.hostnames_array.len;
-
     var hostnames_processed = server_data.hostnames_array.processed;
     defer server_data.hostnames_array.processed = hostnames_processed;
 
-    const response = server_data.response;
+    const response = server_data.payload;
 
     var results_to_process: u16 = server_data.results_to_process;
     defer server_data.results_to_process = results_to_process;
@@ -329,25 +363,21 @@ fn process_dns_response(data: *const CallbackManager.CallbackData) !void {
             var new_result: bool = true;
             var ttl: u32 = std.math.maxInt(u32);
 
-            if (parse_individual_dns_result(response[offset..], &result, &new_result, &ttl)) |new_offset| {
-                offset = new_offset;
-                if (new_result) {
-                    try server_data.results.append(result);
-                    server_data.min_ttl = @min(server_data.min_ttl, ttl);
-                }
+            const new_offset = parse_individual_dns_result(response[offset..], &result, &new_result, &ttl) orelse break;
 
-                results_to_process -= 1;
-                continue;
+            offset = new_offset;
+            if (new_result) {
+                try server_data.results.append(result);
+                server_data.min_ttl = @min(server_data.min_ttl, ttl);
             }
 
-            break :loop;
-        } else {
-            hostnames_processed += 1;
-            continue :loop ResponseProcessingState.ProcessHeader;
+            results_to_process -= 1;
         }
     }
 
-    if (hostnames_processed < hostnames_len) {
+    if (hostnames_processed == hostnames_len) {
+        try release_server_query_resources(server_data);
+    }else if (results_to_process > 0 or server_data.results.items.len == 0) {
         server_data.task_id.* = try Loop.Scheduling.IO.queue(
             server_data.loop, .{
                 .PerformRead = .{
@@ -367,11 +397,9 @@ fn process_dns_response(data: *const CallbackManager.CallbackData) !void {
                 }
             }
         );
-        return;
+    }else{
+        try acquire_and_execute_callback(server_data);
     }
-
-
-
 }
 
 fn build_query(id: u16, payload: []u8, question: QuestionType, hostname: []const u8) usize {
@@ -409,21 +437,22 @@ fn build_query(id: u16, payload: []u8, question: QuestionType, hostname: []const
     return @intFromPtr(question_type_class) + @sizeOf(QuestionTypeClass);
 }
 
-fn send_queries_to_server(
-    loop: *Loop,
-    ipv6_supported: bool,
+fn build_queries(
     allocator: std.mem.Allocator,
+    loop: *Loop,
+    control_data: *ControlData,
+    server_data: *ServerQueryData,
+    ipv6_supported: bool,
     hostnames_array: HostnamesArray,
-    server: *const std.posix.sockaddr,
-    control_data: *ControlData
+    server_address: *const std.posix.sockaddr,
 ) !void {
     const socket_fd = try std.posix.socket(
-        @enumFromInt(server.family), std.posix.SOCK.DGRAM|std.posix.SOCK.CLOEXEC,
+        @enumFromInt(server_address.family), std.posix.SOCK.DGRAM|std.posix.SOCK.CLOEXEC,
         std.posix.IPPROTO.UDP
     );
     errdefer std.posix.close(socket_fd);
 
-    try std.posix.connect(socket_fd, server, switch (server.family) {
+    try std.posix.connect(socket_fd, server_address, switch (server_address.family) {
         std.posix.AF.INET => @sizeOf(std.posix.sockaddr.in),
         std.posix.AF.INET6 => @sizeOf(std.posix.sockaddr.in6),
         else => unreachable
@@ -433,16 +462,28 @@ fn send_queries_to_server(
     errdefer allocator.free(payload);
 
     var offset: usize = 0;
-
     for (0.., hostnames_array.array[0..hostnames_array.len]) |index, hostname_info| {
         offset += build_query(@intCast(index), payload[offset..], .ipv4, hostname_info.hostname);
         
         if (ipv6_supported) {
-            offset += build_query(@intCast(index), payload[offset..], .ipv4, hostname_info.hostname);
+            offset += build_query(@intCast(index), payload[offset..], .ipv6, hostname_info.hostname);
         }
     }
 
+    server_data.* = .{
+        .loop = loop,
 
+        .payload = payload,
+        .address = server_address,
+
+        .socket_fd = socket_fd,
+        .payload_len = offset,
+
+        .control_data = control_data,
+        .hostnames_array = hostnames_array,
+
+        .results = std.ArrayList(std.posix.sockaddr).init(allocator),
+    };
 }
 
 inline fn build_hostname(data: *Hostname, hostname: []const u8, suffix: []const u8) bool {
@@ -492,13 +533,13 @@ fn get_hostname_array(
     return hostnames_array;
 }
 
-pub fn resolv_hostname(
+fn prepare_data(
     dns: *DNS,
-    loop: *Loop,
     hostname: []const u8,
     user_callback: UserCallback,
     configuration: Parsers.Configuration
-) !void {
+) !*ControlData {
+    const loop = dns.loop;
     const allocator = loop.allocator;
 
     const control_data = try allocator.create(ControlData);
@@ -509,22 +550,100 @@ pub fn resolv_hostname(
         .arena = std.heap.ArenaAllocator.init(allocator),
         .dns = dns,
         .user_callback = user_callback,
-        .queries_data = undefined
+        .queries_data = undefined,
+        .timeout_task_id = 0,
     };
     errdefer control_data.arena.deinit();
 
     const arena_allocator = control_data.arena.allocator();
 
     const queries_data = try arena_allocator.alloc(ServerQueryData, configuration.servers.len);
-
     const hostnames_array = try get_hostname_array(arena_allocator, hostname, configuration.search);
-    errdefer allocator.free(hostnames_array.array);
 
     const ipv6_supported = dns.ipv6_supported;
+    control_data.queries_data = queries_data;
+
+    var queries_built: usize = 0;
+    errdefer {
+        for (queries_data[0..queries_built]) |*server_data| {
+            std.posix.close(server_data.socket_fd);
+        }
+    }
+
+    for (configuration.servers, queries_data) |*server_address, *server_data| {
+        try build_queries(
+            arena_allocator, loop, control_data, server_data, ipv6_supported, hostnames_array, server_address
+        );
+
+        queries_built += 1;
+    }
+
+    return control_data;
+}
+
+pub fn resolv(
+    dns: *DNS,
+    hostname: []const u8,
+    user_callback: UserCallback,
+    configuration: Parsers.Configuration
+) !void {
+    const control_data = try prepare_data(dns, hostname, user_callback, configuration);
 
     var queries_sent: usize = 0;
-    for (configuration.servers) |*server| {
-        try send_queries_to_server(loop, ipv6_supported, arena_allocator, hostnames_array, server, control_data);
+    errdefer  {
+        for (control_data.queries_data[0..queries_sent]) |*server_data| {
+            std.posix.close(server_data.socket_fd);
+            server_data.socket_fd = -1;
+        }
+
+        if (queries_sent == 0) {
+            control_data.arena.deinit();
+            control_data.allocator.destroy(control_data);
+        }
+    }
+
+    const loop = dns.loop;
+    for (control_data.queries_data) |*server_data| {
+        _ = try Loop.Scheduling.IO.queue(
+            loop, .{
+                .PerformWrite = .{
+                    .zero_copy = true,
+                    .fd = server_data.socket_fd,
+                    .data = server_data.payload[0..server_data.payload_len],
+                    .callback = .{
+                        .func = &check_send_operation_result,
+                        .cleanup = &release_server_query_resources,
+                        .data = .{
+                            .user_data = server_data,
+                            .exception_context = null
+                        }
+                    }
+                }
+            }
+        );
+
         queries_sent += 1;
     }
+
+    const timeout_duration: std.os.linux.timespec = .{
+        .nsec = 0,
+        .sec = 5
+    };
+
+    control_data.timeout_task_id = try Loop.Scheduling.IO.queue(
+        loop, .{
+            .WaitTimer = .{
+                .delay_type = .Relative,
+                .duration = timeout_duration,
+                .callback = .{
+                    .func = &timeout,
+                    .cleanup = null,
+                    .data = .{
+                        .user_data = control_data,
+                        .exception_context = null
+                    }
+                }
+            }
+        }
+    );
 }

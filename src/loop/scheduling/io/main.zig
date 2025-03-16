@@ -273,8 +273,7 @@ pub fn check_io_uring_result(operation: Loop.Scheduling.IO.BlockingOperation, re
                 .CANCELED => {},
                 .SUCCESS => unreachable, // Just to debug. This timeout isn't linked to any task
                 else => |code| {
-                    std.log.err("Unexpected errno ({}) while checking result for operation {}", .{code, op});
-                    unreachable;
+                    std.debug.panic("Unexpected errno ({}) while checking result for operation {}", .{code, op});
                 }
             }
         },
@@ -287,8 +286,7 @@ pub fn check_io_uring_result(operation: Loop.Scheduling.IO.BlockingOperation, re
                 .SPIPE => {},
                 .AGAIN => unreachable, // This should not happen. Filtered by debugging porpuse
                 else => |code| {
-                    std.log.err("Unexpected errno ({}) while checking result for operation {}", .{code, op});
-                    unreachable;
+                    std.debug.panic("Unexpected errno ({}) while checking result for operation {}", .{code, op});
                 }
             }
         },
@@ -300,8 +298,7 @@ pub fn check_io_uring_result(operation: Loop.Scheduling.IO.BlockingOperation, re
                 .NOBUFS, .NOMEM, .NXIO => {},
                 .AGAIN => unreachable, // This should not happen. Filtered by debugging porpuse
                 else => |code| {
-                    std.log.err("Unexpected errno ({}) while checking result for operation {}", .{code, op});
-                    unreachable;
+                    std.debug.panic("Unexpected errno ({}) while checking result for operation {}", .{code, op});
                 }
             }
         },
@@ -311,8 +308,7 @@ pub fn check_io_uring_result(operation: Loop.Scheduling.IO.BlockingOperation, re
                 .CANCELED, .INVAL, .NOTCONN, .NOTSOCK, .BADF, .NOBUFS => {},
                 .AGAIN => unreachable, // This should not happen. Filtered by debugging porpuse
                 else => |code| {
-                    std.log.err("Unexpected errno ({}) while checking result for operation {}", .{code, op});
-                    unreachable;
+                    std.debug.panic("Unexpected errno ({}) while checking result for operation {}", .{code, op});
                 }
             }
         },
@@ -324,8 +320,7 @@ pub fn check_io_uring_result(operation: Loop.Scheduling.IO.BlockingOperation, re
                 .NETUNREACH, .NOTSOCK, .PROTOTYPE, .TIMEDOUT => {},
                 .AGAIN => unreachable, // This should not happen. Filtered by debugging porpuse
                 else => |code| {
-                    std.log.err("Unexpected errno ({}) while checking result for operation {}", .{code, op});
-                    unreachable;
+                    std.debug.panic("Unexpected errno ({}) while checking result for operation {}", .{code, op});
                 }
             }
         },
@@ -334,8 +329,7 @@ pub fn check_io_uring_result(operation: Loop.Scheduling.IO.BlockingOperation, re
                 .SUCCESS => {},
                 .CANCELED, .BADF, .INTR => {},
                 else => |code| {
-                    std.log.err("Unexpected errno ({}) while checking result for operation {}", .{code, op});
-                    unreachable;
+                    std.debug.panic("Unexpected errno ({}) while checking result for operation {}", .{code, op});
                 }
             }
         }
@@ -366,15 +360,18 @@ inline fn get_blocking_tasks_set(
         }
     };
 
-    available_blocking_tasks_queue.append_node(new_node);
-    errdefer _ = available_blocking_tasks_queue.pop_node() catch unreachable;
-
     try std.posix.epoll_ctl(epoll_fd, std.os.linux.EPOLL.CTL_ADD, new_set.eventfd, &epoll_event);
+    available_blocking_tasks_queue.append_node(new_node);
+
     return new_set;
 }
 
 pub inline fn remove_tasks_set(epoll_fd: std.posix.fd_t, blocking_tasks_set: *BlockingTasksSet) void {
-    std.posix.epoll_ctl(epoll_fd, std.os.linux.EPOLL.CTL_DEL, blocking_tasks_set.eventfd, null) catch unreachable;
+    std.posix.epoll_ctl(epoll_fd, std.os.linux.EPOLL.CTL_DEL, blocking_tasks_set.eventfd, null) catch |err| {
+        std.debug.panic("Unexpected error while removing an eventfd ({}) from epoll ({}): {s}", .{
+            blocking_tasks_set.eventfd, epoll_fd, @errorName(err)
+        });
+    };
     blocking_tasks_set.deinit(true);
 }
 

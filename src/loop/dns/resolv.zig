@@ -5,6 +5,7 @@ const CallbackManager = @import("callback_manager");
 
 const Parsers = @import("parsers.zig");
 const DNS = @import("main.zig");
+const Cache = @import("cache.zig");
 
 // TODO: Implement EDNS0 and DNSSEC
 
@@ -58,7 +59,7 @@ pub const UserCallback = struct {
 
 
 const ResponseProcessingState = enum {
-    ProcessHeader, ProcessBody
+    process_header, process_body
 };
 
 const ServerQueryData = struct {
@@ -79,6 +80,19 @@ const ServerQueryData = struct {
     results_to_process: u16 = 0,
 
     min_ttl: u32 = std.math.maxInt(u32),
+
+    pub fn release(self: *ServerQueryData) bool {
+        const socket_fd = self.socket_fd;
+        if (socket_fd >= 0) {
+            std.posix.close(socket_fd);
+            self.socket_fd = -1;
+        }
+
+        const control_data = self.control_data;
+        control_data.tasks_finished += 1;
+
+        return (control_data.tasks_finished == control_data.queries_data.len);
+    }
 };
 
 pub const ControlData = struct {
@@ -86,18 +100,37 @@ pub const ControlData = struct {
     arena: std.heap.ArenaAllocator,
 
     dns: *DNS,
+    record: *Cache.Record,
 
     user_callbacks: std.ArrayList(UserCallback),
-    user_callbacks_called: bool = false,
-
-    timeout_task_id: usize,
-    timeout_executed: bool = false,
-
 
     queries_data: []ServerQueryData,
     tasks_finished: usize = 0,
     resolved: bool = false,
+
+    pub fn release(self: *ControlData) void {
+        if (!self.resolved) {
+            self.record.discard();
+        }
+
+        self.arena.deinit();
+        self.allocator.destroy(self);
+    }
 };
+
+fn cleanup_controldata(ptr: ?*anyopaque) void {
+    const control_data: *ControlData = @alignCast(@ptrCast(ptr.?));
+    control_data.release();
+}
+
+fn cleanup_server_query_data(ptr: ?*anyopaque) void {
+    const server_data: *ServerQueryData = @alignCast(@ptrCast(ptr.?));
+    const last_one = server_data.release();
+
+    if (last_one) {
+        server_data.control_data.release();
+    }
+}
 
 fn acquire_and_execute_callback(server_data: *ServerQueryData) !void {
     const control_data = server_data.control_data;
@@ -130,35 +163,35 @@ fn acquire_and_execute_callback(server_data: *ServerQueryData) !void {
     try release_server_query_resources(server_data);
 }
 
-fn release_server_query_resources(data: ?*anyopaque) !void {
-    const server_data: *ServerQueryData = @alignCast(@ptrCast(data.?));
+// fn release_server_query_resources(data: ?*anyopaque) !void {
+//     const server_data: *ServerQueryData = @alignCast(@ptrCast(data.?));
 
-    const socket_fd = server_data.socket_fd;
-    if (socket_fd >= 0) {
-        std.posix.close(socket_fd);
-        server_data.socket_fd = -1;
-    }
+//     const socket_fd = server_data.socket_fd;
+//     if (socket_fd >= 0) {
+//         std.posix.close(socket_fd);
+//         server_data.socket_fd = -1;
+//     }
 
-    const control_data = server_data.control_data;
-    control_data.tasks_finished += 1;
+//     const control_data = server_data.control_data;
+//     control_data.tasks_finished += 1;
 
-    if (control_data.tasks_finished < control_data.queries_data.len) {
-        return;
-    }
+//     if (control_data.tasks_finished < control_data.queries_data.len) {
+//         return;
+//     }
 
-    if (!control_data.user_callbacks_called) {
-        for (control_data.user_callbacks.items) |*v| {
-            try v.callback(v.user_data, null);
-        }
-    }
+//     if (!control_data.user_callbacks_called) {
+//         for (control_data.user_callbacks.items) |*v| {
+//             try v.callback(v.user_data, null);
+//         }
+//     }
 
-    control_data.arena.deinit();
-    control_data.allocator.destroy(control_data);
-}
+//     control_data.arena.deinit();
+//     control_data.allocator.destroy(control_data);
+// }
 
-fn execute_user_callbacks(data: *const CallbackManager.CallbackData) !void {
+// fn execute_user_callbacks(data: *const CallbackManager.CallbackData) !void {
 
-}
+// }
 
 fn check_send_operation_result(data: *const CallbackManager.CallbackData) !void {
     const io_uring_err = data.io_uring_err;
@@ -308,9 +341,9 @@ fn process_dns_response(data: *const CallbackManager.CallbackData) !void {
     var results_to_process: u16 = server_data.results_to_process;
     defer server_data.results_to_process = results_to_process;
 
-    var state: ResponseProcessingState = ResponseProcessingState.ProcessHeader;
+    var state: ResponseProcessingState = ResponseProcessingState.process_header;
     if (results_to_process > 0) {
-        state = ResponseProcessingState.ProcessBody;
+        state = ResponseProcessingState.process_body;
     }
 
     loop: switch (state) {
@@ -524,8 +557,7 @@ fn prepare_data(
     user_callback: UserCallback,
     configuration: Parsers.Configuration
 ) !*ControlData {
-    const loop = dns.loop;
-    const allocator = loop.allocator;
+    const allocator = dns.allocator;
 
     const control_data = try allocator.create(ControlData);
     errdefer allocator.destroy(control_data);
@@ -560,6 +592,7 @@ fn prepare_data(
         }
     }
 
+    const loop = dns.loop;
     for (configuration.servers, queries_data) |*server_address, *server_data| {
         try build_queries(
             arena_allocator, loop, control_data, server_data, ipv6_supported, hostnames_array, server_address

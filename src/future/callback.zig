@@ -92,7 +92,7 @@ fn run_python_future_set_callbacks(data: *const CallbackManager.CallbackData) !v
         exceptions_array.deinit();
     }
 
-    for (callbacks_items) |callback| {
+    for (callbacks_items) |*callback| {
         if (callback.cancelled) continue;
 
         switch (callback.data) {

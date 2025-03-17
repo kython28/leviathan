@@ -187,7 +187,7 @@ inline fn queue_remaining_data(self: *WriteTransport, data_written: usize) !void
     python_c.py_incref(self.parent_transport);
 }
 
-fn cleanup_resources_callback(ptr: ?*anyopaque) !void {
+fn cleanup_resources_callback(ptr: ?*anyopaque) void {
     const self: *WriteTransport = @alignCast(@ptrCast(ptr.?));
     python_c.py_decref(self.parent_transport);
 
@@ -197,7 +197,7 @@ fn cleanup_resources_callback(ptr: ?*anyopaque) !void {
 fn write_operation_completed(data: *const CallbackManager.CallbackData) !void {
     const self: *WriteTransport = @alignCast(@ptrCast(data.user_data.?));
     if (data.cancelled) {
-        try cleanup_resources_callback(self);
+        cleanup_resources_callback(self);
         return;
     }
 

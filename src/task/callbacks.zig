@@ -328,7 +328,7 @@ fn failed_execution(task: *Task.PythonTaskObject) error{PythonError}!void {
     return error.PythonError;
 }
 
-pub fn cleanup_task(ptr: ?*anyopaque) !void {
+pub fn cleanup_task(ptr: ?*anyopaque) void {
     const task: *Task.PythonTaskObject = @alignCast(@ptrCast(ptr.?));
     python_c.py_decref(@ptrCast(task));
 }

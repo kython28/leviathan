@@ -24,7 +24,7 @@ pub const PythonHandleObject = extern struct {
 pub const ExceptionMessage: [:0]const u8 = "An error ocurred while executing python callback";
 pub const ModuleName: [:0]const u8 = "handle";
 
-pub fn release_python_generic_callback(ptr: ?*anyopaque) !void {
+pub fn release_python_generic_callback(ptr: ?*anyopaque) void {
     const handle: *PythonHandleObject = @alignCast(@ptrCast(ptr.?));
 
     python_c.py_decref(@ptrCast(handle));

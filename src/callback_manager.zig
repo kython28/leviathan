@@ -28,7 +28,7 @@ pub const CallbackData = struct {
 };
 
 pub const GenericCallback = *const fn (data: *const CallbackData) anyerror!void;
-pub const GenericCleanUpCallback = *const fn (user_data: ?*anyopaque) anyerror!void;
+pub const GenericCleanUpCallback = *const fn (user_data: ?*anyopaque) void;
 
 pub const Callback = struct {
     func: GenericCallback,
@@ -162,38 +162,26 @@ pub fn execute_callbacks(
         chunks_executed += 1;
         for (callbacks_set.callbacks[callbacks_set.offset..callbacks_num]) |*callback| {
             callback.func(&callback.data) catch |err| {
+                defer {
+                    if (callback.cleanup) |cleanup| {
+                        cleanup(callback.data.user_data);
+                    }
+                }
+
                 const new_offset = (
                     @intFromPtr(callback) - @intFromPtr(callbacks_set.callbacks.ptr)
                 ) / @sizeOf(Callback) + 1;
 
-                if (exception_handler) |handler| {
-                    handler(err, exception_handler_data, callback.data.exception_context) catch |err2| {
-                        sets_queue.first_set = node;
-                        node.data.offset = new_offset;
-                        return err2;
-                    };
-
-                    if (callback.cleanup) |cleanup| {
-                        cleanup(callback.data.user_data) catch |err2| {
-                            sets_queue.first_set = node;
-                            node.data.offset = new_offset;
-                            return err2;
-                        };
-                    }
-                    continue;
+                defer {
+                    sets_queue.first_set = node;
+                    node.data.offset = new_offset;
                 }
 
-                if (callback.cleanup) |cleanup| {
-                    cleanup(callback.data.user_data) catch |err2| {
-                        sets_queue.first_set = node;
-                        node.data.offset = new_offset;
-                        return err2;
-                    };
-                }
+                const handler = exception_handler orelse return err;
 
-                sets_queue.first_set = node;
-                node.data.offset = new_offset;
-                return err;
+                handler(err, exception_handler_data, callback.data.exception_context) catch |err2| {
+                    return err2;
+                };
             };
         }
 

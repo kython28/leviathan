@@ -43,7 +43,7 @@ pub const Callback = struct {
 
 pub const CallbacksSetData = std.ArrayList(Callback);
 
-fn release_python_future_data(data: ?*anyopaque) !void {
+fn release_python_future_data(data: ?*anyopaque) void {
     const future: *Future = @alignCast(@ptrCast(data.?));
     const py_future = utils.get_parent_ptr(Future.Python.FutureObject, future);
     python_c.py_decref(@ptrCast(py_future));

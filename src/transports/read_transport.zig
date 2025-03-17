@@ -100,7 +100,7 @@ pub fn deinit(self: *ReadTransport) void {
     self.initialized = false;
 }
 
-fn cleanup_resources_callback(ptr: ?*anyopaque) !void {
+fn cleanup_resources_callback(ptr: ?*anyopaque) void {
     const self: *ReadTransport = @alignCast(@ptrCast(ptr.?));
     python_c.py_decref(self.parent_transport);
 

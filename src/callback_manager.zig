@@ -310,7 +310,7 @@ pub fn execute_callbacks(
 }
 
 
-test "Creating a new callback set" {
+test "Initialize callback set with specific capacity" {
     var callbacks_set: CallbacksSet = undefined;
     try callbacks_set.init(std.testing.allocator, 10);
     defer callbacks_set.deinit(std.testing.allocator);
@@ -339,7 +339,7 @@ fn test_exception_handler(err: anyerror, data: ?*anyopaque, _: ?CallbackExceptio
     executed_ptr.* += 1;
 }
 
-test "Append multiple sets" {
+test "Dynamically expand callback sets with increasing capacity" {
     var set_queue = CallbacksSetsQueue.init(std.testing.allocator);
     defer {
         for (0..set_queue.queue.len) |_| {
@@ -380,7 +380,7 @@ test "Append multiple sets" {
     try std.testing.expectEqual(capacity, set_queue.capacity);
 }
 
-test "Append new callback to set queue and execute it" {
+test "Add new callback to queue and immediately execute" {
     var set_queue = CallbacksSetsQueue.init(std.testing.allocator);
     defer {
         for (0..set_queue.queue.len) |_| {
@@ -425,7 +425,7 @@ test "Append new callback to set queue and execute it" {
     try std.testing.expectEqual(0, callbacks_set.callbacks_num);
 }
 
-test "Append and cancel callbacks" {
+test "Selectively cancel callbacks during addition" {
     var set_queue = CallbacksSetsQueue.init(std.testing.allocator);
     defer {
         for (0..set_queue.queue.len) |_| {
@@ -456,7 +456,7 @@ test "Append and cancel callbacks" {
     try std.testing.expectEqual(35, executed);
 }
 
-test "Append and stopping with exception" {
+test "Handle exceptions during callback execution" {
     var set_queue = CallbacksSetsQueue.init(std.testing.allocator);
     defer {
         for (0..set_queue.queue.len) |_| {
@@ -495,7 +495,7 @@ test "Append and stopping with exception" {
     try std.testing.expectEqual(1, executed2);
 }
 
-test "Prune sets when maximum is 1" {
+test "Reduce callback sets when maximum capacity is 1" {
     const allocator = std.testing.allocator;
 
     var set_queue = CallbacksSetsQueue.init(allocator);
@@ -528,7 +528,7 @@ test "Prune sets when maximum is 1" {
     try std.testing.expectEqual(set_queue.last_set, set_queue.queue.first);
 }
 
-test "Prune sets when maximum is more than 1" {
+test "Reduce callback sets with maximum capacity greater than 1" {
     const allocator = std.testing.allocator;
 
     var set_queue = CallbacksSetsQueue.init(allocator);
@@ -561,7 +561,7 @@ test "Prune sets when maximum is more than 1" {
     try std.testing.expectEqual(set_queue.last_set, set_queue.queue.first);
 }
 
-test "Prune sets with high limit" {
+test "Maintain callback sets when pruning limit is high" {
     const allocator = std.testing.allocator;
 
     var set_queue = CallbacksSetsQueue.init(allocator);
@@ -594,7 +594,7 @@ test "Prune sets with high limit" {
     try std.testing.expectEqual(set_queue.last_set, set_queue.queue.last);
 }
 
-test "Running callbaks and prune" {
+test "Execute callbacks and then prune sets" {
     const allocator = std.testing.allocator;
 
     var set_queue = CallbacksSetsQueue.init(allocator);

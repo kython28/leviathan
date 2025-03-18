@@ -162,4 +162,8 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_leviathan_module_unit_tests.step);
     test_step.dependOn(&run_callback_manager_unit_tests.step);
     test_step.dependOn(&run_utils_unit_tests.step);
+
+    check_step.dependOn(&run_leviathan_module_unit_tests.step);
+    check_step.dependOn(&run_callback_manager_unit_tests.step);
+    check_step.dependOn(&run_utils_unit_tests.step);
 }

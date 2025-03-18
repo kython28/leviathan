@@ -29,6 +29,8 @@ pub const BlockingTasksSet = struct {
     allocator: std.mem.Allocator,
     ring: std.os.linux.IoUring,
 
+    loop: *Loop,
+
     eventfd: std.posix.fd_t,
 
     task_data_pool: [TotalTasksItems * 2]BlockingTaskData,
@@ -48,9 +50,11 @@ pub const BlockingTasksSet = struct {
     node: BlockingTasksSetLinkedList.Node,
 
     pub fn init(
-        allocator: std.mem.Allocator, available_blocking_tasks_queue: *BlockingTasksSetLinkedList,
+        loop: *Loop, available_blocking_tasks_queue: *BlockingTasksSetLinkedList,
         busy_blocking_tasks_queue: *BlockingTasksSetLinkedList, node: BlockingTasksSetLinkedList.Node
     ) !*BlockingTasksSet {
+        const allocator = loop.allocator;
+
         const set: *BlockingTasksSet = try allocator.create(BlockingTasksSet);
         errdefer allocator.destroy(set);
 
@@ -61,6 +65,7 @@ pub const BlockingTasksSet = struct {
         set.ring = try std.os.linux.IoUring.init(TotalTasksItems * 2, 0);
         errdefer set.ring.deinit();
 
+        set.loop = loop;
         set.eventfd = eventfd;
 
         set.quarantine_count = 0;
@@ -144,6 +149,8 @@ pub const BlockingTasksSet = struct {
             }
         }
 
+        try self.loop.reserve_slots(1);
+
         const count = self.free_count - 1;
         const index = self.free_indices[count];
         self.free_count = count;
@@ -159,6 +166,8 @@ pub const BlockingTasksSet = struct {
         task_data.callback_data = null;
         self.free_indices[self.free_count] = task_data.index;
         self.free_count += 1;
+
+        self.loop.reserved_slots -= 1;
 
         switch (task_data.operation) {
             .Cancel => {
@@ -217,11 +226,11 @@ pub const BlockingTasksSet = struct {
         self.quarantine_events_count = @splat(0);
     }
 
-    pub fn cancel_all(self: *BlockingTasksSet, loop: *Loop) !void {
+    pub fn cancel_all(self: *BlockingTasksSet, loop: *Loop) void {
         for (&self.task_data_pool, &self.free_indices) |*task, *f_index| {
             if (task.callback_data) |*callback| {
                 callback.data.cancelled = true;
-                try Loop.Scheduling.Soon.dispatch(loop, callback.*);
+                Loop.Scheduling.Soon.dispatch_guaranteed_nonthreadsafe(loop, callback);
                 task.callback_data = null;
             } 
 
@@ -338,7 +347,7 @@ pub fn check_io_uring_result(operation: Loop.Scheduling.IO.BlockingOperation, re
 }
 
 inline fn get_blocking_tasks_set(
-    allocator: std.mem.Allocator, epoll_fd: std.posix.fd_t,
+    self: *Loop, epoll_fd: std.posix.fd_t,
     available_blocking_tasks_queue: *BlockingTasksSetLinkedList,
     busy_blocking_tasks_queue: *BlockingTasksSetLinkedList
 ) !*BlockingTasksSet {
@@ -350,7 +359,7 @@ inline fn get_blocking_tasks_set(
     errdefer available_blocking_tasks_queue.release_node(new_node);
 
     const new_set = try BlockingTasksSet.init(
-        allocator, available_blocking_tasks_queue, busy_blocking_tasks_queue, new_node
+        self, available_blocking_tasks_queue, busy_blocking_tasks_queue, new_node
     );
     errdefer new_set.deinit(false);
 
@@ -383,7 +392,7 @@ pub fn queue(self: *Loop, event: BlockingOperationData) !usize {
 
     const epoll_fd = self.blocking_tasks_epoll_fd;
     const blocking_tasks_set = try get_blocking_tasks_set(
-        self.allocator, epoll_fd, &self.available_blocking_tasks_queue,
+        self, epoll_fd, &self.available_blocking_tasks_queue,
         &self.busy_blocking_tasks_queue
 
     );

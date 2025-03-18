@@ -11,7 +11,6 @@ const TimerHandle = @import("../../timer_handle.zig");
 const LoopObject = Loop.Python.LoopObject;
 
 const std = @import("std");
-const builtin = @import("builtin");
 
 pub inline fn get_callback_info(allocator: std.mem.Allocator, args: []?PyObject) !?[]PyObject {
     if (args.len == 0) {
@@ -125,7 +124,7 @@ inline fn z_loop_call_soon(
         //     .cancelled = &py_handle.cancelled
         // }
     };
-    try Loop.Scheduling.Soon._dispatch(loop_data, callback);
+    try Loop.Scheduling.Soon.dispatch_nonthreadsafe(loop_data, &callback);
     return python_c.py_newref(py_handle);
 }
 

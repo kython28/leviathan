@@ -39,7 +39,7 @@ fn loop_watchers_callback(data: *const CallbackManager.CallbackData) !void {
     if (!data.cancelled and data.io_uring_err == .SUCCESS and fd >= 0) {
         const loop_data = watcher.loop_data;
         const handle = watcher.handle;
-        try Loop.Scheduling.Soon.dispatch(loop_data, CallbackManager.Callback{
+        const callback = CallbackManager.Callback{
             .func = &Handle.callback_for_python_generic_callbacks,
             .cleanup = &Handle.release_python_generic_callback,
             .data = .{
@@ -51,7 +51,9 @@ fn loop_watchers_callback(data: *const CallbackManager.CallbackData) !void {
                     .callback_ptr = handle.py_callback.?
                 }
             }
-        });
+        };
+
+        try Loop.Scheduling.Soon.dispatch(loop_data, &callback);
         python_c.py_incref(@ptrCast(handle));
 
         const watcher_callback: CallbackManager.Callback = .{

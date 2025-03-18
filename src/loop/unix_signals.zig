@@ -5,7 +5,6 @@ const python_c = @import("python_c");
 const utils = @import("utils");
 
 const Loop = @import("main.zig");
-const Handle = @import("../handle.zig");
 const CallbackManager = @import("callback_manager");
 
 
@@ -50,7 +49,7 @@ fn signal_handler(data: *const CallbackManager.CallbackData) !void {
 
     const sig = loop.unix_signals.signalfd_info.signo;
 
-    const callback = loop.unix_signals.callbacks.get_value(@intCast(sig), null).?;
+    const callback = loop.unix_signals.callbacks.get_value_ptr(@intCast(sig), null).?;
     python_c.py_incref(@alignCast(@ptrCast(callback.data.user_data.?)));
 
     try Loop.Scheduling.Soon.dispatch(loop, callback);
@@ -130,21 +129,21 @@ pub fn link(self: *UnixSignals, sig: u6, callback: CallbackManager.Callback) !vo
     _ = c.siginterrupt(@intCast(sig), 0);
 
     self.fd = try std.posix.signalfd(self.fd, mask, 0);
+    try self.enqueue_signal_fd();
+    try self.loop.reserve_slots(1);
     
     var prev_callback = self.callbacks.replace(sig, callback);
     if (prev_callback) |*v| {
         v.data.cancelled = true;
-        try Loop.Scheduling.Soon.dispatch(self.loop, v.*);
+        Loop.Scheduling.Soon.dispatch_guaranteed_nonthreadsafe(self.loop, v);
     }
-
-    try self.enqueue_signal_fd();
 }
 
 pub fn unlink(self: *UnixSignals, sig: u6) !void {
     var callback_info = self.callbacks.delete(sig);
     if (callback_info) |*v| {
         v.data.cancelled = true;
-        try Loop.Scheduling.Soon._dispatch(self.loop, v.*);
+        Loop.Scheduling.Soon.dispatch_guaranteed_nonthreadsafe(self.loop, v);
     }else{
         return error.KeyNotFound;
     }
@@ -190,7 +189,7 @@ pub fn init(loop: *Loop) !void {
         .loop = loop
     };
     const unix_signals = &loop.unix_signals;
-    errdefer unix_signals.deinit() catch unreachable;
+    errdefer unix_signals.deinit();
 
     try unix_signals.link(std.os.linux.SIG.INT, CallbackManager.Callback{
         .func = &default_sigint_signal_callback,
@@ -202,7 +201,7 @@ pub fn init(loop: *Loop) !void {
     });
 }
 
-pub fn deinit(self: *UnixSignals) !void {
+pub fn deinit(self: *UnixSignals) void {
     std.posix.close(self.fd);
     const loop = self.loop;
 
@@ -215,11 +214,13 @@ pub fn deinit(self: *UnixSignals) !void {
 
         _ = c.signal(@intCast(sig), c.SIG_DFL);
         value.data.cancelled = true;
-        try Loop.Scheduling.Soon._dispatch(loop, value);
+        Loop.Scheduling.Soon.dispatch_guaranteed(loop, &value);
     }
 
     std.posix.sigprocmask(std.os.linux.SIG.UNBLOCK, &mask, null);
-    try self.callbacks.deinit();
+    self.callbacks.deinit() catch |err| {
+        std.debug.panic("Unexpected error while releasing Callbacks Btree: {s}", .{@errorName(err)});
+    };
 }
 
 const UnixSignals = @This();

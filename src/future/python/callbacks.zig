@@ -1,5 +1,3 @@
-const builtin = @import("builtin");
-
 const python_c = @import("python_c");
 const PyObject = *python_c.PyObject;
 
@@ -30,7 +28,7 @@ inline fn z_future_add_done_callback(
         &.{&context},
     );
 
-    var callback: PyObject = undefined;
+    var py_callback: PyObject = undefined;
     {
         errdefer python_c.py_xdecref(context);
 
@@ -47,31 +45,31 @@ inline fn z_future_add_done_callback(
             context = python_c.PyContext_CopyCurrent() orelse return error.PythonError;
         }
 
-        callback = python_c.py_newref(args[0].?);
-        errdefer python_c.py_decref(callback);
+        py_callback = python_c.py_newref(args[0].?);
+        errdefer python_c.py_decref(py_callback);
 
-        if (python_c.PyCallable_Check(callback) <= 0) {
+        if (python_c.PyCallable_Check(py_callback) <= 0) {
             python_c.raise_python_type_error("Invalid callback\x00");
             return error.PythonError;
         }
     }
 
     switch (future_data.status) {
-        .PENDING => Future.Callback.add_done_callback(future_data, .{
+        .pending => Future.Callback.add_done_callback(future_data, .{
             .PythonGeneric = .{
-                .callback = callback,
+                .callback = py_callback,
                 .context = context.?
             }
         }) catch |err| {
             python_c.py_decref(context.?);
-            python_c.py_decref(callback);
+            python_c.py_decref(py_callback);
             return err;
         },
         else => {
             const loop_data = future_data.loop;
             const callback_args = loop_data.allocator.alloc(PyObject, 1) catch |err| {
                 python_c.py_decref(context.?);
-                python_c.py_decref(callback);
+                python_c.py_decref(py_callback);
                 return err;
             };
             errdefer loop_data.allocator.free(callback_args);
@@ -79,26 +77,27 @@ inline fn z_future_add_done_callback(
             callback_args[0] = @ptrCast(self);
 
             const handle = Handle.fast_new_handle(
-                context.?, loop_data, callback, callback_args, false
+                context.?, loop_data, py_callback, callback_args, false
             ) catch |err| {
                 python_c.py_decref(context.?);
-                python_c.py_decref(callback);
+                python_c.py_decref(py_callback);
                 return err;
             };
 
-            try Loop.Scheduling.Soon.dispatch(future_data.loop, CallbackManager.Callback{
+            const callback = CallbackManager.Callback{
                 .func = &Handle.callback_for_python_generic_callbacks,
                 .cleanup = &Handle.release_python_generic_callback,
                 .data = .{
                     .user_data = handle,
                     .exception_context = .{
-                        .callback_ptr = callback,
+                        .callback_ptr = py_callback,
                         .module_name = Handle.ModuleName,
                         .exc_message = Handle.ExceptionMessage,
                         .module_ptr = @ptrCast(handle)
                     }
                 }
-            });
+            };
+            try Loop.Scheduling.Soon.dispatch(future_data.loop, &callback);
 
             python_c.py_incref(@ptrCast(self));
         }

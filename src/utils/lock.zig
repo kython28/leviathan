@@ -1,38 +1,23 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
-const _Lock = enum {
-    unlocked,
-    locked,
-
-    pub inline fn tryLock(self: *_Lock) bool {
-        if (builtin.single_threaded) return true;
-        return @cmpxchgStrong(_Lock, self, .unlocked, .locked, .acquire, .monotonic) == null;
+const DummyLock = struct {
+    pub inline fn tryLock(_: *DummyLock) bool {
+        return true;
     }
 
-    pub inline fn lock(self: *_Lock) void {
-        if (builtin.single_threaded) return;
-
-        while (@cmpxchgWeak(_Lock, self, .unlocked, .locked, .acquire, .monotonic) != null) {
-            std.atomic.spinLoopHint();
-        }
-    }
-
-    pub inline fn unlock(self: *_Lock) void {
-        if (builtin.single_threaded) return;
-
-        @atomicStore(_Lock, self, .unlocked, .release);
-    }
+    pub inline fn lock(_: *DummyLock) void {}
+    pub inline fn unlock(_: *DummyLock) void {}
 };
 
 pub const Mutex = switch (builtin.mode) {
     .Debug => std.Thread.Mutex,
-    else => _Lock,
+    else => if (builtin.single_threaded) DummyLock else std.Thread.Mutex,
 };
 
 pub inline fn init() Mutex {
     return switch (builtin.mode) {
         .Debug => std.Thread.Mutex{},
-        else => _Lock.unlocked,
+        else => if (builtin.single_threaded) DummyLock{} else std.Thread.Mutex{},
     };
 }

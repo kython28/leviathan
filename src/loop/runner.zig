@@ -1,8 +1,6 @@
 const Loop = @import("main.zig");
 const CallbackManager = @import("callback_manager");
 
-const CallbacksSetLinkedList = CallbackManager.CallbacksSetLinkedList;
-
 const Lock = @import("../utils/lock.zig").Mutex;
 
 const utils = @import("utils");
@@ -20,56 +18,6 @@ const PyThreadState = opaque {};
 extern fn PyEval_SaveThread() ?*PyThreadState;
 extern fn PyEval_RestoreThread(?*PyThreadState) void;
 // ------------------------------------------------------------
-
-inline fn free_callbacks_set(
-    allocator: std.mem.Allocator, node: CallbacksSetLinkedList.Node,
-    comptime field_name: []const u8
-) CallbacksSetLinkedList.Node {
-    const callbacks_set: CallbackManager.CallbacksSet = node.data;
-    CallbackManager.release_set(allocator, callbacks_set);
-
-    const next_node = @field(node, field_name).?;
-    allocator.destroy(node);
-
-    return next_node;
-}
-
-pub fn prune_callbacks_sets(
-    allocator: std.mem.Allocator, ready_tasks: *CallbackManager.CallbacksSetsQueue,
-    max_number_of_callbacks_set_ptr: *usize, ready_tasks_queue_min_bytes_capacity: usize
-) void {
-    const queue = &ready_tasks.queue;
-    var queue_len = queue.len;
-    const max_number_of_callbacks_set = max_number_of_callbacks_set_ptr.*;
-    if (queue_len <= max_number_of_callbacks_set) return;
-
-    if (max_number_of_callbacks_set == 1) {
-        var node = queue.last.?;
-        while (queue_len > max_number_of_callbacks_set) : (queue_len -= 1) {
-            node = free_callbacks_set(allocator, node, "prev");
-        }
-        node.next = null;
-        queue.last = node;
-        queue.len = queue_len;
-    }else{
-        var node = queue.first.?;
-        while (queue_len > max_number_of_callbacks_set) : (queue_len -= 1) {
-            node = free_callbacks_set(allocator, node, "next");
-        }
-
-        const callbacks_set: CallbackManager.CallbacksSet = node.data;
-        node.prev = null;
-        queue.first = node;
-        queue.len = queue_len;
-
-        max_number_of_callbacks_set_ptr.* = CallbackManager.get_max_callbacks_sets(
-            ready_tasks_queue_min_bytes_capacity, callbacks_set.callbacks.len
-        );
-    }
-
-    ready_tasks.first_set = queue.first;
-    ready_tasks.last_set = queue.first;
-}
 
 fn exception_handler(
     err: anyerror, py_exception_handler: ?*anyopaque,
@@ -138,29 +86,31 @@ fn exception_handler(
 }
 
 pub inline fn call_once(
-    allocator: std.mem.Allocator, ready_queue: *CallbackManager.CallbacksSetsQueue,
-    max_number_of_callbacks_set_ptr: *usize, ready_tasks_queue_min_bytes_capacity: usize,
+    ready_queue: *CallbackManager.CallbacksSetsQueue,
+    ready_tasks_queue_max_capacity: usize,
     py_exception_handler: PyObject
 ) !usize {
     const chunks_executed = try CallbackManager.execute_callbacks(
         ready_queue, if (builtin.is_test) null else &exception_handler, py_exception_handler
     );
     if (chunks_executed == 0) {
-        prune_callbacks_sets(
-            allocator, ready_queue, max_number_of_callbacks_set_ptr,
-            ready_tasks_queue_min_bytes_capacity
-        );
+        ready_queue.prune(ready_tasks_queue_max_capacity);
     }
 
     return chunks_executed;
 }
 
 fn fetch_completed_tasks(
-    allocator: std.mem.Allocator, blocking_tasks_set: *Loop.Scheduling.IO.BlockingTasksSet,
-    blocking_ready_tasks: []std.os.linux.io_uring_cqe, ready_queue: *CallbackManager.CallbacksSetsQueue
+    self: *Loop,
+    blocking_tasks_set: *Loop.Scheduling.IO.BlockingTasksSet,
+    blocking_ready_tasks: []std.os.linux.io_uring_cqe,
+    ready_queue: *CallbackManager.CallbacksSetsQueue
 ) !void {
     const ring = &blocking_tasks_set.ring;
+
     const nevents = try ring.copy_cqes(blocking_ready_tasks, 0);
+    defer self.reserved_slots -= @intCast(nevents);
+
     for (blocking_ready_tasks[0..nevents]) |cqe| {
         const user_data = cqe.user_data;
         const err: std.os.linux.E = @call(.always_inline, std.os.linux.io_uring_cqe.err, .{cqe});
@@ -173,27 +123,24 @@ fn fetch_completed_tasks(
         callback.data.io_uring_res = cqe.res;
 
         Loop.Scheduling.IO.check_io_uring_result(blocking_task_data.operation, err);
-
-        _ = try CallbackManager.append_new_callback(
-            allocator, ready_queue, callback, Loop.MaxCallbacks
-        );
+        _ = ready_queue.try_append(&callback) orelse unreachable;
     }
 }
 
 fn poll_blocking_events(
-    loop: *Loop, mutex: *Lock, wait: bool, ready_queue: *CallbackManager.CallbacksSetsQueue,
+    self: *Loop, mutex: *Lock, wait: bool, ready_queue: *CallbackManager.CallbacksSetsQueue,
     quarantine_array: *BlockingTasksSetQuarantineArray
 ) !void {
-    const epoll_fd = loop.blocking_tasks_epoll_fd;
-    const blocking_ready_epoll_events = loop.blocking_ready_epoll_events;
+    const epoll_fd = self.blocking_tasks_epoll_fd;
+    const blocking_ready_epoll_events = self.blocking_ready_epoll_events;
 
     var nevents: usize = undefined;
     if (wait) {
-        loop.epoll_locked = true;
+        self.epoll_locked = true;
         mutex.unlock();
         defer {
             mutex.lock();
-            loop.epoll_locked = false;
+            self.epoll_locked = false;
         }
 
         const py_thread_state = PyEval_SaveThread();
@@ -205,13 +152,12 @@ fn poll_blocking_events(
     }
 
     while (nevents > 0) {
-        const allocator = loop.allocator;
-        const blocking_ready_tasks = loop.blocking_ready_tasks;
+        const blocking_ready_tasks = self.blocking_ready_tasks;
 
         for (blocking_ready_epoll_events[0..nevents]) |event| {
             const set = (@as(?*Loop.Scheduling.IO.BlockingTasksSet, @ptrFromInt(event.data.ptr)) orelse continue);
             try fetch_completed_tasks(
-                allocator, set, blocking_ready_tasks, ready_queue
+                self, set, blocking_ready_tasks, ready_queue
             );
 
             try quarantine_array.append(set);
@@ -252,8 +198,7 @@ pub fn start(self: *Loop, py_exception_handler: PyObject) !void {
     }
 
     const ready_tasks_queues: []CallbackManager.CallbacksSetsQueue = &self.ready_tasks_queues;
-    const max_callbacks_set_per_queue: []usize = &self.max_callbacks_sets_per_queue;
-    const ready_tasks_queue_min_bytes_capacity = self.ready_tasks_queue_min_bytes_capacity;
+    const ready_tasks_queue_max_capacity = self.ready_tasks_queue_max_capacity;
     const allocator = self.allocator;
 
     var quanrantine_blocking_tasks = BlockingTasksSetQuarantineArray.init(allocator);
@@ -264,6 +209,8 @@ pub fn start(self: *Loop, py_exception_handler: PyObject) !void {
     while (!self.stopping) {
         const old_index = ready_tasks_queue_index;
         const ready_tasks_queue = &ready_tasks_queues[old_index];
+
+        try ready_tasks_queue.ensure_capacity(self.reserved_slots);
 
         try poll_blocking_events(self, mutex, wait_for_blocking_events, ready_tasks_queue, &quanrantine_blocking_tasks);
         defer {
@@ -285,8 +232,9 @@ pub fn start(self: *Loop, py_exception_handler: PyObject) !void {
         defer mutex.lock();
 
         const chunks_executed = try call_once(
-            allocator, ready_tasks_queue, &max_callbacks_set_per_queue[old_index],
-            ready_tasks_queue_min_bytes_capacity, py_exception_handler
+            ready_tasks_queue,
+            @max(self.reserved_slots, ready_tasks_queue_max_capacity),
+            py_exception_handler
         );
 
         wait_for_blocking_events = (chunks_executed == 0);

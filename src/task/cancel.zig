@@ -36,7 +36,7 @@ fn cancel_future_waiter(future: PyObject, cancel_msg_py_object: ?PyObject) anyer
 
 inline fn fast_task_cancel(task: *PythonTaskObject, data: *Future, cancel_msg_py_object: ?PyObject) !bool {
     switch (data.status) {
-        .FINISHED, .CANCELED => return false,
+        .finished, .canceled => return false,
         else => {}
     }
 
@@ -66,7 +66,7 @@ pub fn task_cancel(self: ?*PythonTaskObject, args: ?PyObject, kwargs: ?PyObject)
     const future_data = utils.get_data_ptr(Future, &instance.fut);
 
     switch (future_data.status) {
-        .FINISHED,.CANCELED => return python_c.get_py_false(),
+        .finished,.canceled => return python_c.get_py_false(),
         else => {}
     }
 
@@ -103,7 +103,7 @@ pub fn task_cancelling(self: ?*PythonTaskObject) callconv(.C) ?PyObject {
 
     const future_data = utils.get_data_ptr(Future, &instance.fut);
     return switch (future_data.status) {
-        .CANCELED,.FINISHED => python_c.PyLong_FromUnsignedLongLong(0),
+        .canceled,.finished => python_c.PyLong_FromUnsignedLongLong(0),
         else => python_c.PyLong_FromUnsignedLongLong(@intCast(instance.cancel_requests))
     };
 }

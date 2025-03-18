@@ -1,16 +1,12 @@
 const std = @import("std");
-const builtin = @import("builtin");
-
 const Loop = @import("../loop/main.zig");
 
-const lock = @import("../utils/lock.zig");
-
 pub const FutureStatus = enum {
-    PENDING, FINISHED, CANCELED
+    pending, finished, canceled
 };
 
 result: ?*anyopaque = null,
-status: FutureStatus = .PENDING,
+status: FutureStatus = .pending,
 
 callbacks_arena: std.heap.ArenaAllocator,
 callbacks_arena_allocator: std.mem.Allocator = undefined,
@@ -20,7 +16,9 @@ loop: *Loop,
 released: bool = false,
 
 
-pub fn init(self: *Future, loop: *Loop) void {
+pub fn init(self: *Future, loop: *Loop) !void {
+    try self.loop.reserve_slots(1);
+
     self.* = .{
         .loop = loop,
         .callbacks_arena = std.heap.ArenaAllocator.init(loop.allocator)
@@ -31,7 +29,7 @@ pub fn init(self: *Future, loop: *Loop) void {
 }
 
 pub inline fn release(self: *Future) void {
-    if (self.status == .PENDING) {
+    if (self.status == .pending) {
         Callback.release_callbacks_queue(&self.callbacks_queue);
     }
     self.callbacks_arena.deinit();

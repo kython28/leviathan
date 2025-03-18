@@ -38,75 +38,189 @@ pub const Callback = struct {
 
 pub const CallbacksSet = struct {
     callbacks: []Callback,
-    callbacks_num: usize = 0,
-    offset: usize = 0,
+    callbacks_num: usize,
+    offset: usize,
+
+    pub fn init(self: *CallbacksSet, allocator: std.mem.Allocator, capacity: usize) !void {
+        self.callbacks = try allocator.alloc(Callback, capacity);
+        errdefer allocator.free(self.callbacks);
+
+        self.callbacks_num = 0;
+        self.offset = 0;
+    }
+
+    pub inline fn deinit(self: *CallbacksSet, allocator: std.mem.Allocator) void {
+        allocator.free(self.callbacks);
+    }
 };
 
 pub const CallbacksSetsQueue = struct {
     queue: CallbacksSetLinkedList,
+    capacity: usize,
+    available_slots: usize,
+
     last_set: ?CallbacksSetLinkedList.Node = null,
-    first_set: ?CallbacksSetLinkedList.Node = null
+    first_set: ?CallbacksSetLinkedList.Node = null,
+
+    pub fn init(allocator: std.mem.Allocator) CallbacksSetsQueue {
+        return CallbacksSetsQueue{
+            .queue = CallbacksSetLinkedList.init(allocator),
+            .capacity = 0,
+            .available_slots = 0
+        };
+    }
+
+    pub inline fn empty(self: *CallbacksSetsQueue) bool {
+        return (self.available_slots == self.capacity);
+    }
+
+    pub fn try_append(self: *CallbacksSetsQueue, callback: *const Callback) ?*Callback {
+        var node = self.last_set;
+        while (node) |n| {
+            const callbacks = &n.data;
+            const callbacks_num = callbacks.callbacks_num;
+
+            if (callbacks_num < callbacks.callbacks.len) {
+                callbacks.callbacks[callbacks_num] = callback.*;
+                callbacks.callbacks_num = callbacks_num + 1;
+
+                self.last_set = n;
+                self.available_slots -= 1;
+                return &callbacks.callbacks[callbacks_num];
+            }
+            node = n.next;
+        }
+
+        return null;
+    }
+
+    pub fn increase_capacity(self: *CallbacksSetsQueue, min_capacity: usize) !void {
+        const new_node = try self.queue.create_new_node(undefined);
+        errdefer self.queue.release_node(new_node);
+
+        const extra_capacity = @max(self.capacity * 2, min_capacity);
+
+        try new_node.data.init(self.queue.allocator, extra_capacity);
+        errdefer new_node.data.deinit();
+
+        self.queue.append_node(new_node);
+        if (self.first_set == null) {
+            self.first_set = new_node;
+        }
+        self.last_set = new_node;
+
+        self.available_slots += extra_capacity;
+        self.capacity += extra_capacity;
+    }
+
+    pub inline fn ensure_capacity(self: *CallbacksSetsQueue, min_capacity: usize) !void {
+        if (self.capacity < min_capacity) {
+            try self.increase_capacity(min_capacity);
+        }
+    }
+
+    pub inline fn append(self: *CallbacksSetsQueue, callback: *const Callback, min_capacity: usize) !*Callback {
+        if (self.try_append(callback)) |new_callback| {
+            return new_callback;
+        }
+
+        try self.increase_capacity(min_capacity);
+        return self.try_append(callback) orelse unreachable;
+    }
+
+    inline fn free_callbacks_set(
+        allocator: std.mem.Allocator, node: CallbacksSetLinkedList.Node,
+        removed: *usize, comptime field_name: []const u8
+    ) CallbacksSetLinkedList.Node {
+        removed.* = node.data.callbacks.len;
+        node.data.deinit(allocator);
+
+        const next_node = @field(node, field_name).?;
+        allocator.destroy(node);
+
+        return next_node;
+    }
+
+    pub fn prune(self: *CallbacksSetsQueue, max_capacity: usize) void {
+        var capacity = self.capacity;
+        if (capacity >= max_capacity and self.available_slots < capacity) return;
+        defer self.capacity = capacity;
+
+        const allocator = self.queue.allocator;
+        if (((capacity * 2) / 3) <= max_capacity) {
+            var queue_len = self.queue.len;
+            var node = self.queue.first.?;
+
+            defer {
+                node.prev = null;
+                self.queue.first = node;
+                self.queue.len = queue_len;
+            }
+
+            while (capacity > max_capacity) {
+                var removed: usize = undefined;
+                node = free_callbacks_set(allocator, node, &removed, "next");
+
+                capacity -= removed;
+                queue_len -= 1;
+            }
+        }else{
+            var queue_len = self.queue.len;
+            var node = self.queue.last.?;
+
+            defer {
+                node.next = null;
+                self.queue.last = node;
+                self.queue.len = queue_len;
+            }
+
+            while (capacity > max_capacity) {
+                var removed: usize = undefined;
+                node = free_callbacks_set(allocator, node, &removed, "prev");
+
+                capacity -= removed;
+                queue_len -= 1;
+            }
+        }
+    }
 };
 
-pub inline fn get_max_callbacks_sets(rtq_min_capacity: usize, callbacks_set_length: usize) usize {
-    return @max(
-        @as(usize, @intFromFloat(
-            @ceil(
-                @log2(
-                    @as(f64, @floatFromInt(rtq_min_capacity)) / @as(f64, @floatFromInt(callbacks_set_length * @sizeOf(Callback))) + 1.0
-                )
-            )
-        )), 1
-    );
-}
+// pub fn append_new_callback(
+//     allocator: std.mem.Allocator, sets_queue: *CallbacksSetsQueue, callback: Callback,
+//     max_callbacks: usize
+// ) !*Callback {
+//     var callbacks: CallbacksSet = undefined;
+//     var last_callbacks_set_len: usize = max_callbacks;
+//     var node = sets_queue.last_set;
+//     while (node) |n| {
+//         callbacks = n.data;
+//         const callbacks_num = callbacks.callbacks_num;
 
-pub inline fn create_new_set(allocator: std.mem.Allocator, size: usize) !CallbacksSet {
-    return .{
-        .callbacks = try allocator.alloc(Callback, size),
-        .callbacks_num = 0
-    };
-}
+//         if (callbacks_num < callbacks.callbacks.len) {
+//             callbacks.callbacks[callbacks_num] = callback;
+//             n.data.callbacks_num = callbacks_num + 1;
 
-pub inline fn release_set(allocator: std.mem.Allocator, set: CallbacksSet) void {
-    allocator.free(set.callbacks);
-}
+//             sets_queue.last_set = n;
+//             return &callbacks.callbacks[callbacks_num];
+//         }
+//         last_callbacks_set_len = (callbacks_num * 2);
+//         node = n.next;
+//     }
 
-pub fn append_new_callback(
-    allocator: std.mem.Allocator, sets_queue: *CallbacksSetsQueue, callback: Callback,
-    max_callbacks: usize
-) !*Callback {
-    var callbacks: CallbacksSet = undefined;
-    var last_callbacks_set_len: usize = max_callbacks;
-    var node = sets_queue.last_set;
-    while (node) |n| {
-        callbacks = n.data;
-        const callbacks_num = callbacks.callbacks_num;
+//     callbacks = try create_new_set(allocator, last_callbacks_set_len);
+//     errdefer allocator.free(callbacks.callbacks);
 
-        if (callbacks_num < callbacks.callbacks.len) {
-            callbacks.callbacks[callbacks_num] = callback;
-            n.data.callbacks_num = callbacks_num + 1;
+//     callbacks.callbacks_num = 1;
+//     callbacks.callbacks[0] = callback;
 
-            sets_queue.last_set = n;
-            return &callbacks.callbacks[callbacks_num];
-        }
-        last_callbacks_set_len = (callbacks_num * 2);
-        node = n.next;
-    }
+//     try sets_queue.queue.append(callbacks);
+//     if (sets_queue.first_set == null) {
+//         sets_queue.first_set = sets_queue.queue.first;
+//     }
+//     sets_queue.last_set = sets_queue.queue.last;
 
-    callbacks = try create_new_set(allocator, last_callbacks_set_len);
-    errdefer allocator.free(callbacks.callbacks);
-
-    callbacks.callbacks_num = 1;
-    callbacks.callbacks[0] = callback;
-
-    try sets_queue.queue.append(callbacks);
-    if (sets_queue.first_set == null) {
-        sets_queue.first_set = sets_queue.queue.first;
-    }
-    sets_queue.last_set = sets_queue.queue.last;
-
-    return &callbacks.callbacks[0];
-}
+//     return &callbacks.callbacks[0];
+// }
 
 pub fn release_sets_queue(
     allocator: std.mem.Allocator, sets_queue: *CallbacksSetsQueue,
@@ -122,7 +236,7 @@ pub fn release_sets_queue(
 
     while (_node) |node| {
         _node = node.next;
-        const callbacks_set: CallbacksSet = node.data;
+        const callbacks_set = &node.data;
         const callbacks_num = callbacks_set.callbacks_num;
 
         for (callbacks_set.callbacks[callbacks_set.offset..callbacks_num]) |*callback| {
@@ -132,7 +246,7 @@ pub fn release_sets_queue(
             };
         }
 
-        release_set(allocator, callbacks_set);
+        callbacks_set.deinit(allocator);
         allocator.destroy(node);
     }
 }
@@ -142,15 +256,18 @@ pub fn execute_callbacks(
     comptime exception_handler: ?ExceptionHandler,
     exception_handler_data: ?*anyopaque
 ) !usize {
-    const queue = &sets_queue.queue;
-    var _node: ?CallbacksSetLinkedList.Node = sets_queue.first_set orelse return 0;
+    if (sets_queue.empty()) return 0;
+
+    var _node: ?CallbacksSetLinkedList.Node = sets_queue.first_set;
     defer {
-        if (sets_queue.first_set == queue.first) {
-            sets_queue.last_set = queue.first;
+        if (sets_queue.first_set == sets_queue.queue.first) {
+            sets_queue.last_set = sets_queue.queue.first;
         }
     }
 
-    var chunks_executed: usize = 0;
+    var callbacks_executed: usize = 0;
+    defer sets_queue.available_slots += callbacks_executed;
+
     while (_node) |node| {
         _node = node.next;
         const callbacks_set: CallbacksSet = node.data;
@@ -159,7 +276,6 @@ pub fn execute_callbacks(
             break;
         }
 
-        chunks_executed += 1;
         for (callbacks_set.callbacks[callbacks_set.offset..callbacks_num]) |*callback| {
             callback.func(&callback.data) catch |err| {
                 defer {
@@ -172,9 +288,10 @@ pub fn execute_callbacks(
                     @intFromPtr(callback) - @intFromPtr(callbacks_set.callbacks.ptr)
                 ) / @sizeOf(Callback) + 1;
 
-                defer {
+                errdefer {
                     sets_queue.first_set = node;
                     node.data.offset = new_offset;
+                    callbacks_executed += new_offset;
                 }
 
                 const handler = exception_handler orelse return err;
@@ -184,22 +301,24 @@ pub fn execute_callbacks(
                 };
             };
         }
+        callbacks_executed += callbacks_num;
 
         node.data.callbacks_num = 0;
         node.data.offset = 0;
     }
 
-    sets_queue.first_set = queue.first;
-    return chunks_executed;
+    sets_queue.first_set = sets_queue.queue.first;
+    return callbacks_executed;
 }
 
 
 test "Creating a new callback set" {
-    const callback_set = try create_new_set(std.testing.allocator, 10);
-    defer release_set(std.testing.allocator, callback_set);
+    var callbacks_set: CallbacksSet = undefined;
+    try callbacks_set.init(std.testing.allocator, 10);
+    defer callbacks_set.deinit(std.testing.allocator);
 
-    try std.testing.expectEqual(0, callback_set.callbacks_num);
-    try std.testing.expectEqual(10, callback_set.callbacks.len);
+    try std.testing.expectEqual(0, callbacks_set.callbacks_num);
+    try std.testing.expectEqual(10, callbacks_set.callbacks.len);
 }
 
 fn test_callback(data: *const CallbackData) !void {
@@ -223,18 +342,16 @@ fn test_exception_handler(err: anyerror, data: ?*anyopaque, _: ?CallbackExceptio
 }
 
 test "Append multiple sets" {
-    var set_queue = CallbacksSetsQueue{
-        .queue = CallbacksSetLinkedList.init(std.testing.allocator)
-    };
+    var set_queue = CallbacksSetsQueue.init(std.testing.allocator);
     defer {
         for (0..set_queue.queue.len) |_| {
             const callbacks_set: CallbacksSet = set_queue.queue.pop() catch unreachable;
-            release_set(std.testing.allocator, callbacks_set);
+            callbacks_set.deinit(std.testing.allocator);
         }
     }
 
     for (0..70) |_| {
-        _ = try append_new_callback(std.testing.allocator, &set_queue, .{
+        _ = try set_queue.append(std.testing.allocator, &set_queue, .{
             .func = &test_callback,
             .cleanup = null,
             .data = .{
@@ -267,13 +384,13 @@ test "Append new callback to set queue and execute it" {
     defer {
         for (0..set_queue.queue.len) |_| {
             const callbacks_set: CallbacksSet = set_queue.queue.pop() catch unreachable;
-            release_set(std.testing.allocator, callbacks_set);
+            callbacks_set.deinit(std.testing.allocator);
         }
     }
 
     var executed: usize = 0;
 
-    const ret = try append_new_callback(std.testing.allocator, &set_queue, .{
+    const ret = try set_queue.append(std.testing.allocator, &set_queue, .{
         .func = &test_callback,
         .cleanup = null,
         .data = .{
@@ -316,13 +433,13 @@ test "Append and cancel callbacks" {
     defer {
         for (0..set_queue.queue.len) |_| {
             const callbacks_set: CallbacksSet = set_queue.queue.pop() catch unreachable;
-            release_set(std.testing.allocator, callbacks_set);
+            callbacks_set.deinit(std.testing.allocator);
         }
     }
 
     var executed: usize = 0;
     for (0..70) |i| {
-        const callback = try append_new_callback(std.testing.allocator, &set_queue, .{
+        const callback = try set_queue.append(std.testing.allocator, &set_queue, .{
             .func = &test_callback,
             .cleanup = null,
             .data = .{
@@ -351,14 +468,14 @@ test "Append and stopping with exception" {
     defer {
         for (0..set_queue.queue.len) |_| {
             const callbacks_set: CallbacksSet = set_queue.queue.pop() catch unreachable;
-            release_set(std.testing.allocator, callbacks_set);
+            callbacks_set.deinit(std.testing.allocator, callbacks_set);
         }
     }
 
     var executed: usize = 0;
     var executed2: usize = 0;
     for (0..70) |i| {
-        const callback = try append_new_callback(std.testing.allocator, &set_queue, .{
+        const callback = try set_queue.append(std.testing.allocator, &set_queue, .{
             .func = blk: {
                 if (i == 35) {
                     break :blk &test_callback2;

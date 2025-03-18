@@ -1,5 +1,3 @@
-const std = @import("std");
-
 const python_c = @import("python_c");
 const PyObject = *python_c.PyObject;
 
@@ -10,7 +8,7 @@ const utils = @import("utils");
 
 pub inline fn future_fast_cancel(instance: *PythonFutureObject, data: *Future, cancel_msg_py_object: ?PyObject) !bool {
     switch (data.status) {
-        .FINISHED,.CANCELED => return false,
+        .finished, .canceled => return false,
         else => {}
     }
 
@@ -23,7 +21,7 @@ pub inline fn future_fast_cancel(instance: *PythonFutureObject, data: *Future, c
         }
     }
 
-    try Future.Callback.call_done_callbacks(data, .CANCELED);
+    Future.Callback.call_done_callbacks(data, .canceled);
     return true;
 }
 
@@ -59,7 +57,7 @@ pub fn future_cancel(
 pub fn future_cancelled(self: ?*PythonFutureObject, _: ?PyObject) callconv(.C) ?PyObject {
     const future_data = utils.get_data_ptr(Future, self.?);
     return switch (future_data.status) {
-        .CANCELED => python_c.get_py_true(),
+        .canceled => python_c.get_py_true(),
         else => python_c.get_py_false()
     };
 }

@@ -41,7 +41,7 @@ inline fn set_result(
     if (task.must_cancel) {
         _ = try Future.Python.Cancel.future_fast_cancel(&task.fut, future_data, task.fut.cancel_msg_py_object);
     }else{
-        try Future.Python.Result.future_fast_set_result(future_data, result);
+        Future.Python.Result.future_fast_set_result(future_data, result);
     }
 }
 
@@ -91,7 +91,7 @@ fn create_new_py_exception_and_add_event(
         }
     };
 
-    try Loop.Scheduling.Soon.dispatch(loop, callback);
+    try Loop.Scheduling.Soon.dispatch(loop, &callback);
     python_c.py_incref(@ptrCast(task));
 } 
 
@@ -271,7 +271,7 @@ inline fn successfully_execution(
             }
         };
 
-        try Loop.Scheduling.Soon.dispatch(loop_data, callback);
+        try Loop.Scheduling.Soon.dispatch(loop_data, &callback);
         python_c.py_incref(@ptrCast(task));
         return;
     }
@@ -315,15 +315,7 @@ fn failed_execution(task: *Task.PythonTaskObject) error{PythonError}!void {
         return;
     }
 
-    Future.Python.Result.future_fast_set_exception(fut, future_data, exception) catch |err| {
-        utils.handle_zig_function_error(err, {});
-
-        const exc = python_c.PyErr_Occurred() orelse unreachable;
-        python_c.PyException_SetCause(exc, exception);
-
-        return error.PythonError;
-    };
-
+    Future.Python.Result.future_fast_set_exception(fut, future_data, exception);
     python_c.PyErr_SetRaisedException(exception);
     return error.PythonError;
 }
@@ -359,7 +351,7 @@ pub fn _execute_task_throw(task: *Task.PythonTaskObject, task_exception: ?PyObje
     const loop_data = utils.get_data_ptr(Loop, py_loop);
     const future_data = utils.get_data_ptr(Future, py_fut);
 
-    if (future_data.status != .PENDING) {
+    if (future_data.status != .pending) {
         python_c.raise_python_runtime_error("Task already finished");
         try failed_execution(task);
         return;
@@ -452,7 +444,7 @@ fn _execute_task_send(task: *Task.PythonTaskObject) !void {
     const loop_data = utils.get_data_ptr(Loop, py_loop);
     const future_data = utils.get_data_ptr(Future, py_fut);
 
-    if (future_data.status != .PENDING) {
+    if (future_data.status != .pending) {
         python_c.raise_python_runtime_error("Task already finished");
         try failed_execution(task);
         return;

@@ -10,8 +10,6 @@ const Loop = @import("../../loop/main.zig");
 const LoopObject = Loop.Python.LoopObject;
 const PythonFutureObject = Future.Python.FutureObject;
 
-const std = @import("std");
-
 pub inline fn future_set_initial_values(self: *PythonFutureObject) void {
     python_c.initialize_object_fields(
         self, &.{"ob_base", "log_destroy_pending", "cancel_msg_py_object"}
@@ -25,10 +23,10 @@ pub inline fn future_set_initial_values(self: *PythonFutureObject) void {
     self.log_destroy_pending = 1;
 }
 
-pub inline fn future_init_configuration(self: *PythonFutureObject, leviathan_loop: *LoopObject) void {
+pub inline fn future_init_configuration(self: *PythonFutureObject, leviathan_loop: *LoopObject) !void {
     const loop_data = utils.get_data_ptr(Loop, leviathan_loop);
     const future_data = utils.get_data_ptr(Future, self);
-    future_data.init(loop_data);
+    try future_data.init(loop_data);
     self.py_loop = @ptrCast(python_c.py_newref(leviathan_loop));
 }
 
@@ -38,7 +36,7 @@ pub inline fn fast_new_future(leviathan_loop: *LoopObject) !*PythonFutureObject 
     );
 
     future_set_initial_values(instance);
-    future_init_configuration(instance, leviathan_loop);
+    try future_init_configuration(instance, leviathan_loop);
     return instance;
 }
 
@@ -119,7 +117,7 @@ inline fn z_future_init(
         return error.PythonError;
     }
 
-    future_init_configuration(self, leviathan_loop);
+    try future_init_configuration(self, leviathan_loop);
     return 0;
 }
 
@@ -142,7 +140,7 @@ pub fn future_iternext(self: ?*PythonFutureObject) callconv(.C) ?PyObject {
 
     const future_data = utils.get_data_ptr(Future, instance);
 
-    if (future_data.status != .PENDING) {
+    if (future_data.status != .pending) {
         const res = result.get_result(instance);
         if (res) |py_res| {
             const exc = python_c.PyObject_CallOneArg(python_c.PyExc_StopIteration, py_res)

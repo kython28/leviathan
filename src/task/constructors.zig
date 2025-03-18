@@ -13,9 +13,6 @@ const callbacks = @import("callbacks.zig");
 const LoopObject = Loop.Python.LoopObject;
 const PythonTaskObject = Task.PythonTaskObject;
 
-const std = @import("std");
-const builtin = @import("builtin");
-
 inline fn task_set_initial_values(self: *PythonTaskObject) void {
     Future.Python.Constructors.future_set_initial_values(&self.fut);
     python_c.initialize_object_fields(self, &.{"fut"});
@@ -25,7 +22,7 @@ inline fn task_init_configuration(
     self: *PythonTaskObject, loop: *LoopObject,
     coro: PyObject, context: PyObject, name: ?PyObject
 ) !void {
-    Future.Python.Constructors.future_init_configuration(&self.fut, loop);
+    try Future.Python.Constructors.future_init_configuration(&self.fut, loop);
     const coro_type = python_c.get_type(coro);
     if (coro_type.tp_as_async == null or coro_type.tp_as_async.*.am_await == null) {
         python_c.raise_python_type_error("Coro argument must be a coroutine\x00");
@@ -59,7 +56,7 @@ inline fn task_schedule_coro(self: *PythonTaskObject, loop: *LoopObject) !void {
         }
     };
 
-    try Loop.Scheduling.Soon.dispatch(loop_data, callback);
+    try Loop.Scheduling.Soon.dispatch(loop_data, &callback);
     python_c.py_incref(@ptrCast(self));
 }
 

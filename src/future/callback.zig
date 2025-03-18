@@ -165,7 +165,7 @@ pub fn release_callbacks_queue(queue: *const CallbacksSetData) void {
 }
 
 pub inline fn add_done_callback(self: *Future, callback_data: Data) !void {
-    if (self.status != .PENDING) return error.FutureAlreadyFinished;
+    if (self.status != .pending) return error.FutureAlreadyFinished;
 
     try self.callbacks_queue.append(.{
         .data = callback_data
@@ -173,7 +173,7 @@ pub inline fn add_done_callback(self: *Future, callback_data: Data) !void {
 }
 
 pub fn remove_done_callback(self: *Future, callback_id: u64) usize {
-    if (self.status != .PENDING) return 0;
+    if (self.status != .pending) return 0;
 
     var removed_count: usize = 0;
     for (self.callbacks_queue.items) |*callback| {
@@ -196,9 +196,10 @@ pub fn remove_done_callback(self: *Future, callback_id: u64) usize {
     return removed_count;
 }
 
-pub inline fn call_done_callbacks(self: *Future, new_status: Future.FutureStatus) !void {
-    if (self.status != .PENDING) return error.FutureAlreadyFinished;
-    defer self.status = new_status;
+pub inline fn call_done_callbacks(self: *Future, new_status: Future.FutureStatus) void {
+    if (self.status != .pending) unreachable;
+
+    self.status = new_status;
 
     if (self.callbacks_queue.items.len == 0) {
         return;
@@ -219,6 +220,6 @@ pub inline fn call_done_callbacks(self: *Future, new_status: Future.FutureStatus
         }
     };
 
-    try Loop.Scheduling.Soon.dispatch(self.loop, callback);
+    Loop.Scheduling.Soon.dispatch_guaranteed(self.loop, &callback);
     python_c.py_incref(@ptrCast(pyfut));
 }

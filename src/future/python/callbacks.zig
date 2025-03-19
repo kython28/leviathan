@@ -55,34 +55,31 @@ inline fn z_future_add_done_callback(
     }
 
     switch (future_data.status) {
-        .pending => Future.Callback.add_done_callback(future_data, .{
+        .pending => try Future.Callback.add_done_callback(future_data, .{
             .PythonGeneric = .{
                 .callback = py_callback,
                 .context = context.?
             }
-        }) catch |err| {
-            python_c.py_decref(context.?);
-            python_c.py_decref(py_callback);
-            return err;
-        },
+        }),
         else => {
             const loop_data = future_data.loop;
-            const callback_args = loop_data.allocator.alloc(PyObject, 1) catch |err| {
-                python_c.py_decref(context.?);
-                python_c.py_decref(py_callback);
-                return err;
-            };
-            errdefer loop_data.allocator.free(callback_args);
+            const handle = blk: {
+                errdefer {
+                    python_c.py_decref(context.?);
+                    python_c.py_decref(py_callback);
+                }
 
-            callback_args[0] = @ptrCast(self);
+                const callback_args = try loop_data.allocator.alloc(PyObject, 1);
+                errdefer loop_data.allocator.free(callback_args);
 
-            const handle = Handle.fast_new_handle(
-                context.?, loop_data, py_callback, callback_args, false
-            ) catch |err| {
-                python_c.py_decref(context.?);
-                python_c.py_decref(py_callback);
-                return err;
+                callback_args[0] = @ptrCast(self);
+
+                break :blk try Handle.fast_new_handle(
+                    context.?, loop_data, py_callback, callback_args, false
+                );
             };
+            python_c.py_incref(@ptrCast(self));
+            errdefer python_c.py_decref(@ptrCast(handle));
 
             const callback = CallbackManager.Callback{
                 .func = &Handle.callback_for_python_generic_callbacks,
@@ -98,8 +95,6 @@ inline fn z_future_add_done_callback(
                 }
             };
             try Loop.Scheduling.Soon.dispatch(future_data.loop, &callback);
-
-            python_c.py_incref(@ptrCast(self));
         }
     }
 

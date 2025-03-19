@@ -84,13 +84,11 @@ fn run_python_future_set_callbacks(data: *const CallbackManager.CallbackData) !v
     }
 
     const callbacks_items = future.callbacks_queue.items;
-    var exceptions_array = std.ArrayList(?PyObject).init(future.callbacks_arena_allocator);
+    var exceptions_array = &future.exceptions_queue;
     defer {
         for (exceptions_array.items) |exc| {
             python_c.py_xdecref(exc);
         }
-
-        exceptions_array.deinit();
     }
 
     for (callbacks_items) |*callback| {
@@ -103,8 +101,7 @@ fn run_python_future_set_callbacks(data: *const CallbackManager.CallbackData) !v
 
                     const exc = python_c.PyErr_GetRaisedException() orelse return error.PythonError;
                     exceptions_array.append(exc) catch |err2| {
-                        python_c.py_decref(exc);
-                        return err2;
+                        std.debug.panic("Unexpected error while adding exception to queue: {s}", .{@errorName(err2)});
                     };
                 };
             },
@@ -114,8 +111,7 @@ fn run_python_future_set_callbacks(data: *const CallbackManager.CallbackData) !v
 
                     const exc = python_c.PyErr_GetRaisedException() orelse return error.PythonError;
                     exceptions_array.append(exc) catch |err2| {
-                        python_c.py_decref(exc);
-                        return err2;
+                        std.debug.panic("Unexpected error while adding exception to queue: {s}", .{@errorName(err2)});
                     };
                 };
             }
@@ -175,6 +171,9 @@ pub inline fn add_done_callback(self: *Future, callback_data: Data) !void {
     try self.callbacks_queue.append(.{
         .data = callback_data
     });
+    errdefer _ = self.exceptions_queue.pop();
+
+    try self.exceptions_queue.ensureTotalCapacity(self.callbacks_queue.items.len);
 }
 
 pub fn remove_done_callback(self: *Future, callback_id: u64) usize {

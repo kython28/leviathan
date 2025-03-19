@@ -31,6 +31,7 @@ fn exception_handler(
         python_c.PyErr_SetRaisedException(exception);
         return error.PythonError;
     }
+    defer python_c.py_decref(exception);
 
     const message_kname: PyObject = python_c.PyUnicode_FromString("message\x00")
         orelse return error.PythonError;

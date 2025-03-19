@@ -1,6 +1,8 @@
 const std = @import("std");
 const Loop = @import("../loop/main.zig");
 
+const python_c = @import("python_c");
+
 pub const FutureStatus = enum {
     pending, finished, canceled
 };
@@ -10,7 +12,9 @@ status: FutureStatus = .pending,
 
 callbacks_arena: std.heap.ArenaAllocator,
 callbacks_arena_allocator: std.mem.Allocator = undefined,
+
 callbacks_queue: Callback.CallbacksSetData = undefined,
+exceptions_queue: std.ArrayList(?*python_c.PyObject) = undefined,
 loop: *Loop,
 
 released: bool = false,
@@ -26,6 +30,7 @@ pub fn init(self: *Future, loop: *Loop) !void {
 
     self.callbacks_arena_allocator = self.callbacks_arena.allocator();
     self.callbacks_queue = Callback.CallbacksSetData.init(self.callbacks_arena_allocator);
+    self.exceptions_queue = std.ArrayList(?*python_c.PyObject).init(self.callbacks_arena_allocator);
 }
 
 pub fn release(self: *Future) void {

@@ -130,12 +130,13 @@ pub fn link(self: *UnixSignals, sig: u6, callback: CallbackManager.Callback) !vo
 
     self.fd = try std.posix.signalfd(self.fd, mask, 0);
     try self.enqueue_signal_fd();
-    try self.loop.reserve_slots(1);
     
     var prev_callback = self.callbacks.replace(sig, callback);
     if (prev_callback) |*v| {
         v.data.cancelled = true;
-        Loop.Scheduling.Soon.dispatch_guaranteed_nonthreadsafe(self.loop, v);
+        try Loop.Scheduling.Soon.dispatch_nonthreadsafe(self.loop, v);
+    }else{
+        try self.loop.reserve_slots(1);
     }
 }
 
@@ -172,6 +173,7 @@ pub fn unlink(self: *UnixSignals, sig: u6) !void {
         }
     };
 
+    try self.loop.reserve_slots(1);
     if (!self.callbacks.insert(sig, callback)) {
         @panic("Failed to insert callback");
     }

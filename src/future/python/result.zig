@@ -75,7 +75,7 @@ pub fn future_exception(self: ?*PythonFutureObject, _: ?PyObject) callconv(.C) ?
 }
 
 pub inline fn future_fast_set_exception(self: *PythonFutureObject, obj: *Future, exception: PyObject) void {
-    self.exception = python_c.py_newref(exception);
+    self.exception = exception;
     self.exception_tb = python_c.PyException_GetTraceback(exception);
 
     Future.Callback.call_done_callbacks(obj, .finished);
@@ -90,14 +90,14 @@ inline fn z_future_set_exception(self: *PythonFutureObject, exception: PyObject)
     const future_data = utils.get_data_ptr(Future, self);
 
     switch (future_data.status) {
-        .finished,.canceled => {
+        .finished, .canceled => {
             python_c.PyErr_SetString(utils.PythonImports.invalid_state_exc, "Exception already setted\x00");
             return error.PythonError;
         },
         else => {}
     }
 
-    _ = future_fast_set_exception(self, future_data, exception);
+    _ = future_fast_set_exception(self, future_data, python_c.py_newref(exception));
     return python_c.get_py_none();
 }
 

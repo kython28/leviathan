@@ -21,11 +21,6 @@ const WatchersBTree = utils.BTree(std.posix.fd_t, *FDWatcher, 11);
 
 const lock = @import("../utils/lock.zig");
 
-pub const MinCallbacksCapacity = switch (builtin.mode) {
-    .Debug => 4,
-    else => 128
-};
-
 allocator: std.mem.Allocator,
 
 ready_tasks_queue_index: u8 = 0,
@@ -173,13 +168,10 @@ pub fn release(self: *Loop) void {
     self.initialized = false;
 }
 
-pub fn reserve_slots(self: *Loop, amount: usize) !void {
-    const reserved_slots = self.reserved_slots + amount;
-    try self.ready_tasks_queues[self.ready_tasks_queue_index].ensure_capacity(
-        @max(MinCallbacksCapacity, reserved_slots)
-    );
-
-    self.reserved_slots = reserved_slots;
+pub inline fn reserve_slots(self: *Loop, amount: usize) !void {
+    const new_value = self.reserved_slots + amount;
+    try self.ready_tasks_queues[self.ready_tasks_queue_index].ensure_capacity(new_value);
+    self.reserved_slots = new_value;
 }
 
 pub const Runner = @import("runner.zig");

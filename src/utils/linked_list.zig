@@ -34,7 +34,7 @@ pub fn LinkedList(comptime T: type) type {
             return new_node;
         }
 
-        pub fn release_node(self: *const @This(), node: Node) void {
+        pub inline fn release_node(self: *const @This(), node: Node) void {
             self.allocator.destroy(node);
         }
 

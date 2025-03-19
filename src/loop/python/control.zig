@@ -8,10 +8,6 @@ const LoopObject = Loop.Python.LoopObject;
 
 const Hooks = @import("hooks.zig");
 
-const CallbackManager = @import("callback_manager");
-
-const std = @import("std");
-
 inline fn z_loop_run_forever(self: *LoopObject) !PyObject {
     const loop_data = utils.get_data_ptr(Loop, self);
 
@@ -100,6 +96,12 @@ pub fn loop_close(self: ?*LoopObject, _: ?PyObject) callconv(.C) ?PyObject {
         if (loop_data.running) {
             python_c.raise_python_runtime_error("Loop is running\x00");
             return null;
+        }
+
+        for (&loop_data.ready_tasks_queues) | *queue| {
+            queue.ensure_capacity(loop_data.reserved_slots) catch |err| {
+                return utils.handle_zig_function_error(err, null);
+            };
         }
     }
 

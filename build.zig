@@ -85,7 +85,7 @@ pub fn build(b: *std.Build) void {
         .cwd_relative = python_lib
     });
 
-    const utils_module = b.addModule("python_c", .{
+    const utils_module = b.addModule("utils", .{
         .root_source_file = b.path("src/utils/main.zig"),
         .target = target,
         .optimize = optimize,
@@ -105,7 +105,7 @@ pub fn build(b: *std.Build) void {
     const leviathan_module = b.addModule("leviathan", .{
         .root_source_file = b.path("src/main.zig"),
         .target = target,
-        .optimize = optimize
+        .optimize = optimize,
     });
     leviathan_module.addImport("python_c", python_c_module);
     leviathan_module.addImport("utils", utils_module);

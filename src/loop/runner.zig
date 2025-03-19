@@ -90,14 +90,14 @@ pub inline fn call_once(
     ready_tasks_queue_max_capacity: usize,
     py_exception_handler: PyObject
 ) !usize {
-    const chunks_executed = try CallbackManager.execute_callbacks(
+    const callbacks_executed = try CallbackManager.execute_callbacks(
         ready_queue, if (builtin.is_test) null else &exception_handler, py_exception_handler
     );
-    if (chunks_executed == 0) {
+    if (callbacks_executed == 0) {
         ready_queue.prune(ready_tasks_queue_max_capacity);
     }
 
-    return chunks_executed;
+    return callbacks_executed;
 }
 
 fn fetch_completed_tasks(
@@ -113,6 +113,8 @@ fn fetch_completed_tasks(
 
     for (blocking_ready_tasks[0..nevents]) |cqe| {
         const user_data = cqe.user_data;
+        if (user_data == 0) continue; // Timeout operations
+
         const err: std.os.linux.E = @call(.always_inline, std.os.linux.io_uring_cqe.err, .{cqe});
 
         const blocking_task_data: *Loop.Scheduling.IO.BlockingTaskData = @ptrFromInt(user_data);
@@ -210,7 +212,10 @@ pub fn start(self: *Loop, py_exception_handler: PyObject) !void {
         const old_index = ready_tasks_queue_index;
         const ready_tasks_queue = &ready_tasks_queues[old_index];
 
-        try ready_tasks_queue.ensure_capacity(self.reserved_slots);
+        const reserved_slots = self.reserved_slots;
+        for (ready_tasks_queues) |*queue| {
+            try queue.ensure_capacity(reserved_slots);
+        }
 
         try poll_blocking_events(self, mutex, wait_for_blocking_events, ready_tasks_queue, &quanrantine_blocking_tasks);
         defer {
@@ -231,12 +236,12 @@ pub fn start(self: *Loop, py_exception_handler: PyObject) !void {
         mutex.unlock();
         defer mutex.lock();
 
-        const chunks_executed = try call_once(
+        const callbacks_executed = try call_once(
             ready_tasks_queue,
             @max(self.reserved_slots, ready_tasks_queue_max_capacity),
             py_exception_handler
         );
 
-        wait_for_blocking_events = (chunks_executed == 0);
+        wait_for_blocking_events = (callbacks_executed == 0);
     }
 }

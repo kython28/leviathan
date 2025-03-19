@@ -1,5 +1,3 @@
-const std = @import("std");
-
 const Loop = @import("../main.zig");
 
 const utils = @import("utils");
@@ -13,8 +11,8 @@ const Control = @import("control.zig");
 const Utils = @import("utils/main.zig");
 const UnixSignal = @import("unix_signals.zig");
 const Watchers = @import("io/watchers.zig");
-const Hooks = @import("hooks.zig");
-const Network = @import("network/main.zig");
+// const Hooks = @import("hooks.zig");
+// const Network = @import("network/main.zig");
 
 const PythonLoopMethods: []const python_c.PyMethodDef = &[_]python_c.PyMethodDef{
     // --------------------- Control ---------------------

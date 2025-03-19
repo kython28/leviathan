@@ -212,20 +212,6 @@ inline fn handle_leviathan_future_object(
             );
         }
 
-        // const callback: CallbackManager.Callback = .{
-        //     .func = &wakeup_task,
-        //     .cleanup = &cleanup_task,
-        //     .data = .{
-        //         .user_data = task,
-        //         .exception_context = .{
-        //             .callback_ptr = task.coro.?,
-        //             .exc_message = Task.ExceptionMessage,
-        //             .module_name = Task.ModuleName,
-        //             .module_ptr = @ptrCast(task)
-        //         }
-        //     }
-        // };
-
         try Future.Callback.add_done_callback(future_data, .{
             .ZigGeneric = .{
                 .callback = &wakeup_task,
@@ -316,8 +302,13 @@ fn failed_execution(task: *Task.PythonTaskObject) error{PythonError}!void {
     }
 
     Future.Python.Result.future_fast_set_exception(fut, future_data, exception);
-    python_c.PyErr_SetRaisedException(exception);
-    return error.PythonError;
+    if (
+        exc_match(exception, python_c.PyExc_SystemExit) > 0 or
+        exc_match(exception, python_c.PyExc_KeyboardInterrupt) > 0
+    ) {
+        python_c.PyErr_SetRaisedException(python_c.py_newref(exception));
+        return error.PythonError;
+    }
 }
 
 pub fn cleanup_task(ptr: ?*anyopaque) void {
@@ -354,6 +345,7 @@ pub fn _execute_task_throw(task: *Task.PythonTaskObject, task_exception: ?PyObje
     if (future_data.status != .pending) {
         python_c.raise_python_runtime_error("Task already finished");
         try failed_execution(task);
+        python_c.py_decref(@ptrCast(task));
         return;
     }
 
@@ -447,6 +439,7 @@ fn _execute_task_send(task: *Task.PythonTaskObject) !void {
     if (future_data.status != .pending) {
         python_c.raise_python_runtime_error("Task already finished");
         try failed_execution(task);
+        python_c.py_decref(@ptrCast(task));
         return;
     }
 
@@ -532,19 +525,14 @@ fn wakeup_task(fut: ?*Future.Python.FutureObject, ptr: ?*anyopaque) !void {
         return;
     };
 
-    if (leviathan_fut.exception) |exception| {
-        _execute_task_throw(task, exception) catch |err| {
-            python_c.py_decref(@ptrCast(task));
-            return err;
-        };
+    errdefer python_c.py_decref(@ptrCast(task));
 
+    if (leviathan_fut.exception) |exception| {
+        try _execute_task_throw(task, python_c.py_newref(exception));
         return;
     }
 
-    _execute_task_send(task) catch |err| {
-        python_c.py_decref(@ptrCast(task));
-        return err;
-    };
+    try _execute_task_send(task);
 }
 
 fn py_wake_up(

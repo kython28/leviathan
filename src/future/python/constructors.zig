@@ -34,6 +34,7 @@ pub inline fn fast_new_future(leviathan_loop: *LoopObject) !*PythonFutureObject 
     const instance: *PythonFutureObject = @ptrCast(
         Future.Python.FutureType.tp_alloc.?(&Future.Python.FutureType, 0) orelse return error.PythonError
     );
+    errdefer future_dealloc(instance);
 
     future_set_initial_values(instance);
     try future_init_configuration(instance, leviathan_loop);

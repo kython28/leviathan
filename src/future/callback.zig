@@ -49,7 +49,7 @@ fn release_python_future_data(data: ?*anyopaque) void {
     python_c.py_decref(@ptrCast(py_future));
 }
 
-inline fn execute_python_callback(context: PyObject, callback: PyObject, future: PyObject) !void {
+fn execute_python_callback(context: PyObject, callback: PyObject, future: PyObject) !void {
     defer {
         python_c.py_decref(context);
         python_c.py_decref(callback);
@@ -62,6 +62,7 @@ inline fn execute_python_callback(context: PyObject, callback: PyObject, future:
     const result: ?PyObject = python_c.PyObject_CallOneArg(callback, future);
 
     if (python_c.PyContext_Exit(context) < 0) {
+        python_c.py_xdecref(result);
         return error.PythonError;
     }
 
@@ -81,9 +82,9 @@ fn run_python_future_set_callbacks(data: *const CallbackManager.CallbackData) !v
         python_c.py_decref(@ptrCast(py_future));
         return;
     }
-    const callbacks_items = future.callbacks_queue.items;
 
-    var exceptions_array = std.ArrayList(?PyObject).init(future.loop.allocator);
+    const callbacks_items = future.callbacks_queue.items;
+    var exceptions_array = std.ArrayList(?PyObject).init(future.callbacks_arena_allocator);
     defer {
         for (exceptions_array.items) |exc| {
             python_c.py_xdecref(exc);
@@ -138,7 +139,11 @@ fn run_python_future_set_callbacks(data: *const CallbackManager.CallbackData) !v
             orelse return error.PythonError;
         defer python_c.py_decref(exception_message);
 
-        const exc = python_c.PyObject_CallFunctionObjArgs(python_c.PyExc_BaseExceptionGroup, exception_message, exc_tuple)
+        var args: [2]PyObject = undefined;
+        args[0] = exception_message;
+        args[1] = exc_tuple;
+
+        const exc = python_c.PyObject_Vectorcall(python_c.PyExc_BaseExceptionGroup, &args, 2, null)
             orelse return error.PythonError;
         python_c.PyErr_SetRaisedException(exc);
         
@@ -157,7 +162,7 @@ pub fn release_callbacks_queue(queue: *const CallbacksSetData) void {
             },
             .ZigGeneric => |data| {
                 data.callback(null, data.ptr) catch |err| {
-                    std.debug.panic("Unexpected error while releasing future callbacks: {s}", .{@errorName(err)});
+                    std.debug.panic("Unexpected error while releasing future callback: {s}", .{@errorName(err)});
                 };
             }
         }
@@ -165,7 +170,7 @@ pub fn release_callbacks_queue(queue: *const CallbacksSetData) void {
 }
 
 pub inline fn add_done_callback(self: *Future, callback_data: Data) !void {
-    if (self.status != .pending) return error.FutureAlreadyFinished;
+    if (self.status != .pending) unreachable;
 
     try self.callbacks_queue.append(.{
         .data = callback_data
@@ -196,12 +201,13 @@ pub fn remove_done_callback(self: *Future, callback_id: u64) usize {
     return removed_count;
 }
 
-pub inline fn call_done_callbacks(self: *Future, new_status: Future.FutureStatus) void {
+pub fn call_done_callbacks(self: *Future, new_status: Future.FutureStatus) void {
     if (self.status != .pending) unreachable;
 
     self.status = new_status;
 
     if (self.callbacks_queue.items.len == 0) {
+        self.loop.reserved_slots -= 1;
         return;
     }
 
@@ -215,7 +221,7 @@ pub inline fn call_done_callbacks(self: *Future, new_status: Future.FutureStatus
                 .callback_ptr = null,
                 .exc_message = ExceptionMessage,
                 .module_name = ModuleName,
-                .module_ptr = @ptrCast(utils.get_parent_ptr(Future.Python.FutureObject, self)),
+                .module_ptr = @ptrCast(pyfut)
             }
         }
     };

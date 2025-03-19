@@ -15,8 +15,7 @@ pub inline fn dispatch_nonthreadsafe(self: *Loop, callback: *const CallbackManag
     }
 
     const ready_queue = &self.ready_tasks_queues[self.ready_tasks_queue_index];
-    try ready_queue.ensure_capacity(@max(Loop.MinCallbacksCapacity, self.reserved_slots));
-    _ = ready_queue.try_append(callback) orelse unreachable;
+    _ = try ready_queue.append(callback, @max(1, self.reserved_slots));
 }
 
 pub inline fn dispatch(self: *Loop, callback: *const CallbackManager.Callback) !void {

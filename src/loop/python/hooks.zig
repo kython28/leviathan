@@ -8,9 +8,6 @@ const Task = @import("../../task/main.zig");
 
 const LoopObject = Loop.Python.LoopObject;
 
-const std = @import("std");
-const builtin = @import("builtin");
-
 pub fn asyncgen_firstiter_hook(
     self: ?*LoopObject, agen: ?PyObject
 ) callconv(.C) ?PyObject {

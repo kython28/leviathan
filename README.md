@@ -8,6 +8,7 @@ From the depths of the sea, where darkness meets vastness, emerges Leviathan: an
 - **Full asyncio compatibility**: A drop-in replacement for the default event loop.
 - **Efficient design**: Focused on maximizing performance and minimizing latency.
 - **Simplicity**: Easy integration with existing Python projects.
+- **Robust Safety**: Carefully engineered for critical systems with advanced error recovery and graceful degradation mechanisms.
 
 ## 📜 Requirements
 

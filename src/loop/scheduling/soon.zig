@@ -21,9 +21,10 @@ pub inline fn dispatch(self: *Loop, callback: *const CallbackManager.Callback) !
 
 pub inline fn dispatch_guaranteed_nonthreadsafe(self: *Loop, callback: *const CallbackManager.Callback) void {
     const ready_queue = &self.ready_tasks_queues[self.ready_tasks_queue_index];
-    _ = ready_queue.try_append(callback) orelse unreachable;
 
     self.reserved_slots -= 1;
+
+    _ = ready_queue.try_append(callback) orelse @panic("Trying to add a callback without available space");
 }
 
 pub inline fn dispatch_guaranteed(self: *Loop, callback: *const CallbackManager.Callback) void {

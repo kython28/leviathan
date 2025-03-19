@@ -105,10 +105,14 @@ pub const CallbacksSetsQueue = struct {
         const new_node = try self.queue.create_new_node(undefined);
         errdefer self.queue.release_node(new_node);
 
-        const extra_capacity = @max(self.capacity * 2, @max(min_capacity, switch (builtin.mode) {
+        var extra_capacity = @max(self.capacity * 2, switch (builtin.mode) {
             .Debug => 4,
+            .ReleaseSmall => 32,
             else => 128
-        }));
+        });
+        while (extra_capacity < min_capacity) {
+            extra_capacity *= 2;
+        }
 
         try new_node.data.init(self.queue.allocator, extra_capacity);
         errdefer new_node.data.deinit();
@@ -131,7 +135,10 @@ pub const CallbacksSetsQueue = struct {
 
     pub inline fn append(self: *CallbacksSetsQueue, callback: *const Callback, min_capacity: usize) !*Callback {
         try self.ensure_capacity(min_capacity);
-        return self.try_append(callback) orelse unreachable;
+        return self.try_append(callback) orelse std.debug.panic(
+            "Appening after increasing capacity failed. Min capacity requested: {d} - Available slots: {d}",
+            .{min_capacity, self.available_slots}
+        );
     }
 
     pub fn prune(self: *CallbacksSetsQueue, max_capacity: usize) void {
@@ -143,6 +150,10 @@ pub const CallbacksSetsQueue = struct {
 
         defer self.capacity = capacity;
         const allocator = self.queue.allocator;
+
+        var available_slots = self.available_slots;
+        defer self.available_slots = available_slots;
+
         if (((capacity * 2) / 3) <= max_capacity) {
             var node = self.queue.first.?;
 
@@ -153,14 +164,18 @@ pub const CallbacksSetsQueue = struct {
             }
 
             while (capacity > max_capacity and queue_len > 1) {
-                const removed = node.data.callbacks.len;
-                node.data.deinit(allocator);
+                const data = &node.data;
+                const removed = data.callbacks.len;
+                const slots_in_use = data.callbacks_num;
+
+                data.deinit(allocator);
 
                 const next_node = node.next.?;
                 allocator.destroy(node);
                 node = next_node;
 
                 capacity -= removed;
+                available_slots -= removed - slots_in_use;
                 queue_len -= 1;
             }
         }else{
@@ -173,14 +188,18 @@ pub const CallbacksSetsQueue = struct {
             }
 
             while (capacity > max_capacity and queue_len > 1) {
-                const removed = node.data.callbacks.len;
-                node.data.deinit(allocator);
+                const data = &node.data;
+                const removed = data.callbacks.len;
+                const slots_in_use = data.callbacks_num;
+
+                data.deinit(allocator);
 
                 const prev_node = node.prev.?;
                 allocator.destroy(node);
                 node = prev_node;
 
                 capacity -= removed;
+                available_slots -= removed - slots_in_use;
                 queue_len -= 1;
             }
         }
@@ -369,8 +388,8 @@ test "Add new callback to queue and immediately execute" {
 
     const ret = try set_queue.append(&callback, 10);
 
-    try std.testing.expectEqual(10, set_queue.capacity);
-    try std.testing.expectEqual(9, set_queue.available_slots);
+    try std.testing.expectEqual(16, set_queue.capacity);
+    try std.testing.expectEqual(15, set_queue.available_slots);
 
     try std.testing.expectEqual(&test_callback, ret.func);
     try std.testing.expectEqual(@intFromPtr(&executed), @intFromPtr(ret.data.user_data));
@@ -381,12 +400,12 @@ test "Add new callback to queue and immediately execute" {
 
     try std.testing.expectEqual(1, callbacks_set.callbacks_num);
     try std.testing.expectEqual(ret, &callbacks_set.callbacks[0]);
-    try std.testing.expectEqual(10, callbacks_set.callbacks.len);
+    try std.testing.expectEqual(16, callbacks_set.callbacks.len);
 
     const callbacks_executed  = try execute_callbacks(&set_queue, null, null);
     try std.testing.expectEqual(1, callbacks_executed);
-    try std.testing.expectEqual(10, set_queue.capacity);
-    try std.testing.expectEqual(10, set_queue.available_slots);
+    try std.testing.expectEqual(16, set_queue.capacity);
+    try std.testing.expectEqual(16, set_queue.available_slots);
 
     try std.testing.expectEqual(1, executed);
     try std.testing.expectEqual(0, callbacks_set.callbacks_num);
@@ -589,9 +608,12 @@ test "Execute callbacks and then prune sets" {
     try std.testing.expectEqual(20, c_executed);
     try std.testing.expectEqual(3, set_queue.queue.len);
 
+    const new_av_slots = set_queue.available_slots - set_queue.queue.last.?.data.callbacks.len;
+
     set_queue.prune(20);
 
     try std.testing.expectEqual(2, set_queue.queue.len);
+    try std.testing.expectEqual(new_av_slots, set_queue.available_slots);
     try std.testing.expectEqual(set_queue.first_set, set_queue.queue.first);
     try std.testing.expectEqual(set_queue.last_set, set_queue.queue.first);
 }

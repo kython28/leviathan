@@ -85,7 +85,7 @@ fn run_python_future_set_callbacks(data: *const CallbackManager.CallbackData) !v
 
     const callbacks_items = future.callbacks_queue.items;
     var exceptions_array = &future.exceptions_queue;
-    defer {
+    errdefer {
         for (exceptions_array.items) |exc| {
             python_c.py_xdecref(exc);
         }
@@ -166,7 +166,7 @@ pub fn release_callbacks_queue(queue: *const CallbacksSetData) void {
 }
 
 pub inline fn add_done_callback(self: *Future, callback_data: Data) !void {
-    if (self.status != .pending) unreachable;
+    if (self.status != .pending) @panic("Trying to add callback when future finished");
 
     try self.callbacks_queue.append(.{
         .data = callback_data
@@ -201,7 +201,7 @@ pub fn remove_done_callback(self: *Future, callback_id: u64) usize {
 }
 
 pub fn call_done_callbacks(self: *Future, new_status: Future.FutureStatus) void {
-    if (self.status != .pending) unreachable;
+    if (self.status != .pending) @panic("Trying to add callback when future finished");
 
     self.status = new_status;
 

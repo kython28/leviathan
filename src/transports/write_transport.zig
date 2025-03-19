@@ -105,8 +105,8 @@ pub fn close(self: *WriteTransport) !void {
         return;
     }
 
-    _ = try Loop.Scheduling.IO.queue(
-        self.loop, .{
+    _ = try self.loop.io.queue(
+        .{
             .Cancel = blocking_task_id
         }
     );
@@ -161,8 +161,8 @@ inline fn queue_remaining_data(self: *WriteTransport, data_written: usize) !void
     }
     self.current_iovec_index = current_ioves_index;
 
-    self.blocking_task_id = try Loop.Scheduling.IO.queue(
-        self.loop, .{
+    self.blocking_task_id = try self.loop.io.queue(
+        .{
             .PerformWriteV = .{
                 .callback = .{
                     .func = &write_operation_completed,
@@ -295,8 +295,8 @@ pub fn queue_buffers_and_swap(self: *WriteTransport) !void {
 
     const buffer_size = self.buffer_size;
 
-    self.blocking_task_id = try Loop.Scheduling.IO.queue(
-        self.loop, .{
+    self.blocking_task_id = try self.loop.io.queue(
+        .{
             .PerformWriteV = .{
                 .callback = .{
                     .func = &write_operation_completed,
@@ -375,14 +375,12 @@ pub fn queue_eof(self: *WriteTransport) !void {
 
     try self.close();
 
-    _ = try Loop.Scheduling.IO.queue(
-        self.loop, .{
-            .SocketShutdown = .{
-                .socket_fd = self.fd,
-                .how = std.os.linux.SHUT.WR
-            }
+    _ = try self.loop.io.queue(.{
+        .SocketShutdown = .{
+            .socket_fd = self.fd,
+            .how = std.os.linux.SHUT.WR
         }
-    );
+    });
 }
 
 const WriteTransport = @This();

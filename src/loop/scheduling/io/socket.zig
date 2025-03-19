@@ -14,16 +14,16 @@ pub const ShutdownData = struct {
     how: u32
 };
 
-pub fn connect(set: *IO.BlockingTasksSet, data: ConnectData) !usize {
-    const data_ptr = try set.push(.SocketConnect, data.callback);
-    errdefer set.pop(data_ptr);
+pub fn connect(ring: *std.os.linux.IoUring, set: *IO.BlockingTasksSet, data: ConnectData) !usize {
+    const data_ptr = try set.push(.SocketConnect, &data.callback);
+    errdefer data_ptr.discard();
 
-    const ring: *std.os.linux.IoUring = &set.ring;
     const sqe = try ring.connect(
         @intCast(@intFromPtr(data_ptr)), data.socket_fd, &data.address.any,
         data.address.getOsSockLen()
     );
     sqe.flags |= std.os.linux.IOSQE_ASYNC;
+
     const ret = try ring.submit();
     if (ret != 1) {
         return error.SQENotSubmitted;
@@ -31,13 +31,13 @@ pub fn connect(set: *IO.BlockingTasksSet, data: ConnectData) !usize {
     return @intFromPtr(data_ptr);
 }
 
-pub fn shutdown(set: *IO.BlockingTasksSet, data: ShutdownData) !usize {
+pub fn shutdown(ring: *std.os.linux.IoUring, set: *IO.BlockingTasksSet, data: ShutdownData) !usize {
     const data_ptr = try set.push(.SocketShutdown, null);
-    errdefer set.pop(data_ptr);
+    errdefer data_ptr.discard();
 
-    const ring: *std.os.linux.IoUring = &set.ring;
     const sqe = try ring.shutdown(@intCast(@intFromPtr(data_ptr)), data.socket_fd, data.how);
     sqe.flags |= std.os.linux.IOSQE_ASYNC;
+
     const ret = try ring.submit();
     if (ret != 1) {
         return error.SQENotSubmitted;

@@ -14,11 +14,9 @@ pub const WaitData = struct {
     delay_type: DelayType
 };
 
-pub fn wait(set: *IO.BlockingTasksSet, data: WaitData) !usize {
-    const data_ptr = try set.push(.WaitTimer, data.callback);
-    errdefer set.pop(data_ptr);
-
-    const ring: *std.os.linux.IoUring = &set.ring;
+pub fn wait(ring: *std.os.linux.IoUring, set: *IO.BlockingTasksSet, data: WaitData) !usize {
+    const data_ptr = try set.push(.WaitTimer, &data.callback);
+    errdefer data_ptr.discard();
 
     const timespec_sec_info = @typeInfo(@FieldType(std.os.linux.timespec, "sec")).int;
     const kernel_timespec_sec_info = @typeInfo(@FieldType(std.os.linux.kernel_timespec, "sec")).int;

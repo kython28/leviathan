@@ -258,7 +258,7 @@ inline fn z_loop_delayed_call(
         //     .cancelled = &py_timer_handle.handle.cancelled
         // }
     };
-    py_timer_handle.handle.blocking_task_id = try Loop.Scheduling.IO.queue(loop_data, .{
+    py_timer_handle.handle.blocking_task_id = try loop_data.io.queue(.{
         .WaitTimer = .{
             .callback = callback,
             .duration = time,

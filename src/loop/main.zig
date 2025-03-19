@@ -1,12 +1,9 @@
 const std = @import("std");
-const builtin = @import("builtin");
 
 const CallbackManager = @import("callback_manager");
 
 const Handle = @import("../handle.zig");
 
-
-const BlockingTasksSetLinkedList = Scheduling.IO.BlockingTasksSetLinkedList;
 
 pub const FDWatcher = struct {
     handle: *Handle.PythonHandleObject,
@@ -28,17 +25,10 @@ ready_tasks_queue_index: u8 = 0,
 ready_tasks_queues: [2]CallbackManager.CallbacksSetsQueue,
 reserved_slots: usize = 0,
 
-blocking_tasks_epoll_fd: std.posix.fd_t = -1,
-blocking_ready_epoll_events: []std.os.linux.epoll_event,
-available_blocking_tasks_queue: BlockingTasksSetLinkedList,
-busy_blocking_tasks_queue: BlockingTasksSetLinkedList,
-blocking_ready_tasks: []std.os.linux.io_uring_cqe,
+io: Scheduling.IO,
 
 reader_watchers: WatchersBTree,
 writer_watchers: WatchersBTree,
-
-unlock_epoll_fd: std.posix.fd_t = -1,
-epoll_locked: bool = false,
 
 ready_tasks_queue_max_capacity: usize,
 
@@ -55,21 +45,6 @@ pub fn init(self: *Loop, allocator: std.mem.Allocator, rtq_max_capacity: usize) 
     if (self.initialized) {
         @panic("Loop is already initialized");
     }
-
-    const blocking_ready_tasks = try allocator.alloc(std.os.linux.io_uring_cqe, Scheduling.IO.TotalTasksItems * 2);
-    errdefer allocator.free(blocking_ready_tasks);
-
-    const blocking_ready_epoll_events = try allocator.alloc(std.os.linux.epoll_event, switch (builtin.mode) {
-        .Debug => 8,
-        else => 256
-    });
-    errdefer allocator.free(blocking_ready_epoll_events);
-
-    const unlock_epoll_fd = try std.posix.eventfd(0, std.os.linux.EFD.NONBLOCK|std.os.linux.EFD.CLOEXEC);
-    errdefer std.posix.close(unlock_epoll_fd);
-
-    const blocking_tasks_epoll_fd = try std.posix.epoll_create1(0);
-    errdefer std.posix.close(blocking_tasks_epoll_fd);
 
     var reader_watchers = try WatchersBTree.init(allocator);
     errdefer reader_watchers.deinit() catch |err| {
@@ -89,32 +64,21 @@ pub fn init(self: *Loop, allocator: std.mem.Allocator, rtq_max_capacity: usize) 
             CallbackManager.CallbacksSetsQueue.init(allocator)
         },
         .ready_tasks_queue_max_capacity = rtq_max_capacity / @sizeOf(CallbackManager.Callback),
-        .available_blocking_tasks_queue = BlockingTasksSetLinkedList.init(allocator),
-        .busy_blocking_tasks_queue = BlockingTasksSetLinkedList.init(allocator),
-        .blocking_ready_tasks = blocking_ready_tasks,
-        .blocking_tasks_epoll_fd = try std.posix.epoll_create1(0),
-        .blocking_ready_epoll_events = blocking_ready_epoll_events,
         .reader_watchers = reader_watchers,
         .writer_watchers = writer_watchers,
         .unix_signals = undefined,
-        .unlock_epoll_fd = unlock_epoll_fd
+        .io = undefined
     };
-    errdefer {
-        std.posix.close(self.blocking_tasks_epoll_fd);
-    }
+
+    try self.io.init(self, allocator);
+    errdefer self.io.deinit();
+
+    try self.io.register_eventfd_callback();
 
     try UnixSignals.init(self);
+    errdefer self.unix_signals.deinit();
 
     self.initialized = true;
-
-    var epoll_event: std.os.linux.epoll_event = .{
-        .events = std.os.linux.EPOLL.IN | std.os.linux.EPOLL.ET,
-        .data = std.os.linux.epoll_data{
-            .ptr = 0
-        }
-    };
-
-    try std.posix.epoll_ctl(self.blocking_tasks_epoll_fd, std.os.linux.EPOLL.CTL_ADD, unlock_epoll_fd, &epoll_event);
 }
 
 pub fn release(self: *Loop) void {
@@ -122,27 +86,10 @@ pub fn release(self: *Loop) void {
         @panic("Loop is running, can't be deallocated");
     }
 
-    const allocator = self.allocator;
-    const available_blocking_tasks_queue = &self.available_blocking_tasks_queue;
-    for (0..available_blocking_tasks_queue.len) |_| {
-        const set = available_blocking_tasks_queue.pop() catch |err| {
-            std.debug.panic("Unexpected error while getting blocking tasks queue: {s}", .{@errorName(err)});
-        };
-        set.cancel_all(self);
-        set.deinit(false);
-    }
-
-    const busy_blocking_tasks_queue = &self.busy_blocking_tasks_queue;
-    for (0..busy_blocking_tasks_queue.len) |_| {
-        const set = busy_blocking_tasks_queue.pop() catch |err| {
-            std.debug.panic("Unexpected error while getting blocking tasks queue: {s}", .{@errorName(err)});
-        };
-        set.cancel_all(self);
-        set.deinit(false);
-    }
-
+    self.io.deinit();
     self.unix_signals.deinit();
 
+    const allocator = self.allocator;
     for (&self.ready_tasks_queues) |*ready_tasks_queue| {
         CallbackManager.release_sets_queue(allocator, ready_tasks_queue);
     }
@@ -153,17 +100,6 @@ pub fn release(self: *Loop) void {
     self.writer_watchers.deinit() catch |err| {
         std.debug.panic("Unexpected error while releasing writer watchers: {s}", .{@errorName(err)});
     };
-
-    if (self.blocking_tasks_epoll_fd != -1) {
-        std.posix.close(self.blocking_tasks_epoll_fd);
-    }
-
-    if (self.unlock_epoll_fd != -1) {
-        std.posix.close(self.unlock_epoll_fd);
-    }
-
-    allocator.free(self.blocking_ready_epoll_events);
-    allocator.free(self.blocking_ready_tasks);
 
     self.initialized = false;
 }

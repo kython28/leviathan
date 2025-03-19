@@ -58,23 +58,21 @@ fn signal_handler(data: *const CallbackManager.CallbackData) !void {
         .buffer = @as([*]u8, @ptrCast(&loop.unix_signals.signalfd_info))[0..@sizeOf(std.os.linux.signalfd_siginfo)],
     };
 
-    loop.unix_signals.blocking_task_id = try Loop.Scheduling.IO.queue(
-        loop, Loop.Scheduling.IO.BlockingOperationData{
-            .PerformRead = .{
-                .fd = loop.unix_signals.fd,
-                .data = buffer_to_read,
-                .callback = CallbackManager.Callback{
-                    .func = &signal_handler,
-                    .cleanup = null,
-                    .data = .{
-                        .exception_context = null,
-                        .user_data = loop,
-                    },
+    loop.unix_signals.blocking_task_id = try loop.io.queue(.{
+        .PerformRead = .{
+            .fd = loop.unix_signals.fd,
+            .data = buffer_to_read,
+            .callback = CallbackManager.Callback{
+                .func = &signal_handler,
+                .cleanup = null,
+                .data = .{
+                    .exception_context = null,
+                    .user_data = loop,
                 },
-                .offset = 0
-            }
+                },
+            .offset = 0
         }
-    );
+    });
 }
 
 fn default_sigint_signal_callback(data: *const CallbackManager.CallbackData) !void {
@@ -88,18 +86,16 @@ fn enqueue_signal_fd(self: *UnixSignals) !void {
     const blocking_task_id = self.blocking_task_id;
     const loop = self.loop;
     if (blocking_task_id > 0) {
-        _ = try Loop.Scheduling.IO.queue(
-            loop, Loop.Scheduling.IO.BlockingOperationData{
-                .Cancel = blocking_task_id
-            }
-        );
+        _ = try loop.io.queue(.{
+            .Cancel = blocking_task_id
+        });
     }
 
     const buffer_to_read: std.os.linux.IoUring.ReadBuffer = .{
         .buffer = @as([*]u8, @ptrCast(&self.signalfd_info))[0..@sizeOf(std.os.linux.signalfd_siginfo)],
     };
 
-    self.blocking_task_id = try Loop.Scheduling.IO.queue(loop, Loop.Scheduling.IO.BlockingOperationData{
+    self.blocking_task_id = try loop.io.queue(.{
         .PerformRead = .{
             .fd = self.fd,
             .data = buffer_to_read,

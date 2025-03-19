@@ -80,8 +80,8 @@ pub fn close(self: *ReadTransport) !void {
         return;
     }
 
-    _ = try Loop.Scheduling.IO.queue(
-        self.loop, .{
+    _ = try self.loop.io.queue(
+        .{
             .Cancel = blocking_task_id
         }
     );
@@ -161,8 +161,8 @@ fn read_operation_completed(data: *const CallbackManager.CallbackData) !void {
 pub inline fn perform(self: *ReadTransport, buffer: ?[]u8) !void {
     const buffer_to_read = buffer orelse self.buffer;
 
-    self.blocking_task_id = try Loop.Scheduling.IO.queue(
-        self.loop, .{
+    self.blocking_task_id = try self.loop.io.queue(
+        .{
             .PerformRead = .{
                 .callback = .{
                     .func = &read_operation_completed,
@@ -196,8 +196,8 @@ pub inline fn cancel(self: *ReadTransport) !void {
         return;
     }
 
-    _ = try Loop.Scheduling.IO.queue(
-        self.loop, .{
+    _ = try self.loop.io.queue(
+        .{
             .Cancel = blocking_task_id
         }
     );

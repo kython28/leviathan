@@ -3,7 +3,7 @@ const builtin = @import("builtin");
 
 pub fn LinkedList(comptime T: type) type {
     return struct {
-        const _linked_list_node = struct {
+        pub const _linked_list_node = struct {
             data: T,
 
             prev: ?*_linked_list_node,

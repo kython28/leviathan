@@ -65,8 +65,8 @@ fn loop_watchers_callback(data: *const CallbackManager.CallbackData) !void {
             }
         };
 
-        const blocking_task_id = try Loop.Scheduling.IO.queue(
-            loop_data, switch (watcher.event_type) {
+        const blocking_task_id = try loop_data.io.queue(
+            switch (watcher.event_type) {
                 std.c.POLL.IN => Loop.Scheduling.IO.BlockingOperationData{
                     .WaitReadable = .{
                         .fd = fd,
@@ -207,8 +207,7 @@ inline fn z_loop_add_watcher(
         // }
     };
 
-    const blocking_task_id = try Loop.Scheduling.IO.queue(
-        loop_data,
+    const blocking_task_id = try loop_data.io.queue(
         switch (operation) {
             .WaitReadable => Loop.Scheduling.IO.BlockingOperationData{
                 .WaitReadable = .{
@@ -287,8 +286,8 @@ inline fn z_loop_remove_watcher(
         }
 
         existing_watcher_data.fd = -1;
-        _ = try Loop.Scheduling.IO.queue(
-            loop_data, Loop.Scheduling.IO.BlockingOperationData{
+        _ = try loop_data.io.queue(
+            .{
                 .Cancel = blocking_task_id
             }
         );

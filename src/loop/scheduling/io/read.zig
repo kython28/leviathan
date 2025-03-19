@@ -12,11 +12,10 @@ pub const PerformData = struct {
     zero_copy: bool = false
 };
 
-pub fn wait_ready(set: *IO.BlockingTasksSet, data: IO.WaitData) !usize {
-    const data_ptr = try set.push(.WaitReadable, data.callback);
-    errdefer set.pop(data_ptr);
+pub fn wait_ready(ring: *std.os.linux.IoUring, set: *IO.BlockingTasksSet, data: IO.WaitData) !usize {
+    const data_ptr = try set.push(.WaitReadable, &data.callback);
+    errdefer data_ptr.discard();
 
-    const ring: *std.os.linux.IoUring = &set.ring;
     const sqe = try ring.poll_add(@intCast(@intFromPtr(data_ptr)), data.fd, std.c.POLL.IN);
     sqe.flags |= std.os.linux.IOSQE_ASYNC;
 
@@ -35,11 +34,10 @@ pub fn wait_ready(set: *IO.BlockingTasksSet, data: IO.WaitData) !usize {
     return @intFromPtr(data_ptr);
 }
 
-pub fn perform(set: *IO.BlockingTasksSet, data: PerformData) !usize {
-    const data_ptr = try set.push(.PerformRead, data.callback);
-    errdefer set.pop(data_ptr);
+pub fn perform(ring: *std.os.linux.IoUring, set: *IO.BlockingTasksSet, data: PerformData) !usize {
+    const data_ptr = try set.push(.PerformRead, &data.callback);
+    errdefer data_ptr.discard();
 
-    const ring = &set.ring;
     const sqe = blk: {
         if (data.zero_copy) {
             var msghr = comptime std.mem.zeroes(std.posix.msghdr);

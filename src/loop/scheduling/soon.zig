@@ -2,16 +2,9 @@ const Loop = @import("../main.zig");
 
 const CallbackManager = @import("callback_manager");
 
-const std = @import("std");
-
-inline fn unlock_epoll(self: *Loop) !void {
-    const data: [8]u8 = .{1} ** 8;
-    _ = try std.posix.write(self.unlock_epoll_fd, &data);
-}
-
 pub inline fn dispatch_nonthreadsafe(self: *Loop, callback: *const CallbackManager.Callback) !void {
-    if (self.epoll_locked) {
-        try unlock_epoll(self);
+    if (self.io.ring_blocked) {
+        try self.io.wakeup_eventfd();
     }
 
     const ready_queue = &self.ready_tasks_queues[self.ready_tasks_queue_index];

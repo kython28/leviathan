@@ -51,38 +51,6 @@ pub fn validate_hostname(hostname: []const u8) bool {
     return true;
 }
 
-pub fn is_ipv4(ip: []const u8) bool {
-    var iter = std.mem.tokenizeScalar(u8, ip, '.');
-    var count: u8 = 0;
-
-    while (iter.next()) |octet| : (count += 1) {
-        if (count >= 4) return false;
-
-        _ = std.fmt.parseInt(u8, octet, 10) catch return false;
-    }
-
-    return count == 4;
-}
-
-pub fn is_ipv6(ip: []const u8) bool {
-    var iter = std.mem.splitScalar(u8, ip, ':');
-    var count: u8 = 0;
-    var compressed_zero_count: u8 = 0;
-
-    while (iter.next()) |segment| : (count += 1) {
-        if (count > 8) return false;
-
-        if (segment.len == 0) {
-            compressed_zero_count += 1;
-            if (compressed_zero_count > 1) return false;
-        } else {
-            _ = std.fmt.parseInt(u16, segment, 16) catch return false;
-        }
-    }
-
-    return count <= 8;
-}
-
 pub fn resolve_address(hostname: []const u8, allow_ipv6: bool) !?[]const std.net.Address {
     // 1. Check for localhost
     if (std.mem.eql(u8, hostname, "localhost")) {
@@ -90,15 +58,17 @@ pub fn resolve_address(hostname: []const u8, allow_ipv6: bool) !?[]const std.net
     }
 
     // 2. Check for IPv4
-    if (is_ipv4(hostname)) {
-        tmp_address = try std.net.Address.resolveIp(hostname, 0);
+    if (std.net.Address.resolveIp(hostname, 0)) |res| {
+        tmp_address = res;
         return @as([*]const std.net.Address, @ptrCast(&tmp_address))[0..1];
-    }
+    }else |_| {}
 
     // 3. Check for IPv6
-    if (allow_ipv6 and is_ipv6(hostname)) {
-        tmp_address = try std.net.Address.resolveIp6(hostname, 0);
-        return @as([*]const std.net.Address, @ptrCast(&tmp_address))[0..1];
+    if (allow_ipv6) {
+        if (std.net.Address.resolveIp6(hostname, 0)) |res| {
+            tmp_address = res;
+            return @as([*]const std.net.Address, @ptrCast(&tmp_address))[0..1];
+        }else |_| {}
     }
 
     // 4. Validate hostname
@@ -461,4 +431,42 @@ test "validate_hostname edge cases" {
     for (edge_cases) |case| {
         try std.testing.expectEqual(case.expected, validate_hostname(case.domain));
     }
+}
+
+test "resolve_address localhost" {
+    // Test IPv4 localhost
+    {
+        const result = try resolve_address("localhost", false);
+        try std.testing.expect(result != null);
+        try std.testing.expectEqual(@as(usize, 1), result.?.len);
+        try std.testing.expectEqual(std.posix.AF.INET, result.?[0].any.family);
+    }
+
+    // Test IPv4 and IPv6 localhost
+    {
+        const result = try resolve_address("localhost", true);
+        try std.testing.expect(result != null);
+        try std.testing.expectEqual(@as(usize, 2), result.?.len);
+        try std.testing.expectEqual(std.posix.AF.INET, result.?[0].any.family);
+        try std.testing.expectEqual(std.posix.AF.INET6, result.?[1].any.family);
+    }
+}
+
+test "resolve_address IPv4" {
+    const result = try resolve_address("8.8.8.8", false);
+    try std.testing.expect(result != null);
+    try std.testing.expectEqual(@as(usize, 1), result.?.len);
+    try std.testing.expectEqual(std.posix.AF.INET, result.?[0].any.family);
+}
+
+test "resolve_address IPv6" {
+    const result = try resolve_address("2001:4860:4860::8888", true);
+    try std.testing.expect(result != null);
+    try std.testing.expectEqual(@as(usize, 1), result.?.len);
+    try std.testing.expectEqual(std.posix.AF.INET6, result.?[0].any.family);
+}
+
+test "resolve_address invalid hostname" {
+    const result = resolve_address("invalid--domain", false);
+    try std.testing.expectError(error.InvalidHostname, result);
 }

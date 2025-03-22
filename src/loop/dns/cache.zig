@@ -15,6 +15,19 @@ pub const Record = struct {
     state: RecordState,
     expire_at: i64,
 
+    pub inline fn get_address_list(self: *Record) ?[]const std.posix.sockaddr {
+        return switch (self.state) {
+            .pending => null,
+            .resolved => |d| d,
+            .none => @panic("Attempt to get data from empty record") // Read `get` Cache's method
+        };
+    }
+
+    pub inline fn append_callback(self: *Record, user_callback: *const Resolv.UserCallback) !void {
+        const control_data = self.state.pending;
+        try control_data.user_callbacks.append(user_callback.*);
+    }
+
     pub inline fn set_resolved_data(self: *Record, address_list: []std.posix.sockaddr, ttl: u32) void {
         var expire_at: i64 = std.math.maxInt(i64);
         if (ttl < std.math.maxInt(u32)) {
@@ -56,26 +69,7 @@ pub fn create_new_record(self: *Cache, hostname: []const u8, control_data: *Reso
     try self.records_list.append(new_record);
 }
 
-pub fn add(self: *Cache, hostname: []const u8, address_list: []std.posix.sockaddr, ttl: u32) !void {
-    const allocator = self.allocator;
-    const new_hostname = try allocator.dupe(hostname);
-    errdefer allocator.free(new_hostname);
-
-    var expire_at: i64 = std.math.maxInt(i64);
-    if (ttl < std.math.maxInt(u32)) {
-        expire_at = std.time.timestamp() + ttl;
-    }
-
-    const new_record = Record{
-        .hostname = new_hostname,
-        .address_list = address_list,
-        .expire_at = expire_at
-    };
-
-    try self.records_list.append(new_record);
-}
-
-pub fn get(self: *Cache, hostname: []const u8) ?[]const std.posix.sockaddr {
+pub fn get(self: *Cache, hostname: []const u8) ?*Record {
     const current_time = std.time.timestamp();
 
     const allocator = self.allocator;
@@ -83,11 +77,11 @@ pub fn get(self: *Cache, hostname: []const u8) ?[]const std.posix.sockaddr {
     while (node) |n| {
         node = n.next;
 
-        const data = n.data;
+        const data = &n.data;
         if (data.expire_at < current_time) {
             switch (data.state) {
                 .resolved => |v| allocator.free(v),
-                .none => {},
+                .none => {}, // When it is none, `expire_at` must be 0
 
                 // At this point the hostname should be resolved. Also when it is pending state,
                 // `expire_at` is MAX_I64
@@ -105,11 +99,7 @@ pub fn get(self: *Cache, hostname: []const u8) ?[]const std.posix.sockaddr {
             continue;
         }
 
-        return switch (data.state) {
-            .resolved => |v| v,
-            .pending => null,
-            .none => unreachable
-        };
+        return data;
     }
 
     return null;

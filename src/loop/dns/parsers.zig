@@ -1,5 +1,25 @@
 const std = @import("std");
 
+// Localhost addresses for quick reference
+const localhost_address_list: []const std.posix.sockaddr = &[_]std.posix.sockaddr{
+    @bitCast(
+        std.net.Ip4Address.init(
+            &.{ 127, 0, 0, 1 },
+            0,
+        ).sa,
+    ),
+    @bitCast(
+        std.net.Ip6Address.init(
+            &.{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1 },
+            0,
+            0,
+            0,
+        ).sa,
+    )
+};
+
+var tmp_address: std.posix.sockaddr = undefined;
+
 // TODO: Implement resolv options
 pub const Configuration = struct {
     servers: []std.posix.sockaddr,
@@ -18,17 +38,79 @@ pub fn validate_hostname(hostname: []const u8) bool {
         }
 
         for (label) |c| {
-            if (!(
-                (c >= 'a' and c <= 'z') or
+            if (!((c >= 'a' and c <= 'z') or
                 (c >= '0' and c <= '9') or
-                (c == '-')
-            )) {
+                (c == '-')))
+            {
                 return false;
             }
         }
     }
 
     return true;
+}
+
+pub fn is_ipv4(ip: []const u8) bool {
+    var iter = std.mem.tokenizeScalar(u8, ip, '.');
+    var count: u8 = 0;
+
+    while (iter.next()) |octet| : (count += 1) {
+        if (count >= 4) return false;
+
+        _ = std.fmt.parseInt(u8, octet, 10) catch return false;
+    }
+
+    return count == 4;
+}
+
+pub fn is_ipv6(ip: []const u8) bool {
+    var iter = std.mem.splitScalar(u8, ip, ':');
+    var count: u8 = 0;
+    var compressed_zero_count: u8 = 0;
+
+    while (iter.next()) |segment| : (count += 1) {
+        if (count > 8) return false;
+
+        if (segment.len == 0) {
+            compressed_zero_count += 1;
+            if (compressed_zero_count > 1) return false;
+        } else {
+            _ = std.fmt.parseInt(u16, segment, 16) catch return false;
+        }
+    }
+
+    return count <= 8;
+}
+
+pub fn resolve_address(hostname: []const u8, allow_ipv6: bool) !?[]const std.posix.sockaddr {
+    // 1. Check for localhost
+    if (std.mem.eql(u8, hostname, "localhost")) {
+        return localhost_address_list[0..(1 + @as(usize, @intFromBool(allow_ipv6)))];
+    }
+
+    // 2. Check for IPv4
+    if (is_ipv4(hostname)) {
+        const address = try std.net.Ip4Address.resolveIp(hostname, 0);
+        tmp_address = @bitCast(address.sa);
+
+        return @as([*]const std.posix.sockaddr, @ptrCast(&tmp_address))[0..1];
+    }
+
+    // 3. Check for IPv6
+    if (allow_ipv6 and is_ipv6(hostname)) {
+        const address = try std.net.Ip6Address.resolve(hostname, 0);
+        tmp_address = @bitCast(address.sa);
+
+        return @as([*]const std.posix.sockaddr, @ptrCast(&tmp_address))[0..1];
+    }
+
+    // 4. Validate hostname
+    if (!validate_hostname(hostname)) {
+        return error.InvalidHostname;
+    }
+
+    // If no match, return null
+    return null;
 }
 
 pub fn parse_resolv_configuration(allocator: std.mem.Allocator, content: []const u8) !Configuration {
@@ -62,7 +144,7 @@ pub fn parse_resolv_configuration(allocator: std.mem.Allocator, content: []const
             const ip_str = words_iter.next() orelse return error.InvalidConfiguration;
             const address = try std.net.Address.parseIp(ip_str, 53);
             try servers.append(address.any);
-        }else if (std.mem.eql(u8, first_word, "search")) {
+        } else if (std.mem.eql(u8, first_word, "search")) {
             while (words_iter.next()) |word| {
                 chr = word[0];
                 if (chr == '#' or chr == ';') {
@@ -93,6 +175,6 @@ pub fn parse_resolv_configuration(allocator: std.mem.Allocator, content: []const
 
     return Configuration{
         .search = search_hosts_slice,
-        .servers = servers_slice
+        .servers = servers_slice,
     };
 }

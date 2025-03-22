@@ -24,16 +24,9 @@ pub inline fn get_result(self: *PythonFutureObject) ?PyObject {
         },
         .finished => blk: {
             if (self.exception) |exc| {
-                const new_exc = python_c.py_newref(exc);
-                if (self.exception_tb) |exception_tb| {
-                    if (python_c.PyException_SetTraceback(new_exc, exception_tb) < 0) {
-                        python_c.raise_python_runtime_error(
-                            "An error ocurred setting traceback to python exception\x00"
-                        );
-                        break :blk null;
-                    }
-                }
-                python_c.PyErr_SetRaisedException(new_exc);
+                python_c.PyErr_SetRaisedException(
+                    python_c.py_newref(exc)
+                );
                 break :blk null;
             }
             break :blk @as(PyObject, @alignCast(@ptrCast(future_data.result.?)));
@@ -76,8 +69,6 @@ pub fn future_exception(self: ?*PythonFutureObject, _: ?PyObject) callconv(.C) ?
 
 pub inline fn future_fast_set_exception(self: *PythonFutureObject, obj: *Future, exception: PyObject) void {
     self.exception = exception;
-    self.exception_tb = python_c.PyException_GetTraceback(exception);
-
     Future.Callback.call_done_callbacks(obj, .finished);
 }
 

@@ -9,7 +9,7 @@ const Resolv = @import("resolv.zig");
 
 const DNSCacheEntries = switch (builtin.mode) {
     .Debug => 8,
-    else => 65536
+    else => 65536,
 };
 
 const CACHE_MASK = DNSCacheEntries - 1;
@@ -47,7 +47,7 @@ pub fn init(self: *DNS, loop: *Loop) !void {
 
 fn load_configuration(self: *DNS, allocator: std.mem.Allocator) !void {
     const file = try std.fs.openFileAbsolute("/etc/resolv.conf", .{
-        .mode = .read_only
+        .mode = .read_only,
     });
     defer file.close();
 
@@ -62,32 +62,43 @@ fn load_configuration(self: *DNS, allocator: std.mem.Allocator) !void {
     self.configuration = try Parsers.parse_resolv_configuration(allocator, content);
 }
 
-fn get_from_cache(self: *DNS, hostname: []const u8) ?[]const std.posix.sockaddr {
+fn get_cache_slot(self: *DNS, hostname: []const u8) *Cache {
     var h = std.hash.XxHash3.init(0);
     h.update(hostname);
     const index = h.final();
 
-    return self.cache_entries[index & CACHE_MASK].get(hostname);
+    return &self.cache_entries[index & CACHE_MASK];
 }
 
-pub fn add_to_cache(self: *DNS, hostname: []const u8, address_list: []std.posix.sockaddr, ttl: u32) !void {
-    var h = std.hash.XxHash3.init(0);
-    h.update(hostname);
-    const index = h.final();
-
-    try self.cache_entries[index & CACHE_MASK].add(hostname, address_list, ttl);
-}
-
-pub fn lookup(self: *DNS, hostname: []const u8) !?[]const std.posix.sockaddr {
+pub fn lookup(self: *DNS, hostname: []const u8, callback: *const Resolv.UserCallback) !?[]const std.posix.sockaddr {
     const parsed_hostname = try std.ascii.lowerString(&self.parsed_hostname_buf, hostname);
 
-    if (self.get_from_cache(parsed_hostname)) |addr_info| {
-        return addr_info;
-    }
+    const cache_slot = self.get_cache_slot(parsed_hostname);
+    const record = cache_slot.get(parsed_hostname) orelse {
+        const ipv6_supported: bool = self.ipv6_supported;
 
-    try Resolv.resolv_hostname(hostname, self.configuration);
+        const address_resolved = try Parsers.resolve_address(parsed_hostname, ipv6_supported);
+        if (address_resolved) |v| {
+            return v;
+        }
 
-    return null;
+        try Resolv.queue(
+            cache_slot,
+            self.loop,
+            hostname,
+            callback,
+            self.configuration,
+            ipv6_supported,
+        );
+        return null;
+    };
+
+    const address_list = record.get_address_list() orelse {
+        try record.append_callback(callback);
+        return null;
+    };
+
+    return address_list;
 }
 
 pub fn deinit(self: *DNS) void {

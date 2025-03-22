@@ -80,7 +80,6 @@ pub const FutureObject = extern struct {
 
     py_loop: ?PyObject,
     exception: ?PyObject,
-    exception_tb: ?PyObject,
 
     cancel_msg_py_object: ?PyObject,
     blocking: u64,

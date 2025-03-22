@@ -319,6 +319,106 @@ test "parse empty resolv.conf" {
     try std.testing.expectEqual(@as(u8, 1), ip_bytes[3]);
 }
 
+test "parse resolv.conf with IPv6 nameservers" {
+    const content =
+        \\nameserver 2001:4860:4860::8888
+        \\nameserver 2606:4700:4700::1111
+        \\search ipv6.example.com
+    ;
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    const config = try parse_resolv_configuration(allocator, content);
+    defer {
+        allocator.free(config.search);
+        allocator.free(config.servers);
+    }
+
+    try std.testing.expectEqual(@as(usize, 2), config.servers.len);
+    try std.testing.expectEqual(@as(usize, 1), config.search.len);
+    try std.testing.expectEqualStrings("ipv6.example.com", config.search[0]);
+
+    // Verify first IPv6 nameserver details
+    const first_server = config.servers[0];
+    try std.testing.expectEqual(std.posix.AF.INET6, first_server.any.family);
+    const first_ipv6_bytes: [16]u8 = @bitCast(first_server.in6.sa.addr);
+    try std.testing.expectEqual(@as(u8, 0x20), first_ipv6_bytes[0]);
+    try std.testing.expectEqual(@as(u8, 0x01), first_ipv6_bytes[1]);
+    try std.testing.expectEqual(@as(u8, 0x48), first_ipv6_bytes[2]);
+    try std.testing.expectEqual(@as(u8, 0x60), first_ipv6_bytes[3]);
+    
+    // Verify second IPv6 nameserver details
+    const second_server = config.servers[1];
+    try std.testing.expectEqual(std.posix.AF.INET6, second_server.any.family);
+    const second_ipv6_bytes: [16]u8 = @bitCast(second_server.in6.sa.addr);
+    try std.testing.expectEqual(@as(u8, 0x26), second_ipv6_bytes[0]);
+    try std.testing.expectEqual(@as(u8, 0x06), second_ipv6_bytes[1]);
+    try std.testing.expectEqual(@as(u8, 0x47), second_ipv6_bytes[2]);
+    try std.testing.expectEqual(@as(u8, 0x00), second_ipv6_bytes[3]);
+}
+
+test "parse resolv.conf with mixed IPv4 and IPv6 nameservers" {
+    const content =
+        \\nameserver 8.8.8.8
+        \\nameserver 2001:4860:4860::8888
+        \\nameserver 1.1.1.1
+        \\nameserver 2606:4700:4700::1111
+        \\search mixed.example.com
+    ;
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    const config = try parse_resolv_configuration(allocator, content);
+    defer {
+        allocator.free(config.search);
+        allocator.free(config.servers);
+    }
+
+    try std.testing.expectEqual(@as(usize, 4), config.servers.len);
+    try std.testing.expectEqual(@as(usize, 1), config.search.len);
+    try std.testing.expectEqualStrings("mixed.example.com", config.search[0]);
+
+    // Verify first IPv4 nameserver details
+    const first_server = config.servers[0];
+    try std.testing.expectEqual(std.posix.AF.INET, first_server.any.family);
+    const first_ipv4_bytes: [4]u8 = @bitCast(first_server.in.sa.addr);
+    try std.testing.expectEqual(@as(u8, 8), first_ipv4_bytes[0]);
+    try std.testing.expectEqual(@as(u8, 8), first_ipv4_bytes[1]);
+    try std.testing.expectEqual(@as(u8, 8), first_ipv4_bytes[2]);
+    try std.testing.expectEqual(@as(u8, 8), first_ipv4_bytes[3]);
+
+    // Verify first IPv6 nameserver details
+    const second_server = config.servers[1];
+    try std.testing.expectEqual(std.posix.AF.INET6, second_server.any.family);
+    const first_ipv6_bytes: [16]u8 = @bitCast(second_server.in6.sa.addr);
+    try std.testing.expectEqual(@as(u8, 0x20), first_ipv6_bytes[0]);
+    try std.testing.expectEqual(@as(u8, 0x01), first_ipv6_bytes[1]);
+    try std.testing.expectEqual(@as(u8, 0x48), first_ipv6_bytes[2]);
+    try std.testing.expectEqual(@as(u8, 0x60), first_ipv6_bytes[3]);
+
+    // Verify second IPv4 nameserver details
+    const third_server = config.servers[2];
+    try std.testing.expectEqual(std.posix.AF.INET, third_server.any.family);
+    const third_ipv4_bytes: [4]u8 = @bitCast(third_server.in.sa.addr);
+    try std.testing.expectEqual(@as(u8, 1), third_ipv4_bytes[0]);
+    try std.testing.expectEqual(@as(u8, 1), third_ipv4_bytes[1]);
+    try std.testing.expectEqual(@as(u8, 1), third_ipv4_bytes[2]);
+    try std.testing.expectEqual(@as(u8, 1), third_ipv4_bytes[3]);
+
+    // Verify second IPv6 nameserver details
+    const fourth_server = config.servers[3];
+    try std.testing.expectEqual(std.posix.AF.INET6, fourth_server.any.family);
+    const second_ipv6_bytes: [16]u8 = @bitCast(fourth_server.in6.sa.addr);
+    try std.testing.expectEqual(@as(u8, 0x26), second_ipv6_bytes[0]);
+    try std.testing.expectEqual(@as(u8, 0x06), second_ipv6_bytes[1]);
+    try std.testing.expectEqual(@as(u8, 0x47), second_ipv6_bytes[2]);
+    try std.testing.expectEqual(@as(u8, 0x00), second_ipv6_bytes[3]);
+}
+
 test "validate_hostname valid domains" {
     const valid_domains = [_][]const u8{
         "example.com",

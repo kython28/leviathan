@@ -1,33 +1,29 @@
 const std = @import("std");
 
 // Localhost addresses for quick reference
-const localhost_address_list: []const std.posix.sockaddr = &[_]std.posix.sockaddr{
-    @bitCast(
-        std.net.Ip4Address.init(
-            &.{ 127, 0, 0, 1 },
-            0,
-        ).sa,
+const localhost_address_list: []const std.net.Address = &[_]std.net.Address{
+    std.net.Address.initIp4(
+        .{ 127, 0, 0, 1 },
+        0,
     ),
-    @bitCast(
-        std.net.Ip6Address.init(
-            &.{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1 },
-            0,
-            0,
-            0,
-        ).sa,
-    )
+    std.net.Address.initIp6(
+        .{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1 },
+        0,
+        0,
+        0,
+    ),
 };
 
-var tmp_address: std.posix.sockaddr = undefined;
+var tmp_address: std.net.Address = undefined;
 
 // TODO: Implement resolv options
 pub const Configuration = struct {
-    servers: []std.posix.sockaddr,
+    servers: []std.net.Address,
     search: [][]u8,
 };
 
 pub fn validate_hostname(hostname: []const u8) bool {
-    const iter = std.mem.splitScalar(u8, hostname, '.');
+    var iter = std.mem.splitScalar(u8, hostname, '.');
     while (iter.next()) |label| {
         if (label.len < 1 or label.len > 63) {
             return false;
@@ -37,10 +33,15 @@ pub fn validate_hostname(hostname: []const u8) bool {
             return false;
         }
 
+        var has_hyphen = false;
         for (label) |c| {
+            const hyphen = (c == '-');
+            if (hyphen and has_hyphen) return false;
+            has_hyphen = hyphen;
+
             if (!((c >= 'a' and c <= 'z') or
                 (c >= '0' and c <= '9') or
-                (c == '-')))
+                hyphen))
             {
                 return false;
             }
@@ -82,7 +83,7 @@ pub fn is_ipv6(ip: []const u8) bool {
     return count <= 8;
 }
 
-pub fn resolve_address(hostname: []const u8, allow_ipv6: bool) !?[]const std.posix.sockaddr {
+pub fn resolve_address(hostname: []const u8, allow_ipv6: bool) !?[]const std.net.Address {
     // 1. Check for localhost
     if (std.mem.eql(u8, hostname, "localhost")) {
         return localhost_address_list[0..(1 + @as(usize, @intFromBool(allow_ipv6)))];
@@ -90,18 +91,14 @@ pub fn resolve_address(hostname: []const u8, allow_ipv6: bool) !?[]const std.pos
 
     // 2. Check for IPv4
     if (is_ipv4(hostname)) {
-        const address = try std.net.Ip4Address.resolveIp(hostname, 0);
-        tmp_address = @bitCast(address.sa);
-
-        return @as([*]const std.posix.sockaddr, @ptrCast(&tmp_address))[0..1];
+        tmp_address = try std.net.Address.resolveIp(hostname, 0);
+        return @as([*]const std.net.Address, @ptrCast(&tmp_address))[0..1];
     }
 
     // 3. Check for IPv6
     if (allow_ipv6 and is_ipv6(hostname)) {
-        const address = try std.net.Ip6Address.resolve(hostname, 0);
-        tmp_address = @bitCast(address.sa);
-
-        return @as([*]const std.posix.sockaddr, @ptrCast(&tmp_address))[0..1];
+        tmp_address = try std.net.Address.resolveIp6(hostname, 0);
+        return @as([*]const std.net.Address, @ptrCast(&tmp_address))[0..1];
     }
 
     // 4. Validate hostname
@@ -119,7 +116,7 @@ pub fn parse_resolv_configuration(allocator: std.mem.Allocator, content: []const
     const search_tmp_buf = try allocator.alloc(u8, 255);
     defer allocator.free(search_tmp_buf);
 
-    var servers = std.ArrayList(std.posix.sockaddr).init(allocator);
+    var servers = std.ArrayList(std.net.Address).init(allocator);
     defer servers.deinit();
 
     var search_hosts = std.ArrayList([]u8).init(allocator);
@@ -143,7 +140,13 @@ pub fn parse_resolv_configuration(allocator: std.mem.Allocator, content: []const
         if (std.mem.eql(u8, first_word, "nameserver")) {
             const ip_str = words_iter.next() orelse return error.InvalidConfiguration;
             const address = try std.net.Address.parseIp(ip_str, 53);
-            try servers.append(address.any);
+
+            switch (address.any.family) {
+                std.posix.AF.INET, std.posix.AF.INET6 => {},
+                else => unreachable
+            }
+            
+            try servers.append(address);
         } else if (std.mem.eql(u8, first_word, "search")) {
             while (words_iter.next()) |word| {
                 chr = word[0];
@@ -151,15 +154,19 @@ pub fn parse_resolv_configuration(allocator: std.mem.Allocator, content: []const
                     continue :loop;
                 }
 
-                const parsed_hostname = try std.ascii.lowerString(search_tmp_buf, word);
+                const parsed_hostname = std.ascii.lowerString(search_tmp_buf, word);
                 if (!validate_hostname(parsed_hostname)) return error.InvalidConfiguration;
 
-                const host = try allocator.dupe(parsed_hostname);
+                const host = try allocator.dupe(u8, parsed_hostname);
                 errdefer allocator.free(host);
 
                 try search_hosts.append(host);
             }
         }
+    }
+
+    if (servers.items.len == 0) {
+        try servers.append(try std.net.Address.parseIp("1.1.1.1", 53));
     }
 
     const search_hosts_slice = try search_hosts.toOwnedSlice();
@@ -241,23 +248,25 @@ test "parse resolv.conf with invalid nameserver" {
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    try std.testing.expectError(error.InvalidConfiguration, 
-        parse_resolv_configuration(allocator, content)
+    try std.testing.expectError(
+        error.InvalidIPAddressFormat, 
+        parse_resolv_configuration(allocator, content),
     );
 }
 
 test "parse resolv.conf with invalid search domain" {
     const content =
         \\nameserver 8.8.8.8
-        \\search invalid-domain
+        \\search invalid--domain
     ;
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    try std.testing.expectError(error.InvalidConfiguration, 
-        parse_resolv_configuration(allocator, content)
+    try std.testing.expectError(
+        error.InvalidConfiguration, 
+        parse_resolv_configuration(allocator, content),
     );
 }
 
@@ -274,6 +283,6 @@ test "parse empty resolv.conf" {
         allocator.free(config.servers);
     }
 
-    try std.testing.expectEqual(@as(usize, 0), config.servers.len);
+    try std.testing.expectEqual(@as(usize, 1), config.servers.len);
     try std.testing.expectEqual(@as(usize, 0), config.search.len);
 }

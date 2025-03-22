@@ -40,7 +40,7 @@ pub fn init(self: *DNS, loop: *Loop) !void {
     if (ret) |sock| {
         self.ipv6_supported = true;
         std.posix.close(sock);
-    } else {
+    } else |_| {
         self.ipv6_supported = false;
     }
 }
@@ -70,8 +70,12 @@ fn get_cache_slot(self: *DNS, hostname: []const u8) *Cache {
     return &self.cache_entries[index & CACHE_MASK];
 }
 
-pub fn lookup(self: *DNS, hostname: []const u8, callback: *const Resolv.UserCallback) !?[]const std.posix.sockaddr {
-    const parsed_hostname = try std.ascii.lowerString(&self.parsed_hostname_buf, hostname);
+pub fn lookup(
+    self: *DNS,
+    hostname: []const u8,
+    callback: *const Resolv.UserCallback,
+) !?[]const std.net.Address {
+    const parsed_hostname = std.ascii.lowerString(&self.parsed_hostname_buf, hostname);
 
     const cache_slot = self.get_cache_slot(parsed_hostname);
     const record = cache_slot.get(parsed_hostname) orelse {
@@ -103,6 +107,11 @@ pub fn lookup(self: *DNS, hostname: []const u8, callback: *const Resolv.UserCall
 
 pub fn deinit(self: *DNS) void {
     self.arena.deinit();
+}
+
+test {
+    std.testing.refAllDecls(Parsers);
+    std.testing.refAllDecls(Cache);
 }
 
 const DNS = @This();

@@ -52,7 +52,7 @@ const HostnamesArray = struct {
 };
 
 pub const UserCallback = struct {
-    callback: *const fn (?*anyopaque, ?[]const std.posix.sockaddr) void,
+    callback: *const fn (?*anyopaque, ?[]const std.net.Address) void,
     user_data: ?*anyopaque,
 };
 
@@ -64,7 +64,6 @@ const ResponseProcessingState = enum {
 const ServerQueryData = struct {
     loop: *Loop,
 
-    address: *const std.posix.sockaddr,
     socket_fd: std.posix.fd_t,
 
     hostnames_array: HostnamesArray,
@@ -75,7 +74,7 @@ const ServerQueryData = struct {
     payload_len: usize,
     payload_offset: usize = 0,
 
-    results: std.ArrayList(std.posix.sockaddr),
+    results: std.ArrayList(std.net.Address),
     results_to_process: u16 = 0,
 
     min_ttl: u32 = std.math.maxInt(u32),
@@ -141,13 +140,12 @@ fn mark_resolved_and_execute_user_callbacks(server_data: *ServerQueryData) !void
         sd.cancel();
     }
 
-    const address_list = try control_data.allocator.dupe(server_data.results.items);
+    const address_list = try control_data.allocator.dupe(std.net.Address, server_data.results.items);
 
     control_data.record.set_resolved_data(
         address_list, server_data.min_ttl
     );
 
-    control_data.user_callbacks_called = true;
     for (control_data.user_callbacks.items) |*v| {
         v.callback(v.user_data, address_list);
     }
@@ -216,10 +214,10 @@ fn check_send_operation_result(data: *const CallbackManager.CallbackData) !void 
         unreachable; // Just in case hahah
     }
 
-    _ = try Loop.Scheduling.IO.queue(server_data.loop, operation_data);
+    _ = try server_data.loop.io.queue(operation_data);
 }
 
-fn parse_individual_dns_result(data: []const u8, result: *std.posix.sockaddr, new_result: *bool, ttl: *u32) ?usize {
+fn parse_individual_dns_result(data: []const u8, result: *std.net.Address, new_result: *bool, ttl: *u32) ?usize {
     var offset: usize = 0;
     if (data[offset] & 0xC0 == 0xC0) {
         offset += 2;
@@ -241,7 +239,7 @@ fn parse_individual_dns_result(data: []const u8, result: *std.posix.sockaddr, ne
 
     if ((offset + @sizeOf(ResultHeader)) >= data.len) return null;
 
-    const result_header: *ResultHeader = @alignCast(@ptrCast(data.ptr + offset));
+    const result_header: *const ResultHeader = @alignCast(@ptrCast(data.ptr + offset));
     offset += @sizeOf(ResultHeader);
 
     const r_type = std.mem.bigToNative(u16, result_header.type);
@@ -250,15 +248,16 @@ fn parse_individual_dns_result(data: []const u8, result: *std.posix.sockaddr, ne
     if (r_class == 1) {
         switch (r_type) {
             1 => {
-                const sockaddr_in: *std.posix.sockaddr.in = @ptrCast(result);
-                sockaddr_in.* = .{ .addr = @as(*align(1) const u32, @ptrCast(data.ptr + offset)), .port = 0 };
+                var addr: [4]u8 = undefined;
+                @memcpy(&addr, data[offset..(offset + 4)]);
+                result.* = std.net.Address.initIp4(addr, 0);
                 new_result.* = true;
                 ttl.* = std.mem.bigToNative(u32, result_header.ttl);
             },
             28 => {
-                const sockaddr_in6: *std.posix.sockaddr.in6 = @ptrCast(result);
-                sockaddr_in6.* = std.posix.sockaddr.in6{ .addr = undefined, .port = 0, .flowinfo = 0, .scope_id = 0 };
-                @memcpy(&sockaddr_in6.addr, data[offset..(offset + 16)]);
+                var addr: [16]u8 = undefined;
+                @memcpy(&addr, data[offset..(offset + 16)]);
+                result.* = std.net.Address.initIp6(addr, 0, 0, 0);
                 new_result.* = true;
                 ttl.* = std.mem.bigToNative(u32, result_header.ttl);
             },
@@ -299,14 +298,14 @@ fn process_dns_response(data: *const CallbackManager.CallbackData) !void {
     }
 
     loop: switch (state) {
-        .ProcessHeader => while (hostnames_processed < hostnames_len) {
+        .process_header => while (hostnames_processed < hostnames_len) {
             const diff = (data_received - offset);
             if (diff < @sizeOf(Header)) {
                 break;
             }
 
-            const header: *Header = response[offset..(offset + @sizeOf(Header))];
-            const results_len: u16 = std.mem.bigToNative(header.ancount);
+            const header: *const Header = @alignCast(@ptrCast(response.ptr + offset));
+            const results_len: u16 = std.mem.bigToNative(u16, header.ancount);
             offset += @sizeOf(Header);
 
             // Check if there aren't results
@@ -325,10 +324,10 @@ fn process_dns_response(data: *const CallbackManager.CallbackData) !void {
 
             offset += 5; // Skip some stuffs
             results_to_process = results_len;
-            continue :loop ResponseProcessingState.ProcessBody;
+            continue :loop ResponseProcessingState.process_body;
         },
-        .ProcessBody => while (results_to_process > 0) {
-            var result: std.posix.sockaddr = undefined;
+        .process_body => while (results_to_process > 0) {
+            var result: std.net.Address = undefined;
             var new_result: bool = true;
             var ttl: u32 = std.math.maxInt(u32);
 
@@ -355,8 +354,7 @@ fn process_dns_response(data: *const CallbackManager.CallbackData) !void {
     if (hostnames_processed == hostnames_len) {
         server_data.release();
     } else if (results_to_process > 0 or server_data.results.items.len == 0) {
-        server_data.task_id.* = try Loop.Scheduling.IO.queue(
-            server_data.loop,
+        _ = try server_data.loop.io.queue(
             .{
                 .PerformRead = .{
                     .data = .{
@@ -423,30 +421,27 @@ fn build_queries(
     server_data: *ServerQueryData,
     ipv6_supported: bool,
     hostnames_array: HostnamesArray,
-    server_address: *const std.posix.sockaddr,
+    server_address: *const std.net.Address,
 ) !void {
     const socket_fd = try std.posix.socket(
-        @enumFromInt(server_address.family),
+        server_address.any.family,
         std.posix.SOCK.DGRAM | std.posix.SOCK.CLOEXEC,
         std.posix.IPPROTO.UDP,
     );
     errdefer std.posix.close(socket_fd);
 
-    try std.posix.connect(socket_fd, server_address, switch (server_address.family) {
-        std.posix.AF.INET => @sizeOf(std.posix.sockaddr.in),
-        std.posix.AF.INET6 => @sizeOf(std.posix.sockaddr.in6),
-        else => unreachable,
-    });
+    try std.posix.connect(socket_fd, &server_address.any, server_address.getOsSockLen());
 
     const payload = try allocator.alloc(u8, (1 + @as(usize, @intFromBool(ipv6_supported))) * 512 * hostnames_array.len);
     errdefer allocator.free(payload);
 
     var offset: usize = 0;
     for (0.., hostnames_array.array[0..hostnames_array.len]) |index, hostname_info| {
-        offset += build_query(@intCast(index), payload[offset..], .ipv4, hostname_info.hostname);
+        const hostname = hostname_info.hostname[0..hostname_info.hostname_len];
+        offset += build_query(@intCast(index), payload[offset..], .ipv4, hostname);
 
         if (ipv6_supported) {
-            offset += build_query(@intCast(index), payload[offset..], .ipv6, hostname_info.hostname);
+            offset += build_query(@intCast(index), payload[offset..], .ipv6, hostname);
         }
     }
 
@@ -454,7 +449,6 @@ fn build_queries(
         .loop = loop,
 
         .payload = payload,
-        .address = server_address,
 
         .socket_fd = socket_fd,
         .payload_len = offset,
@@ -462,7 +456,7 @@ fn build_queries(
         .control_data = control_data,
         .hostnames_array = hostnames_array,
 
-        .results = std.ArrayList(std.posix.sockaddr).init(allocator),
+        .results = std.ArrayList(std.net.Address).init(allocator),
     };
 }
 
@@ -510,7 +504,7 @@ fn prepare_data(
     cache_slot: *Cache,
     loop: *Loop,
     hostname: []const u8,
-    user_callback: UserCallback,
+    user_callback: *const UserCallback,
     configuration: Parsers.Configuration,
     ipv6_supported: bool,
 ) !*ControlData {
@@ -532,7 +526,7 @@ fn prepare_data(
         control_data.release();
     }
 
-    try control_data.user_callbacks.append(user_callback);
+    try control_data.user_callbacks.append(user_callback.*);
     errdefer control_data.user_callbacks.clearRetainingCapacity();
 
     const queries_data = try arena_allocator.alloc(ServerQueryData, configuration.servers.len);
@@ -593,7 +587,7 @@ pub fn queue(
     }
 
     for (control_data.queries_data) |*server_data| {
-        _ = try Loop.Scheduling.IO.queue(loop, .{
+        _ = try loop.io.queue(.{
             .PerformWrite = .{
                 .zero_copy = true,
                 .fd = server_data.socket_fd,

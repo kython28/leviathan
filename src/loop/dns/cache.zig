@@ -6,7 +6,7 @@ const Resolv = @import("resolv.zig");
 
 const RecordState = union(enum) {
     pending: *Resolv.ControlData,
-    resolved: []std.posix.sockaddr,
+    resolved: []std.net.Address,
     none,
 };
 
@@ -15,7 +15,7 @@ pub const Record = struct {
     state: RecordState,
     expire_at: i64,
 
-    pub inline fn get_address_list(self: *Record) ?[]const std.posix.sockaddr {
+    pub inline fn get_address_list(self: *Record) ?[]const std.net.Address {
         return switch (self.state) {
             .pending => null,
             .resolved => |d| d,
@@ -28,14 +28,16 @@ pub const Record = struct {
         try control_data.user_callbacks.append(user_callback.*);
     }
 
-    pub inline fn set_resolved_data(self: *Record, address_list: []std.posix.sockaddr, ttl: u32) void {
+    pub inline fn set_resolved_data(self: *Record, address_list: []std.net.Address, ttl: u32) void {
         var expire_at: i64 = std.math.maxInt(i64);
         if (ttl < std.math.maxInt(u32)) {
             expire_at = std.time.timestamp() + ttl;
         }
 
         self.expire_at = expire_at;
-        self.state = address_list;
+        self.state = .{
+            .resolved = address_list
+        };
     }
 
     pub inline fn discard(self: *Record) void {
@@ -53,20 +55,22 @@ pub fn init(self: *Cache, allocator: std.mem.Allocator) void {
     self.records_list = RecordLinkedList.init(allocator);
 }
 
-pub fn create_new_record(self: *Cache, hostname: []const u8, control_data: *Resolv.ControlData) !void {
+pub fn create_new_record(self: *Cache, hostname: []const u8, control_data: *Resolv.ControlData) !*Record {
     const allocator = self.allocator;
-    const new_hostname = try allocator.dupe(hostname);
+    const new_hostname = try allocator.dupe(u8, hostname);
     errdefer allocator.free(new_hostname);
 
     const new_record = Record{
         .hostname = new_hostname,
         .expire_at = std.math.maxInt(i64),
         .state = .{
-            .Pending = control_data
+            .pending = control_data
         }
     };
 
-    try self.records_list.append(new_record);
+    const new_node = try self.records_list.create_new_node(new_record);
+    self.records_list.append_node(new_node);
+    return &new_node.data;
 }
 
 pub fn get(self: *Cache, hostname: []const u8) ?*Record {
@@ -88,7 +92,7 @@ pub fn get(self: *Cache, hostname: []const u8) ?*Record {
                 .pending => unreachable
             }
 
-            allocator.destroy(data.hostname);
+            allocator.free(data.hostname);
 
             self.records_list.unlink_node(n);
             self.records_list.release_node(n);

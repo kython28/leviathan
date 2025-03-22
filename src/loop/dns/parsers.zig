@@ -198,18 +198,29 @@ test "parse valid resolv.conf with nameservers and search domains" {
     const allocator = arena.allocator();
 
     const config = try parse_resolv_configuration(allocator, content);
-    defer {
-        for (config.search) |search| {
-            allocator.free(search);
-        }
-        allocator.free(config.search);
-        allocator.free(config.servers);
-    }
 
     try std.testing.expectEqual(@as(usize, 2), config.servers.len);
     try std.testing.expectEqual(@as(usize, 2), config.search.len);
     try std.testing.expectEqualStrings("example.com", config.search[0]);
     try std.testing.expectEqualStrings("test.com", config.search[1]);
+
+    // Verify first nameserver details
+    const first_server = config.servers[0];
+    try std.testing.expectEqual(std.posix.AF.INET, first_server.any.family);
+    const first_ip_bytes: [4]u8 = @bitCast(first_server.in.sa.addr);
+    try std.testing.expectEqual(@as(u8, 8), first_ip_bytes[0]);
+    try std.testing.expectEqual(@as(u8, 8), first_ip_bytes[1]);
+    try std.testing.expectEqual(@as(u8, 8), first_ip_bytes[2]);
+    try std.testing.expectEqual(@as(u8, 8), first_ip_bytes[3]);
+
+    // Verify second nameserver details
+    const second_server = config.servers[1];
+    try std.testing.expectEqual(std.posix.AF.INET, second_server.any.family);
+    const second_ip_bytes: [4]u8 = @bitCast(second_server.in.sa.addr);
+    try std.testing.expectEqual(@as(u8, 1), second_ip_bytes[0]);
+    try std.testing.expectEqual(@as(u8, 1), second_ip_bytes[1]);
+    try std.testing.expectEqual(@as(u8, 1), second_ip_bytes[2]);
+    try std.testing.expectEqual(@as(u8, 1), second_ip_bytes[3]);
 }
 
 test "parse resolv.conf with comments" {
@@ -226,17 +237,28 @@ test "parse resolv.conf with comments" {
     const allocator = arena.allocator();
 
     const config = try parse_resolv_configuration(allocator, content);
-    defer {
-        for (config.search) |search| {
-            allocator.free(search);
-        }
-        allocator.free(config.search);
-        allocator.free(config.servers);
-    }
 
     try std.testing.expectEqual(@as(usize, 2), config.servers.len);
     try std.testing.expectEqual(@as(usize, 1), config.search.len);
     try std.testing.expectEqualStrings("example.com", config.search[0]);
+
+    // Verify first nameserver details
+    const first_server = config.servers[0];
+    try std.testing.expectEqual(std.posix.AF.INET, first_server.any.family);
+    const first_ip_bytes: [4]u8 = @bitCast(first_server.in.sa.addr);
+    try std.testing.expectEqual(@as(u8, 8), first_ip_bytes[0]);
+    try std.testing.expectEqual(@as(u8, 8), first_ip_bytes[1]);
+    try std.testing.expectEqual(@as(u8, 8), first_ip_bytes[2]);
+    try std.testing.expectEqual(@as(u8, 8), first_ip_bytes[3]);
+
+    // Verify second nameserver details
+    const second_server = config.servers[1];
+    try std.testing.expectEqual(std.posix.AF.INET, second_server.any.family);
+    const second_ip_bytes: [4]u8 = @bitCast(second_server.in.sa.addr);
+    try std.testing.expectEqual(@as(u8, 1), second_ip_bytes[0]);
+    try std.testing.expectEqual(@as(u8, 1), second_ip_bytes[1]);
+    try std.testing.expectEqual(@as(u8, 1), second_ip_bytes[2]);
+    try std.testing.expectEqual(@as(u8, 1), second_ip_bytes[3]);
 }
 
 test "parse resolv.conf with invalid nameserver" {
@@ -285,4 +307,58 @@ test "parse empty resolv.conf" {
 
     try std.testing.expectEqual(@as(usize, 1), config.servers.len);
     try std.testing.expectEqual(@as(usize, 0), config.search.len);
+    
+    // Verify default DNS server
+    const default_dns = config.servers[0];
+    try std.testing.expectEqual(std.posix.AF.INET, default_dns.any.family);
+    
+    const ip_bytes: [4]u8 = @bitCast(default_dns.in.sa.addr);
+    try std.testing.expectEqual(@as(u8, 1), ip_bytes[0]);
+    try std.testing.expectEqual(@as(u8, 1), ip_bytes[1]);
+    try std.testing.expectEqual(@as(u8, 1), ip_bytes[2]);
+    try std.testing.expectEqual(@as(u8, 1), ip_bytes[3]);
+}
+
+test "validate_hostname valid domains" {
+    const valid_domains = [_][]const u8{
+        "example.com",
+        "sub.example.com",
+        "test-domain.co.uk",
+        "my-domain.org",
+        "a.b.c.d",
+        "x1.y2.z3",
+    };
+
+    for (valid_domains) |domain| {
+        try std.testing.expect(validate_hostname(domain));
+    }
+}
+
+test "validate_hostname invalid domains" {
+    const invalid_domains = [_][]const u8{
+        "-example.com",     // Starts with hyphen
+        "example-.com",     // Ends with hyphen
+        "example--test.com", // Consecutive hyphens
+        "exam!ple.com",     // Invalid characters
+        "exam ple.com",     // Space in domain
+        ".example.com",     // Starts with dot
+        "example.com.",     // Ends with dot
+    };
+
+    for (invalid_domains) |domain| {
+        try std.testing.expect(!validate_hostname(domain));
+    }
+}
+
+test "validate_hostname edge cases" {
+    const edge_cases = [_]struct { domain: []const u8, expected: bool }{
+        .{ .domain = "a.com", .expected = true },           // Minimum valid length
+        .{ .domain = "a-1.com", .expected = true },          // Hyphen with number
+        .{ .domain = "a" ** 63 ++ ".com", .expected = true }, // Maximum label length
+        .{ .domain = "a" ** 64 ++ ".com", .expected = false }, // Exceeds maximum label length
+    };
+
+    for (edge_cases) |case| {
+        try std.testing.expectEqual(case.expected, validate_hostname(case.domain));
+    }
 }

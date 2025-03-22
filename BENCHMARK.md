@@ -1,6 +1,6 @@
 # Leviathan Benchmarking Results
 
-This page presents the benchmarking results for Leviathan, showcasing its performance and efficiency compared to other event loops. The tests compare the implementation of the asyncio standard event loop, uvloop, Leviathan (single thread mode) and Leviathan (thread-safe).
+This page presents the benchmarking results for Leviathan, showcasing its performance and efficiency compared to other event loops. The tests compare the implementation of the asyncio standard event loop, uvloop and Leviathan.
 
 ### Test Environment
 

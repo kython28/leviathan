@@ -152,7 +152,7 @@ pub fn parse_resolv_configuration(allocator: std.mem.Allocator, content: []const
                 }
 
                 const parsed_hostname = try std.ascii.lowerString(search_tmp_buf, word);
-                if (!validate_hostname(parsed_hostname, true)) return error.InvalidConfiguration;
+                if (!validate_hostname(parsed_hostname)) return error.InvalidConfiguration;
 
                 const host = try allocator.dupe(parsed_hostname);
                 errdefer allocator.free(host);
@@ -177,4 +177,103 @@ pub fn parse_resolv_configuration(allocator: std.mem.Allocator, content: []const
         .search = search_hosts_slice,
         .servers = servers_slice,
     };
+}
+
+test "parse valid resolv.conf with nameservers and search domains" {
+    const content =
+        \\nameserver 8.8.8.8
+        \\nameserver 1.1.1.1
+        \\search example.com test.com
+    ;
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    const config = try parse_resolv_configuration(allocator, content);
+    defer {
+        for (config.search) |search| {
+            allocator.free(search);
+        }
+        allocator.free(config.search);
+        allocator.free(config.servers);
+    }
+
+    try std.testing.expectEqual(@as(usize, 2), config.servers.len);
+    try std.testing.expectEqual(@as(usize, 2), config.search.len);
+    try std.testing.expectEqualStrings("example.com", config.search[0]);
+    try std.testing.expectEqualStrings("test.com", config.search[1]);
+}
+
+test "parse resolv.conf with comments" {
+    const content =
+        \\# This is a comment
+        \\nameserver 8.8.8.8
+        \\; Another comment
+        \\nameserver 1.1.1.1
+        \\search example.com
+    ;
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    const config = try parse_resolv_configuration(allocator, content);
+    defer {
+        for (config.search) |search| {
+            allocator.free(search);
+        }
+        allocator.free(config.search);
+        allocator.free(config.servers);
+    }
+
+    try std.testing.expectEqual(@as(usize, 2), config.servers.len);
+    try std.testing.expectEqual(@as(usize, 1), config.search.len);
+    try std.testing.expectEqualStrings("example.com", config.search[0]);
+}
+
+test "parse resolv.conf with invalid nameserver" {
+    const content =
+        \\nameserver invalid.ip
+    ;
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    try std.testing.expectError(error.InvalidConfiguration, 
+        parse_resolv_configuration(allocator, content)
+    );
+}
+
+test "parse resolv.conf with invalid search domain" {
+    const content =
+        \\nameserver 8.8.8.8
+        \\search invalid-domain
+    ;
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    try std.testing.expectError(error.InvalidConfiguration, 
+        parse_resolv_configuration(allocator, content)
+    );
+}
+
+test "parse empty resolv.conf" {
+    const content = "";
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    const config = try parse_resolv_configuration(allocator, content);
+    defer {
+        allocator.free(config.search);
+        allocator.free(config.servers);
+    }
+
+    try std.testing.expectEqual(@as(usize, 0), config.servers.len);
+    try std.testing.expectEqual(@as(usize, 0), config.search.len);
 }

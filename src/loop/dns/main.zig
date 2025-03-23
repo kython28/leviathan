@@ -109,9 +109,11 @@ pub fn deinit(self: *DNS) void {
     self.arena.deinit();
 }
 
+const DNS = @This();
+
 test {
     std.testing.refAllDecls(Parsers);
     std.testing.refAllDecls(Cache);
 }
 
-const DNS = @This();
+

@@ -110,3 +110,138 @@ pub fn get(self: *Cache, hostname: []const u8) ?*Record {
 }
 
 const Cache = @This();
+
+const testing = std.testing;
+
+test "create_new_record" {
+    var cache = Cache{
+        .allocator = testing.allocator,
+        .records_list = undefined,
+    };
+    cache.init(testing.allocator);
+    defer {
+        var node = cache.records_list.first;
+        while (node) |n| {
+            node = n.next;
+            testing.allocator.free(n.data.hostname);
+            switch (n.data.state) {
+                .resolved => |d| {
+                    testing.allocator.free(d);
+                },
+                else => {}
+            }
+            cache.records_list.release_node(n);
+        }
+    }
+
+    const record = try cache.create_new_record("example.com", undefined);
+
+    try testing.expectEqualStrings("example.com", record.hostname);
+    try testing.expect(record.state == .pending);
+    try testing.expect(record.expire_at == std.math.maxInt(i64));
+}
+
+test "set_resolved_data" {
+    var cache = Cache{
+        .allocator = testing.allocator,
+        .records_list = undefined,
+    };
+    cache.init(testing.allocator);
+    defer {
+        var node = cache.records_list.first;
+        while (node) |n| {
+            node = n.next;
+            testing.allocator.free(n.data.hostname);
+            switch (n.data.state) {
+                .resolved => |d| {
+                    testing.allocator.free(d);
+                },
+                else => {}
+            }
+            cache.records_list.release_node(n);
+        }
+    }
+
+    const record = try cache.create_new_record("example.com", undefined);
+
+    const addresses = try testing.allocator.alloc(std.net.Address, 2);
+    addresses[0] = std.net.Address.initIp4(.{8, 8, 8, 8}, 53);
+    addresses[1] = std.net.Address.initIp4(.{1, 1, 1, 1}, 53);
+
+    record.set_resolved_data(addresses, 300);
+
+    try testing.expect(record.state == .resolved);
+    try testing.expectEqual(@as(usize, 2), record.get_address_list().?.len);
+    try testing.expectEqual(std.posix.AF.INET, record.get_address_list().?[0].any.family);
+    try testing.expectEqual(std.posix.AF.INET, record.get_address_list().?[1].any.family);
+    try testing.expect(record.expire_at > std.time.timestamp());
+}
+
+test "get record from cache" {
+    var cache = Cache{
+        .allocator = testing.allocator,
+        .records_list = undefined,
+    };
+    cache.init(testing.allocator);
+    defer {
+        var node = cache.records_list.first;
+        while (node) |n| {
+            node = n.next;
+            testing.allocator.free(n.data.hostname);
+            switch (n.data.state) {
+                .resolved => |d| {
+                    testing.allocator.free(d);
+                },
+                else => {}
+            }
+            cache.records_list.release_node(n);
+        }
+    }
+
+    const record = try cache.create_new_record("example.com", undefined);
+
+    const addresses = try testing.allocator.alloc(std.net.Address, 2);
+    addresses[0] = std.net.Address.initIp4(.{8, 8, 8, 8}, 53);
+    addresses[1] = std.net.Address.initIp4(.{1, 1, 1, 1}, 53);
+
+    record.set_resolved_data(addresses, 300);
+
+    const retrieved_record = cache.get("example.com").?;
+    try testing.expectEqualStrings("example.com", retrieved_record.hostname);
+    try testing.expect(retrieved_record.state == .resolved);
+    try testing.expectEqual(@as(usize, 2), retrieved_record.get_address_list().?.len);
+}
+
+test "get expired record" {
+    var cache = Cache{
+        .allocator = testing.allocator,
+        .records_list = undefined,
+    };
+    cache.init(testing.allocator);
+    defer {
+        var node = cache.records_list.first;
+        while (node) |n| {
+            node = n.next;
+            testing.allocator.free(n.data.hostname);
+            switch (n.data.state) {
+                .resolved => |d| {
+                    testing.allocator.free(d);
+                },
+                else => {}
+            }
+            cache.records_list.release_node(n);
+        }
+    }
+
+    const record = try cache.create_new_record("example.com", undefined);
+
+    const addresses = try testing.allocator.alloc(std.net.Address, 2);
+    addresses[0] = std.net.Address.initIp4(.{8, 8, 8, 8}, 53);
+    addresses[1] = std.net.Address.initIp4(.{1, 1, 1, 1}, 53);
+
+    record.set_resolved_data(addresses, 0);  // Immediately expire
+    record.expire_at = 0;  // Force expiration
+
+    const retrieved_record = cache.get("example.com");
+    try testing.expect(retrieved_record == null);
+}

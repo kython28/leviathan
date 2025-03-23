@@ -1,4 +1,3 @@
-const std = @import("std");
 const builtin = @import("builtin");
 
 const python_c = @import("python_c");

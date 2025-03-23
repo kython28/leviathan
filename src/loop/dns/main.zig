@@ -8,7 +8,7 @@ const Parsers = @import("parsers.zig");
 const Resolv = @import("resolv.zig");
 
 const DNSCacheEntries = switch (builtin.mode) {
-    .Debug => 8,
+    .Debug => 4,
     else => 65536,
 };
 
@@ -116,4 +116,106 @@ test {
     std.testing.refAllDecls(Cache);
 }
 
+test "get_cache_slot returns consistent slot for same hostname" {
+    var dns = DNS{
+        .loop = undefined,
+        .arena = undefined,
+        .allocator = std.testing.allocator,
+        .configuration = undefined,
+        .cache_entries = undefined,
+        .parsed_hostname_buf = undefined,
+        .ipv6_supported = false,
+    };
 
+    const hostname1 = "example.com";
+    const hostname2 = "example.com";
+
+    const slot1 = dns.get_cache_slot(hostname1);
+    const slot2 = dns.get_cache_slot(hostname2);
+
+    try std.testing.expectEqual(slot1, slot2);
+}
+
+test "get_cache_slot distributes hostnames across slots" {
+    var dns = DNS{
+        .loop = undefined,
+        .arena = undefined,
+        .allocator = std.testing.allocator,
+        .configuration = undefined,
+        .cache_entries = undefined,
+        .parsed_hostname_buf = undefined,
+        .ipv6_supported = false,
+    };
+
+    const hostnames = [_][]const u8{
+        "example1.com",
+        "example2.com",
+        "example3.com",
+        "example4.com",
+        "example5.com",
+    };
+
+    var slots = [_]*Cache{undefined} ** hostnames.len;
+
+    for (hostnames, 0..) |hostname, i| {
+        slots[i] = dns.get_cache_slot(hostname);
+    }
+
+    // Check that not all slots are the same
+    var unique_slots = std.ArrayList(*Cache).init(std.testing.allocator);
+    defer unique_slots.deinit();
+
+    loop: for (slots) |slot| {
+        for (unique_slots.items) |existing_slot| {
+            if (slot == existing_slot) {
+                continue :loop;
+            }
+        }
+        try unique_slots.append(slot);
+    }
+
+    try std.testing.expect(unique_slots.items.len > 1);
+}
+
+test "get_cache_slot handles different hostname lengths" {
+    var dns = DNS{
+        .loop = undefined,
+        .arena = undefined,
+        .allocator = std.testing.allocator,
+        .configuration = undefined,
+        .cache_entries = undefined,
+        .parsed_hostname_buf = undefined,
+        .ipv6_supported = false,
+    };
+
+    const hostnames = [_][]const u8{
+        "a",
+        "ab",
+        "abc",
+        "abcd",
+        "abcde",
+        "a" ** 63,
+        "a" ** 255,
+    };
+
+    var slots = [_]*Cache{undefined} ** hostnames.len;
+
+    for (hostnames, 0..) |hostname, i| {
+        slots[i] = dns.get_cache_slot(hostname);
+    }
+
+    // Check that different length hostnames can map to different slots
+    var unique_slots = std.ArrayList(*Cache).init(std.testing.allocator);
+    defer unique_slots.deinit();
+
+    loop: for (slots) |slot| {
+        for (unique_slots.items) |existing_slot| {
+            if (slot == existing_slot) {
+                continue :loop;
+            }
+        }
+        try unique_slots.append(slot);
+    }
+
+    try std.testing.expect(unique_slots.items.len > 1);
+}

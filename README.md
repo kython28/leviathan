@@ -1,5 +1,4 @@
-# Leviathan
-
+![Banner](media/banner.png)
 From the depths of the sea, where darkness meets vastness, emerges Leviathan: an unyielding force of speed and power. In a world where the arcane and the agile intertwine, a loop forged in Python takes its dance. Leviathan, master of the journey, governs events with a steady hand—an **ultra-fast event loop** that deploys its bastion in **asyncio**, powered by the artistry of Zig. Between promises and futures, its path is clear: to rule swiftly where code is prepared.
 
 ## 🚀 Features

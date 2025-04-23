@@ -6,8 +6,7 @@ const Loop = @import("../main.zig");
 const Cache = @import("cache.zig");
 const Parsers = @import("parsers.zig");
 const Resolv = @import("resolv.zig");
-
-pub const UserCallback = Resolv.UserCallback;
+const CallbackManager = @import("callback_manager");
 
 const DNSCacheEntries = switch (builtin.mode) {
     .Debug => 4,
@@ -75,12 +74,14 @@ fn get_cache_slot(self: *DNS, hostname: []const u8) *Cache {
 pub fn lookup(
     self: *DNS,
     hostname: []const u8,
-    callback: *const Resolv.UserCallback,
+    callback: ?*const CallbackManager.Callback,
 ) !?[]const std.net.Address {
     const parsed_hostname = std.ascii.lowerString(&self.parsed_hostname_buf, hostname);
 
     const cache_slot = self.get_cache_slot(parsed_hostname);
     const record = cache_slot.get(parsed_hostname) orelse {
+        if (callback == null) return null;
+
         const ipv6_supported: bool = self.ipv6_supported;
 
         const address_resolved = try Parsers.resolve_address(parsed_hostname, ipv6_supported);
@@ -92,7 +93,7 @@ pub fn lookup(
             cache_slot,
             self.loop,
             hostname,
-            callback,
+            callback.?,
             self.configuration,
             ipv6_supported,
         );
@@ -100,7 +101,12 @@ pub fn lookup(
     };
 
     const address_list = record.get_address_list() orelse {
-        try record.append_callback(callback);
+        if (callback == null) return null;
+
+        try self.loop.reserve_slots(1);
+        errdefer self.loop.reserved_slots -= 1;
+
+        try record.append_callback(callback.?);
         return null;
     };
 

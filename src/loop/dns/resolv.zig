@@ -51,11 +51,6 @@ const HostnamesArray = struct {
     processed: u32 = 0,
 };
 
-pub const UserCallback = struct {
-    callback: *const fn (?*anyopaque, ?[]const std.net.Address) void,
-    user_data: ?*anyopaque,
-};
-
 const ResponseProcessingState = enum {
     process_header,
     process_body,
@@ -105,8 +100,9 @@ pub const ControlData = struct {
     arena: std.heap.ArenaAllocator,
 
     record: *Cache.Record,
+    loop: *Loop,
 
-    user_callbacks: std.ArrayList(UserCallback),
+    user_callbacks: std.ArrayList(CallbackManager.Callback),
 
     queries_data: []ServerQueryData,
     tasks_finished: usize = 0,
@@ -116,8 +112,10 @@ pub const ControlData = struct {
         if (!self.resolved) {
             self.record.discard();
 
+            const loop = self.loop;
             for (self.user_callbacks.items) |*v| {
-                v.callback(v.user_data, null);
+                v.data.cancelled = true;
+                Loop.Scheduling.Soon.dispatch_guaranteed(loop, v);
             }
         }
 
@@ -146,8 +144,9 @@ fn mark_resolved_and_execute_user_callbacks(server_data: *ServerQueryData) !void
         address_list, server_data.min_ttl
     );
 
+    const loop = control_data.loop;
     for (control_data.user_callbacks.items) |*v| {
-        v.callback(v.user_data, address_list);
+        Loop.Scheduling.Soon.dispatch_guaranteed(loop, v);
     }
 
     server_data.release();
@@ -504,7 +503,7 @@ fn prepare_data(
     cache_slot: *Cache,
     loop: *Loop,
     hostname: []const u8,
-    user_callback: *const UserCallback,
+    user_callback: *const CallbackManager.Callback,
     configuration: Parsers.Configuration,
     ipv6_supported: bool,
 ) !*ControlData {
@@ -515,9 +514,10 @@ fn prepare_data(
 
     control_data.allocator = allocator;
     control_data.arena = std.heap.ArenaAllocator.init(allocator);
+    control_data.loop = loop;
     const arena_allocator = control_data.arena.allocator();
 
-    control_data.user_callbacks = std.ArrayList(UserCallback).init(arena_allocator);
+    control_data.user_callbacks = std.ArrayList(CallbackManager.Callback).init(arena_allocator);
     control_data.record = try cache_slot.create_new_record(hostname, control_data);
 
     control_data.resolved = false;
@@ -526,8 +526,11 @@ fn prepare_data(
         control_data.release();
     }
 
+    try loop.reserve_slots(1);
+    errdefer loop.reserved_slots -= 1;
+
     try control_data.user_callbacks.append(user_callback.*);
-    errdefer control_data.user_callbacks.clearRetainingCapacity();
+    errdefer control_data.user_callbacks.deinit();
 
     const queries_data = try arena_allocator.alloc(ServerQueryData, configuration.servers.len);
     const hostnames_array = try get_hostname_array(arena_allocator, hostname, configuration.search);
@@ -562,7 +565,7 @@ pub fn queue(
     cache_slot: *Cache,
     loop: *Loop,
     hostname: []const u8,
-    user_callback: *const UserCallback,
+    user_callback: *const CallbackManager.Callback,
     configuration: Parsers.Configuration,
     ipv6_supported: bool,
 ) !void {

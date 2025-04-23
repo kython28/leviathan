@@ -211,32 +211,11 @@ const SocketConnectionMethod = union(enum) {
 
 const SocketConnectionData = struct {
     creation_data: *SocketCreationData,
-    address_list: []const std.net.Address,
+    address_list: []std.net.Address,
     method: SocketConnectionMethod,
 };
 
-fn host_resolved_callback(data: ?*anyopaque, address_list: ?[]const std.net.Address) void {
-    const connection_data: *SocketConnectionData = @alignCast(@ptrCast(data.?));
-    connection_data.address_list = address_list orelse {
-        python_c.raise_python_runtime_error("Failed to resolve host");
-        set_future_exception(error.PythonError, connection_data.creation_data.future);
-    };
-
-    const loop_data = utils.get_data_ptr(Loop, connection_data.creation_data.loop);
-
-    const callback = CallbackManager.Callback{
-        .func = &create_socket_connection,
-        .cleanup = null,
-        .data = .{
-            .user_data = connection_data,
-            .exception_context = null,
-        },
-    };
-    Loop.Scheduling.Soon.dispatch_guaranteed(loop_data, &callback);
-}
-
-
-fn z_try_resolv_host(data: *SocketCreationData) !void {
+fn get_host_slice(data: *SocketCreationData) ![]const u8 {
     const py_host = data.py_host orelse {
         python_c.raise_python_value_error("Host is required");
         return error.PythonError;
@@ -251,20 +230,62 @@ fn z_try_resolv_host(data: *SocketCreationData) !void {
     const host_ptr = python_c.PyUnicode_AsUTF8AndSize(py_host, &host_ptr_lenght)
         orelse return error.PythonError;
 
-    const host = host_ptr[0..@intCast(host_ptr_lenght)];
+    return host_ptr[0..@intCast(host_ptr_lenght)];
+}
 
-    const loop_data = utils.get_data_ptr(Loop, data.loop);
+fn z_host_resolved_callback(connection_data: *SocketConnectionData) !void {
+    const creation_data = connection_data.creation_data;
+    const loop_data = utils.get_data_ptr(Loop, creation_data.loop);
+    const allocator = loop_data.allocator;
+
+    const host = try get_host_slice(creation_data);
+    const address_list = try loop_data.dns.lookup(host, null) orelse {
+        python_c.raise_python_runtime_error("Failed to resolve host");
+        return set_future_exception(error.PythonError, creation_data.future);
+    };
+
+    connection_data.address_list = try allocator.dupe(std.net.Address, address_list);
+    errdefer allocator.free(connection_data.address_list);
+
+    const callback = CallbackManager.Callback{
+        .func = &create_socket_connection,
+        .cleanup = null,
+        .data = .{
+            .user_data = connection_data,
+            .exception_context = null,
+        },
+    };
+    Loop.Scheduling.Soon.dispatch(loop_data, &callback);
+}
+
+fn host_resolved_callback(data: *const CallbackManager.CallbackData) !void {
+    const connection_data: *SocketConnectionData = @alignCast(@ptrCast(data.user_data.?));
+    if (data.cancelled) {
+        python_c.raise_python_runtime_error("Host resolution failed");
+        return set_future_exception(error.PythonError, connection_data.creation_data.future);
+    }
+
+
+}
+
+fn z_try_resolv_host(creation_data: *SocketCreationData) !void {
+    const host = try get_host_slice(creation_data);
+
+    const loop_data = utils.get_data_ptr(Loop, creation_data.loop);
     const allocator = loop_data.allocator;
 
     const connection_data = try allocator.create(SocketConnectionData);
     errdefer allocator.destroy(connection_data);
-    connection_data.creation_data = data;
+    connection_data.creation_data = creation_data;
 
     const resolver_callback = Loop.DNS.UserCallback{
         .callback = &host_resolved_callback,
         .user_data = connection_data,
     };
-    try loop_data.dns.lookup(host, &resolver_callback);
+    const address_list = try loop_data.dns.lookup(host, &resolver_callback) orelse return;
+
+    connection_data.address_list = try allocator.dupe(std.net.Address, address_list);
+    errdefer allocator.free(connection_data.address_list);
 }
 
 fn try_resolv_host(data: *const CallbackManager.CallbackData) !void {

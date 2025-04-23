@@ -3,6 +3,7 @@ const std = @import("std");
 const utils = @import("utils");
 
 const Resolv = @import("resolv.zig");
+const CallbackManager = @import("callback_manager");
 
 const RecordState = union(enum) {
     pending: *Resolv.ControlData,
@@ -23,9 +24,8 @@ pub const Record = struct {
         };
     }
 
-    pub inline fn append_callback(self: *Record, user_callback: *const Resolv.UserCallback) !void {
-        const control_data = self.state.pending;
-        try control_data.user_callbacks.append(user_callback.*);
+    pub inline fn append_callback(self: *Record, user_callback: *const CallbackManager.Callback) !void {
+        try self.state.pending.user_callbacks.append(user_callback.*);
     }
 
     pub inline fn set_resolved_data(self: *Record, address_list: []std.net.Address, ttl: u32) void {

@@ -26,6 +26,7 @@ ready_tasks_queues: [2]CallbackManager.CallbacksSetsQueue,
 reserved_slots: usize = 0,
 
 io: Scheduling.IO,
+dns: DNS,
 
 reader_watchers: WatchersBTree,
 writer_watchers: WatchersBTree,
@@ -67,7 +68,8 @@ pub fn init(self: *Loop, allocator: std.mem.Allocator, rtq_max_capacity: usize) 
         .reader_watchers = reader_watchers,
         .writer_watchers = writer_watchers,
         .unix_signals = undefined,
-        .io = undefined
+        .io = undefined,
+        .dns = undefined,
     };
 
     try self.io.init(self, allocator);
@@ -77,6 +79,9 @@ pub fn init(self: *Loop, allocator: std.mem.Allocator, rtq_max_capacity: usize) 
 
     try UnixSignals.init(self);
     errdefer self.unix_signals.deinit();
+
+    try self.dns.init(self);
+    errdefer self.dns.deinit();
 
     self.initialized = true;
 }
@@ -101,6 +106,7 @@ pub fn release(self: *Loop) void {
         std.debug.panic("Unexpected error while releasing writer watchers: {s}", .{@errorName(err)});
     };
 
+    self.dns.deinit();
     self.initialized = false;
 }
 

@@ -10,9 +10,8 @@ const Scheduling = @import("scheduling.zig");
 const Control = @import("control.zig");
 const Utils = @import("utils/main.zig");
 const UnixSignal = @import("unix_signals.zig");
-const Watchers = @import("io/watchers.zig");
+const IO = @import("io/main.zig");
 // const Hooks = @import("hooks.zig");
-// const Network = @import("network/main.zig");
 
 const PythonLoopMethods: []const python_c.PyMethodDef = &[_]python_c.PyMethodDef{
     // --------------------- Control ---------------------
@@ -111,34 +110,34 @@ const PythonLoopMethods: []const python_c.PyMethodDef = &[_]python_c.PyMethodDef
     // --------------------- Watchers ---------------------
     python_c.PyMethodDef{
         .ml_name = "add_reader\x00",
-        .ml_meth = @ptrCast(&Watchers.loop_add_reader),
+        .ml_meth = @ptrCast(&IO.Watchers.loop_add_reader),
         .ml_doc = "Start monitoring the fd file descriptor for read availability\x00",
         .ml_flags = python_c.METH_FASTCALL
     },
     python_c.PyMethodDef{
         .ml_name = "add_writer\x00",
-        .ml_meth = @ptrCast(&Watchers.loop_add_writer),
+        .ml_meth = @ptrCast(&IO.Watchers.loop_add_writer),
         .ml_doc = "Start monitoring the fd file descriptor for write availability\x00",
         .ml_flags = python_c.METH_FASTCALL
     },
 
     python_c.PyMethodDef{
         .ml_name = "remove_reader\x00",
-        .ml_meth = @ptrCast(&Watchers.loop_remove_reader),
+        .ml_meth = @ptrCast(&IO.Watchers.loop_remove_reader),
         .ml_doc = "Stop monitoring the fd file descriptor for read availability\x00",
         .ml_flags = python_c.METH_O
     },
     python_c.PyMethodDef{
         .ml_name = "remove_writer\x00",
-        .ml_meth = @ptrCast(&Watchers.loop_remove_writer),
+        .ml_meth = @ptrCast(&IO.Watchers.loop_remove_writer),
         .ml_doc = "Stop monitoring the fd file descriptor for write availability\x00",
         .ml_flags = python_c.METH_O
     },
-    // --------------------- Watchers ---------------------
+    // --------------------- Socket client ---------------------
     //
     // python_c.PyMethodDef{
     //     .ml_name = "create_connection\x00",
-    //     .ml_meth = @ptrCast(&Network.Client.CreateConnection.loop_create_connection),
+    //     .ml_meth = @ptrCast(&IO.Client.loop_create_connection),
     //     .ml_doc = "Open a streaming transport connection to a given address specified by host and port.\x00",
     //     .ml_flags = python_c.METH_FASTCALL | python_c.METH_KEYWORDS
     // },

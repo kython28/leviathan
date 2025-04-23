@@ -34,27 +34,6 @@ const SocketCreationData = struct {
     loop: *LoopObject = undefined,
 };
 
-const SocketConnectionMethod = enum {
-    Single, HappyEyeballs
-};
-
-const SocketConnectionMethodData = union(SocketConnectionMethod) {
-    Single: usize,
-    HappyEyeballs: []usize
-};
-
-const SocketConnectionData = struct {
-    creation_data: *SocketCreationData,
-    address_list: *std.net.AddressList,
-    method: SocketConnectionMethodData,
-    owned: bool
-};
-
-const SocketData = struct {
-    connection_data: *SocketConnectionData,
-    socket_fd: std.posix.fd_t
-};
-
 const TransportCreationData = struct {
     protocol_factory: PyObject,
     future: *FutureObject,
@@ -64,273 +43,13 @@ const TransportCreationData = struct {
     fd_created: bool = true
 };
 
-fn set_future_exception(err: anyerror, future: *FutureObject) CallbackManager.ExecuteCallbacksReturn {
+fn set_future_exception(err: anyerror, future: *FutureObject) !void {
     utils.handle_zig_function_error(err, {});
-    const exc = python_c.PyErr_GetRaisedException() orelse return .Exception;
+    const exc = python_c.PyErr_GetRaisedException() orelse return error.PythonError;
 
     const future_data = utils.get_data_ptr(Future, future);
-    Future.Python.Result.future_fast_set_exception(future, future_data, exc) catch |err2| {
-        utils.handle_zig_function_error(err2, {});
-
-        const exc2 = python_c.PyErr_Occurred() orelse return .Exception;
-        python_c.PyException_SetCause(exc2, exc);
-
-        return .Exception;
-    };
-
-    return .Continue;
+    Future.Python.Result.future_fast_set_exception(future, future_data, exc);
 }
-
-fn interleave_address_list(allocator: std.mem.Allocator, address_list: []std.net.Address, interleave: usize) !void {
-    const tmp_list = try allocator.alloc(std.net.Address, address_list.len * 2);
-    defer allocator.free(tmp_list);
-
-    var ipv4_addresses: usize = 0;
-    var ipv6_addresses: usize = 0;
-
-    for (address_list) |*address| {
-        switch (address.any.family) {
-            std.posix.AF.INET => {
-                tmp_list[ipv4_addresses] = address.*;
-                ipv4_addresses += 1;
-            },
-            std.posix.AF.INET6 => {
-                tmp_list[address_list.len + ipv6_addresses] = address.*;
-                ipv6_addresses += 1;
-            },
-            else => unreachable
-        }
-    }
-
-    if (ipv6_addresses == 0 or ipv4_addresses == 0) {
-        return;
-    }
-
-    var interleave_count: usize = interleave;
-    for (address_list) |*v| {
-        if (interleave_count == 0 or ipv6_addresses == 0) {
-            ipv4_addresses -= 1;
-            v.* = tmp_list[ipv4_addresses];
-            interleave_count = interleave;
-        }else{
-            ipv6_addresses -= 1;
-            v.* = tmp_list[address_list.len + ipv6_addresses];
-            interleave_count -= 1;
-        }
-    }
-}
-
-fn create_socket_and_submit_connect_req(address: *const std.net.Address, data: *SocketData, loop: *Loop) !usize {
-    const flags = std.posix.SOCK.STREAM | std.posix.SOCK.NONBLOCK | std.posix.SOCK.CLOEXEC;
-    const socket_fd = try std.posix.socket(address.any.family, flags, std.posix.IPPROTO.TCP);
-    errdefer std.posix.close(socket_fd);
-
-    data.socket_fd = socket_fd;
-    errdefer data.socket_fd = -1;
-
-    const task_id = try Loop.Scheduling.IO.queue(
-        loop, .{
-            .SocketConnect = .{
-                .address = address,
-                .socket_fd = socket_fd,
-                .callback = .{
-                    .ZigGenericIO = .{
-                        .callback = &socket_connected_callback,
-                        .data = data
-                    }
-                }
-            }
-        }
-    );
-
-    return task_id;
-}
-
-fn z_create_socket_connection(data: *SocketCreationData) !void {
-    const py_host = data.py_host orelse {
-        python_c.raise_python_value_error("Host is required");
-        return error.PythonError;
-    };
-
-    if (python_c.unicode_check(py_host)) {
-        python_c.raise_python_value_error("Host must be a valid string");
-        return error.PythonError;
-    }
-
-    var host_ptr_lenght: python_c.Py_ssize_t = undefined;
-    const host_ptr = python_c.PyUnicode_AsUTF8AndSize(py_host, &host_ptr_lenght) orelse
-        return error.PythonError;
-
-    const host = host_ptr[0..@intCast(host_ptr_lenght)];
-    const port: u16 = blk: {
-        const py_port = data.py_port orelse break :blk 0;
-        const value = python_c.PyLong_AsInt(py_port);
-        if (value == -1) {
-            if (python_c.PyErr_Occurred()) |_| {
-                return error.PythonError;
-            }
-        }
-
-        break :blk @intCast(value);
-    };
-
-    const interleave: usize = blk: {
-        const py_interleave = data.py_interleave orelse break :blk 0;
-        const value = python_c.PyLong_AsUnsignedLongLong(py_interleave);
-        if (@as(c_longlong, @bitCast(value)) == -1) {
-            if (python_c.PyErr_Occurred()) |_| {
-                return error.PythonError;
-            }
-        }
-
-        break :blk @intCast(value);
-    };
-
-    const loop = data.loop;
-    const loop_data = utils.get_data_ptr(Loop, loop);
-    const allocator = loop_data.allocator;
-
-    const address_list = try std.net.getAddressList(allocator, host, port);
-    errdefer address_list.deinit();
-
-    const connection_data = try allocator.create(SocketConnectionData);
-    errdefer allocator.destroy(connection_data);
-
-    connection_data.creation_data = data;
-    connection_data.address_list = address_list;
-    connection_data.owned = false;
-
-    if (interleave > 0) {
-        try interleave_address_list(allocator, address_list.addrs, interleave);
-    }
-
-    if (data.py_happy_eyeballs_delay) |py_delay| {
-        if (interleave == 0) {
-            try interleave_address_list(allocator, address_list.addrs, 1);
-        }
-
-        const delay = python_c.PyFloat_AsDouble(py_delay);
-        const eps = comptime std.math.floatEps(f64);
-        if (@abs(delay + 1.0) < eps) {
-            if (python_c.PyErr_Occurred()) |_| {
-                return error.PythonError;
-            }
-        }
-    }else{
-
-    }
-
-    // connection_data.* = .{
-    //     .address_list = address_list,
-    //     .creation_data = data,
-    //     .method = 
-    // };
-
-    // if (python_c.unicode_check())
-    // const host = python_c.PyObject
-}
-
-fn create_socket_connection(
-    data: ?*anyopaque, status: CallbackManager.ExecuteCallbacksReturn
-) CallbackManager.ExecuteCallbacksReturn {
-    const socket_creation_data: *SocketCreationData = @alignCast(@ptrCast(data.?));
-    defer python_c.deinitialize_object_fields(socket_creation_data, &.{});
-
-    if (status != .Continue) return status;
-
-    z_create_socket_connection(socket_creation_data) catch |err| {
-        return set_future_exception(err, socket_creation_data.future);
-    };
-
-    return .Continue;
-}
-
-fn socket_connected_callback(
-    data: ?*anyopaque, io_uring_res: i32, io_uring_err: std.os.linux.E
-) CallbackManager.ExecuteCallbacksReturn {
-    _ = data;
-    _ = io_uring_res;
-    _ = io_uring_err;
-
-    return .Continue;
-}
-
-fn z_create_transport_and_set_future_result(data: TransportCreationData) !void {
-    var transport_added_to_tuple: bool = false;
-    var protocol_added_to_tuple: bool = false;
-
-    const transport = try Stream.Constructors.new_stream_transport(
-        data.protocol_factory, data.loop, data.socket_fd, data.zero_copying
-    );
-    errdefer {
-        // PyTuple_SetItem steal reference
-        if (!transport_added_to_tuple) {
-            python_c.py_decref(@ptrCast(transport));
-        }
-    }
-
-    const protocol = python_c.PyObject_CallNoArgs(data.protocol_factory) orelse return error.PythonError;
-    errdefer {
-        if (!protocol_added_to_tuple) {
-            python_c.py_decref(protocol);
-        }
-    }
-
-    const connection_made_func = python_c.PyObject_GetAttrString(protocol, "connection_made\x00")
-        orelse return error.PythonError;
-    defer python_c.py_decref(connection_made_func);
-
-    const ret = python_c.PyObject_CallOneArg(connection_made_func, @ptrCast(transport))
-        orelse return error.PythonError;
-    defer python_c.py_decref(ret);
-
-    const result_tuple = python_c.PyTuple_New(2) orelse return error.PythonError;
-    errdefer python_c.py_decref(result_tuple);
-
-    if (python_c.PyTuple_SetItem(result_tuple, 0, @ptrCast(transport)) != 0) {
-        return error.PythonError;
-    }
-    transport_added_to_tuple = true;
-
-    if (python_c.PyTuple_SetItem(result_tuple, 1, protocol) != 0) {
-        return error.PythonError;
-    }
-    protocol_added_to_tuple = true;
-
-    const future_data = utils.get_data_ptr(Future, data.future);
-    try Future.Python.Result.future_fast_set_result(future_data, result_tuple);
-}
-
-fn create_transport_and_set_future_result(
-    data: ?*anyopaque, status: CallbackManager.ExecuteCallbacksReturn
-) CallbackManager.ExecuteCallbacksReturn {
-    const transport_creation_data_ptr: *TransportCreationData = @alignCast(@ptrCast(data.?));
-
-    const loop = transport_creation_data_ptr.loop;
-    const loop_data = utils.get_data_ptr(Loop, loop);
-    const allocator = loop_data.allocator;
-
-    defer allocator.destroy(transport_creation_data_ptr);
-
-    const transport_creation_data = transport_creation_data_ptr.*;
-    defer {
-        python_c.py_decref(transport_creation_data.protocol_factory);
-        python_c.py_decref(@ptrCast(transport_creation_data.loop));
-        python_c.py_decref(@ptrCast(transport_creation_data.future));
-
-        if (transport_creation_data.fd_created) {
-            std.posix.close(@intCast(transport_creation_data.socket_fd));
-        }
-    }
-    if (status != .Continue) return status;
-
-    z_create_transport_and_set_future_result(transport_creation_data) catch |err| {
-        return set_future_exception(err, transport_creation_data.future);
-    };
-
-    return .Continue;
-}
-
 
 inline fn z_loop_create_connection(
     self: *LoopObject, args: []?PyObject, knames: ?PyObject
@@ -437,12 +156,15 @@ inline fn z_loop_create_connection(
         };
         errdefer python_c.py_decref(@ptrCast(self));
 
-        try Loop.Scheduling.Soon.dispatch(loop_data, CallbackManager.Callback{
-            .ZigGeneric = .{
-                .callback = &create_transport_and_set_future_result,
-                .data = transport_creation_data
-            }
-        });
+        const callback = CallbackManager.Callback{
+            .func = &create_transport_and_set_future_result,
+            .cleanup = null,
+            .data = .{
+                .user_data = transport_creation_data,
+                .exception_context = null,
+            },
+        };
+        try Loop.Scheduling.Soon.dispatch(loop_data, &callback);
 
         python_c.deinitialize_object_fields(&creation_data, &.{"future", "protocol_factory"});
         return python_c.py_newref(fut);
@@ -456,12 +178,15 @@ inline fn z_loop_create_connection(
     creation_data_ptr.* = creation_data;
     errdefer allocator.destroy(creation_data_ptr);
 
-    try Loop.Scheduling.Soon.dispatch(loop_data, CallbackManager.Callback{
-        .ZigGeneric = .{
-            .callback = &create_socket_connection,
-            .data = creation_data_ptr
-        }
-    });
+    const callback = CallbackManager.Callback{
+        .func = &create_socket_connection,
+        .cleanup = null,
+        .data = .{
+            .user_data = creation_data_ptr,
+            .exception_context = null,
+        },
+    };
+    try Loop.Scheduling.Soon.dispatch(loop_data, &callback);
 
     return python_c.py_newref(fut);
 }
@@ -476,6 +201,323 @@ pub fn loop_create_connection(
     );
 }
 
+// -----------------------------------------------------------------
+// STEP#1: Resolve host
+
+const SocketConnectionMethod = union(enum) {
+    Single: usize, // Blocking task id
+    HappyEyeballs: []usize, // Blocking task id per address
+};
+
+const SocketConnectionData = struct {
+    creation_data: *SocketCreationData,
+    address_list: []const std.net.Address,
+    method: SocketConnectionMethod,
+};
+
+fn host_resolved_callback(data: ?*anyopaque, address_list: ?[]const std.net.Address) void {
+    const connection_data: *SocketConnectionData = @alignCast(@ptrCast(data.?));
+    connection_data.address_list = address_list orelse {
+        python_c.raise_python_runtime_error("Failed to resolve host");
+        set_future_exception(error.PythonError, connection_data.creation_data.future);
+    };
+
+    const loop_data = utils.get_data_ptr(Loop, connection_data.creation_data.loop);
+
+    const callback = CallbackManager.Callback{
+        .func = &create_socket_connection,
+        .cleanup = null,
+        .data = .{
+            .user_data = connection_data,
+            .exception_context = null,
+        },
+    };
+    Loop.Scheduling.Soon.dispatch_guaranteed(loop_data, &callback);
+}
+
+
+fn z_try_resolv_host(data: *SocketCreationData) !void {
+    const py_host = data.py_host orelse {
+        python_c.raise_python_value_error("Host is required");
+        return error.PythonError;
+    };
+
+    if (python_c.unicode_check(py_host)) {
+        python_c.raise_python_value_error("Host must be a valid string");
+        return error.PythonError;
+    }
+
+    var host_ptr_lenght: python_c.Py_ssize_t = undefined;
+    const host_ptr = python_c.PyUnicode_AsUTF8AndSize(py_host, &host_ptr_lenght)
+        orelse return error.PythonError;
+
+    const host = host_ptr[0..@intCast(host_ptr_lenght)];
+
+    const loop_data = utils.get_data_ptr(Loop, data.loop);
+    const allocator = loop_data.allocator;
+
+    const connection_data = try allocator.create(SocketConnectionData);
+    errdefer allocator.destroy(connection_data);
+    connection_data.creation_data = data;
+
+    const resolver_callback = Loop.DNS.UserCallback{
+        .callback = &host_resolved_callback,
+        .user_data = connection_data,
+    };
+    try loop_data.dns.lookup(host, &resolver_callback);
+}
+
+fn try_resolv_host(data: *const CallbackManager.CallbackData) !void {
+    const socket_creation_data_ptr: *SocketCreationData = @alignCast(@ptrCast(data.user_data.?));
+    defer python_c.deinitialize_object_fields(socket_creation_data_ptr, &.{});
+
+    if (data.cancelled) return;
+
+
+}
+
+// -----------------------------------------------------------------
+// STEP#2: Create socket and submit connect requests
+
+fn interleave_address_list(allocator: std.mem.Allocator, address_list: []std.net.Address, interleave: usize) !void {
+    const tmp_list = try allocator.alloc(std.net.Address, address_list.len * 2);
+    defer allocator.free(tmp_list);
+
+    var ipv4_addresses: usize = 0;
+    var ipv6_addresses: usize = 0;
+
+    for (address_list) |*address| {
+        switch (address.any.family) {
+            std.posix.AF.INET => {
+                tmp_list[ipv4_addresses] = address.*;
+                ipv4_addresses += 1;
+            },
+            std.posix.AF.INET6 => {
+                tmp_list[address_list.len + ipv6_addresses] = address.*;
+                ipv6_addresses += 1;
+            },
+            else => unreachable
+        }
+    }
+
+    if (ipv6_addresses == 0 or ipv4_addresses == 0) {
+        return;
+    }
+
+    var interleave_count: usize = interleave;
+    for (address_list) |*v| {
+        if (interleave_count == 0 or ipv6_addresses == 0) {
+            ipv4_addresses -= 1;
+            v.* = tmp_list[ipv4_addresses];
+            interleave_count = interleave;
+        }else{
+            ipv6_addresses -= 1;
+            v.* = tmp_list[address_list.len + ipv6_addresses];
+            interleave_count -= 1;
+        }
+    }
+}
+
+
+fn create_socket_and_submit_connect_req(address: *const std.net.Address, data: *SocketData, loop: *Loop) !usize {
+    const flags = std.posix.SOCK.STREAM | std.posix.SOCK.NONBLOCK | std.posix.SOCK.CLOEXEC;
+    const socket_fd = try std.posix.socket(address.any.family, flags, std.posix.IPPROTO.TCP);
+    errdefer std.posix.close(socket_fd);
+
+    data.socket_fd = socket_fd;
+    errdefer data.socket_fd = -1;
+
+    const task_id = try Loop.Scheduling.IO.queue(
+        loop, .{
+            .SocketConnect = .{
+                .address = address,
+                .socket_fd = socket_fd,
+                .callback = .{
+                    .ZigGenericIO = .{
+                        .callback = &socket_connected_callback,
+                        .data = data
+                    }
+                }
+            }
+        }
+    );
+
+    return task_id;
+}
+
+fn z_create_socket_connection(data: *SocketCreationData) !void {
+    const port: u16 = blk: {
+        const py_port = data.py_port orelse break :blk 0;
+        const value = python_c.PyLong_AsInt(py_port);
+        if (value == -1) {
+            if (python_c.PyErr_Occurred()) |_| {
+                return error.PythonError;
+            }
+        }
+
+        break :blk @intCast(value);
+    };
+
+    const interleave: usize = blk: {
+        const py_interleave = data.py_interleave orelse break :blk 0;
+        const value = python_c.PyLong_AsUnsignedLongLong(py_interleave);
+        if (@as(c_longlong, @bitCast(value)) == -1) {
+            if (python_c.PyErr_Occurred()) |_| {
+                return error.PythonError;
+            }
+        }
+
+        break :blk @intCast(value);
+    };
+
+    const loop = data.loop;
+    const loop_data = utils.get_data_ptr(Loop, loop);
+    const allocator = loop_data.allocator;
+
+    const address_list = try std.net.getAddressList(allocator, host, port);
+    errdefer address_list.deinit();
+
+    connection_data.creation_data = data;
+    connection_data.address_list = address_list;
+    connection_data.owned = false;
+
+    if (interleave > 0) {
+        try interleave_address_list(allocator, address_list.addrs, interleave);
+    }
+
+    if (data.py_happy_eyeballs_delay) |py_delay| {
+        if (interleave == 0) {
+            try interleave_address_list(allocator, address_list.addrs, 1);
+        }
+
+        const delay = python_c.PyFloat_AsDouble(py_delay);
+        const eps = comptime std.math.floatEps(f64);
+        if (@abs(delay + 1.0) < eps) {
+            if (python_c.PyErr_Occurred()) |_| {
+                return error.PythonError;
+            }
+        }
+    }else{
+
+    }
+
+    // connection_data.* = .{
+    //     .address_list = address_list,
+    //     .creation_data = data,
+    //     .method = 
+    // };
+
+    // if (python_c.unicode_check())
+    // const host = python_c.PyObject
+}
+
+fn create_socket_connection(data: *const CallbackManager.CallbackData) !void {
+    const socket_creation_data: *SocketCreationData = @alignCast(@ptrCast(data.user_data.?));
+    defer python_c.deinitialize_object_fields(socket_creation_data, &.{});
+
+    if (data.cancelled) return;
+
+    z_create_socket_connection(socket_creation_data) catch |err| {
+        return set_future_exception(err, socket_creation_data.future);
+    };
+}
+
+// -----------------------------------------------------------------
+// STEP#3: Socket connected (or failed to connect)
+
+const SocketData = struct {
+    connection_data: *SocketConnectionData,
+    socket_fd: std.posix.fd_t
+};
+
+fn socket_connected_callback(
+    data: ?*anyopaque, io_uring_res: i32, io_uring_err: std.os.linux.E
+) CallbackManager.ExecuteCallbacksReturn {
+    _ = data;
+    _ = io_uring_res;
+    _ = io_uring_err;
+
+    return .Continue;
+}
+
+// -----------------------------------------------------------------
+// STEP#4: Create transport and set future result
+
+fn z_create_transport_and_set_future_result(data: *const TransportCreationData) !void {
+    var transport_added_to_tuple: bool = false;
+    var protocol_added_to_tuple: bool = false;
+
+    const transport = try Stream.Constructors.new_stream_transport(
+        data.protocol_factory, data.loop, data.socket_fd, data.zero_copying
+    );
+    errdefer {
+        // PyTuple_SetItem steal reference
+        if (!transport_added_to_tuple) {
+            python_c.py_decref(@ptrCast(transport));
+        }
+    }
+
+    const protocol = python_c.PyObject_CallNoArgs(data.protocol_factory) orelse return error.PythonError;
+    errdefer {
+        if (!protocol_added_to_tuple) {
+            python_c.py_decref(protocol);
+        }
+    }
+
+    const connection_made_func = python_c.PyObject_GetAttrString(protocol, "connection_made\x00")
+        orelse return error.PythonError;
+    defer python_c.py_decref(connection_made_func);
+
+    const ret = python_c.PyObject_CallOneArg(connection_made_func, @ptrCast(transport))
+        orelse return error.PythonError;
+    defer python_c.py_decref(ret);
+
+    const result_tuple = python_c.PyTuple_New(2) orelse return error.PythonError;
+    errdefer python_c.py_decref(result_tuple);
+
+    if (python_c.PyTuple_SetItem(result_tuple, 0, @ptrCast(transport)) != 0) {
+        return error.PythonError;
+    }
+    transport_added_to_tuple = true;
+
+    if (python_c.PyTuple_SetItem(result_tuple, 1, protocol) != 0) {
+        return error.PythonError;
+    }
+    protocol_added_to_tuple = true;
+
+    const future_data = utils.get_data_ptr(Future, data.future);
+    Future.Python.Result.future_fast_set_result(future_data, result_tuple);
+}
+
+fn create_transport_and_set_future_result(
+    data: *const CallbackManager.CallbackData
+) !void {
+    const transport_creation_data_ptr: *TransportCreationData = @alignCast(@ptrCast(data.user_data.?));
+
+    const loop = transport_creation_data_ptr.loop;
+    const loop_data = utils.get_data_ptr(Loop, loop);
+    const allocator = loop_data.allocator;
+
+    defer allocator.destroy(transport_creation_data_ptr);
+
+    const transport_creation_data = transport_creation_data_ptr.*;
+    defer {
+        python_c.py_decref(transport_creation_data.protocol_factory);
+        python_c.py_decref(@ptrCast(transport_creation_data.loop));
+        python_c.py_decref(@ptrCast(transport_creation_data.future));
+
+        if (transport_creation_data.fd_created) {
+            std.posix.close(@intCast(transport_creation_data.socket_fd));
+        }
+    }
+    if (data.cancelled) return;
+
+    z_create_transport_and_set_future_result(&transport_creation_data) catch |err| {
+        return set_future_exception(err, transport_creation_data.future);
+    };
+}
+
+// -----------------------------------------------------------------
 
 test "interleave_address_list with mixed IPv4 and IPv6" {
     const allocator = std.testing.allocator;

@@ -7,6 +7,8 @@ const Cache = @import("cache.zig");
 const Parsers = @import("parsers.zig");
 const Resolv = @import("resolv.zig");
 
+pub const UserCallback = Resolv.UserCallback;
+
 const DNSCacheEntries = switch (builtin.mode) {
     .Debug => 4,
     else => 65536,
@@ -111,11 +113,6 @@ pub fn deinit(self: *DNS) void {
 
 const DNS = @This();
 
-test {
-    std.testing.refAllDecls(Parsers);
-    std.testing.refAllDecls(Cache);
-}
-
 test "get_cache_slot returns consistent slot for same hostname" {
     var dns = DNS{
         .loop = undefined,
@@ -218,4 +215,9 @@ test "get_cache_slot handles different hostname lengths" {
     }
 
     try std.testing.expect(unique_slots.items.len > 1);
+}
+
+test {
+    std.testing.refAllDecls(Parsers);
+    std.testing.refAllDecls(Cache);
 }
